@@ -9481,6 +9481,77 @@ function GoalCard({ goal, active, onToggle, onRemove, onUpdate, onToggleStatus, 
   );
 }
 
+// ───────────────────────────────────────────────
+// 영역별 진전도 추이 차트 (시간축 다중 꺾은선)
+// series: [{ domain, color, points: [{date, rate}] }]
+// ───────────────────────────────────────────────
+function DomainTrendChart({ series }) {
+  if (!series || series.length === 0) return null;
+  const allDates = [...new Set(series.flatMap(s => s.points.map(p => p.date)))].sort();
+  if (allDates.length < 2) {
+    return (
+      <div style={{ padding: "28px 20px", textAlign: "center", color: "#9a9a9a", fontSize: 12.5, lineHeight: 1.7, background: "#fafafa", borderRadius: 10 }}>
+        추이를 그리려면 최소 2개 이상의 날짜에 데이터가 필요합니다.<br />
+        <span style={{ color: "#bbb" }}>데일리 데이터를 더 입력하면 영역별 변화가 선으로 표시됩니다.</span>
+      </div>
+    );
+  }
+  // 넉넉한 여백
+  const W = 600, H = 300, padL = 44, padR = 18, padT = 24, padB = 52;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const xFor = (i) => padL + (allDates.length === 1 ? plotW / 2 : (i / (allDates.length - 1)) * plotW);
+  const yFor = (rate) => padT + plotH - (Math.max(0, Math.min(100, rate)) / 100) * plotH;
+  const dateIndex = Object.fromEntries(allDates.map((d, i) => [d, i]));
+  const fmtDate = (d) => { const p = (d || "").split("-"); return p.length >= 3 ? `${Number(p[1])}/${Number(p[2])}` : d; };
+  const labelStep = Math.max(1, Math.ceil(allDates.length / 6));
+
+  return (
+    <div style={{ width: "100%", overflowX: "auto" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: W, height: "auto", display: "block", margin: "0 auto" }}>
+        {/* 가로 기준선 — 아주 연하게, 100/50/0만 살짝 진하게 */}
+        {[0, 25, 50, 75, 100].map(v => (
+          <g key={v}>
+            <line
+              x1={padL} y1={yFor(v)} x2={W - padR} y2={yFor(v)}
+              stroke={v === 0 ? "#e3e3e3" : "#f2f2f2"} strokeWidth="1"
+            />
+            <text x={padL - 9} y={yFor(v) + 3.5} fontSize="9.5" fill="#bcbcbc" textAnchor="end" fontFamily="inherit">{v}</text>
+          </g>
+        ))}
+        {/* x축 날짜 라벨 — 솎아내고 연하게 */}
+        {allDates.map((d, i) => (i % labelStep === 0 || i === allDates.length - 1) && (
+          <text key={d} x={xFor(i)} y={H - padB + 18} fontSize="9.5" fill="#aeaeae" textAnchor="middle" fontFamily="inherit">{fmtDate(d)}</text>
+        ))}
+        {/* 각 영역의 꺾은선 — 선이 주인공 */}
+        {series.map((s, si) => {
+          const pts = s.points
+            .filter(p => p.date in dateIndex)
+            .sort((a, b) => dateIndex[a.date] - dateIndex[b.date]);
+          if (pts.length === 0) return null;
+          const path = pts.map((p, idx) => `${idx === 0 ? "M" : "L"} ${xFor(dateIndex[p.date]).toFixed(1)} ${yFor(p.rate).toFixed(1)}`).join(" ");
+          return (
+            <g key={si}>
+              <path d={path} fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.9" />
+              {pts.map((p, idx) => (
+                <circle key={idx} cx={xFor(dateIndex[p.date])} cy={yFor(p.rate)} r="2.2" fill="#fff" stroke={s.color} strokeWidth="1.6" />
+              ))}
+            </g>
+          );
+        })}
+      </svg>
+      {/* 범례 — 정돈된 칩 */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", justifyContent: "center", marginTop: 12 }}>
+        {series.map((s, si) => (
+          <div key={si} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#6b6b6b" }}>
+            <span style={{ width: 9, height: 9, background: s.color, borderRadius: "50%", display: "inline-block" }} />
+            {s.domain}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function RadarChart({ data }) {
   if (data.length === 0) return <div style={{ padding: 20, textAlign: "center", fontSize: 12, color: "#aaa" }}>데이터 없음</div>;
   const splitLabel = (lbl) => {
@@ -14354,6 +14425,44 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
           </div>
         </div>
       )}
+
+      {/* 영역별 진전도 추이 (시간축 다중 꺾은선) */}
+      {(() => {
+        const TREND_COLORS = ["#C97B92", "#B5895F", "#8E7BB0", "#7089A0", "#7BA05B", "#5A9AAA", "#C99A5B", "#A87088"];
+        // 영역별로 목표를 묶고, 날짜별 평균 정반응률 계산
+        const domainMap = {};  // domain -> { date -> [rate들] }
+        (goals || []).filter(g => g.includeInIep).forEach(g => {
+          const dom = g.domain || "(영역 없음)";
+          const series = (typeof getTimeline === "function") ? getTimeline(g) : [];
+          series.forEach(pt => {
+            if (pt.rate == null || isNaN(pt.rate)) return;
+            if (!domainMap[dom]) domainMap[dom] = {};
+            if (!domainMap[dom][pt.date]) domainMap[dom][pt.date] = [];
+            domainMap[dom][pt.date].push(Number(pt.rate));
+          });
+        });
+        const trendSeries = Object.keys(domainMap).map((dom, i) => ({
+          domain: dom,
+          color: TREND_COLORS[i % TREND_COLORS.length],
+          points: Object.keys(domainMap[dom]).sort().map(date => {
+            const arr = domainMap[dom][date];
+            const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+            return { date, rate: Math.round(avg) };
+          })
+        })).filter(s => s.points.length > 0);
+
+        if (trendSeries.length === 0) return null;
+
+        return (
+          <div style={CS}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 4, color: PKD }}>📈 영역별 진전도 추이</h3>
+            <div style={{ fontSize: 11, color: "#888", marginBottom: 12 }}>
+              데일리 기록 날짜에 따라 각 영역의 평균 정반응률이 어떻게 변해왔는지 보여줍니다.
+            </div>
+            <DomainTrendChart series={trendSeries} />
+          </div>
+        );
+      })()}
 
       {/* W-34: VB-MAPP 마일스톤 격자 (보고서 탭에도 표시 — 인쇄에는 별도 섹션) */}
       {(() => {
