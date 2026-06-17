@@ -3248,7 +3248,7 @@ function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
           fontSize: 10, color: "#999", lineHeight: 1.6, textAlign: "center"
         }}>
           {view === "setup"
-            ? "이 비밀번호는 이 브라우저에만 저장됩니다."
+            ? "이 비밀번호는 클라우드에 안전하게 저장되며, 어느 기기에서든 로그인할 수 있습니다."
             : "관리자(센터장)는 이름 '관리자', 선생님은 본인 이름으로 로그인."}
         </div>
         <div style={{ marginTop: 14, textAlign: "center" }}>
@@ -3674,6 +3674,7 @@ export default function App() {
   const [templateModal, setTemplateModal] = useState(null); // { name, description, domain } | null
   const [autoBackupToast, setAutoBackupToast] = useState(null);      // { message, type } | null
   const [showBackupHistory, setShowBackupHistory] = useState(false); // ★ [v19] 백업 히스토리 모달
+  const [showBackupMenu, setShowBackupMenu] = useState(false); // 백업/복원 접기 메뉴 (관리자 전용, 평소엔 접힘)
   const [backupHistoryList, setBackupHistoryList] = useState([]); // ★ [v19 window.storage] 백업 히스토리 로드용
 
   const [obsEditUnlocked, setObsEditUnlocked] = useState({
@@ -5746,19 +5747,31 @@ export default function App() {
                 🗄️ 보관 후보 {archiveCandidates.length}명
               </button>
             )}
-            <button style={BS} onClick={exportToDataEntry} title="중간보고서 시스템(v9) 연동용 JSON 내보내기">📤 JSON 백업</button>
-            <button
-              style={{ ...BS, borderColor: GREEN, color: GREEN }}
-              onClick={exportAllChildren}
-              title="전체 데이터를 PC에 JSON 파일로 저장합니다 (localStorage 유실 대비)">
-              💾 전체 백업
-            </button>
-            <button
-              style={{ ...BS, borderColor: BLUE, color: BLUE }}
-              onClick={triggerBackupRestore}
-              title="PC에 저장해둔 백업 JSON 파일을 불러와 데이터를 복구합니다">
-              📂 복원
-            </button>
+            {currentUser?.role === "admin" && (
+              <div style={{ position: "relative" }}>
+                <button
+                  style={{ ...BS, borderColor: "#bbb", color: "#777", fontSize: 11 }}
+                  onClick={() => setShowBackupMenu(v => !v)}
+                  title="데이터 백업 / 복원 (관리자 전용)">
+                  ⚙️ 백업 관리 {showBackupMenu ? "▴" : "▾"}
+                </button>
+                {showBackupMenu && (
+                  <div style={{
+                    position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 50,
+                    background: "#fff", border: "1px solid #e0e0e0", borderRadius: 10,
+                    boxShadow: "0 6px 20px rgba(0,0,0,0.12)", padding: 10,
+                    display: "flex", flexDirection: "column", gap: 6, minWidth: 180
+                  }}>
+                    <div style={{ fontSize: 10, color: "#999", padding: "2px 4px 4px", borderBottom: "1px solid #f0f0f0", marginBottom: 2 }}>
+                      데이터 백업 / 복원
+                    </div>
+                    <button style={{ ...BS, fontSize: 11, textAlign: "left" }} onClick={() => { exportToDataEntry(); setShowBackupMenu(false); }} title="중간보고서 시스템(v9) 연동용 JSON 내보내기">📤 JSON 백업 (v9 연동)</button>
+                    <button style={{ ...BS, borderColor: GREEN, color: GREEN, fontSize: 11, textAlign: "left" }} onClick={() => { exportAllChildren(); setShowBackupMenu(false); }} title="전체 데이터를 PC에 JSON 파일로 저장">💾 전체 백업</button>
+                    <button style={{ ...BS, borderColor: BLUE, color: BLUE, fontSize: 11, textAlign: "left" }} onClick={() => { triggerBackupRestore(); setShowBackupMenu(false); }} title="PC에 저장해둔 백업 JSON 파일을 불러와 데이터를 복구">📂 복원</button>
+                  </div>
+                )}
+              </div>
+            )}
             {false && (
             <button
               style={{ ...BS, borderColor: "#888", color: "#666" }}
@@ -6416,7 +6429,7 @@ export default function App() {
         {/* ═══ 탭 네비게이션 ═══ */}
         <div className="responsive-tab-nav" style={{ display: "flex", gap: 0, marginBottom: 18, background: "#fff", borderRadius: 12, padding: 5, border: `1px solid ${PKL}`, boxShadow: "0 1px 4px rgba(212,114,138,0.06)" }}>
           {[
-            ...(currentUser?.role === "admin" ? [{ k: "dashboard", label: "📊 센터 대시보드", labelShort: "대시보드", icon: "📊", badge: "" }] : []),
+            ...(currentUser?.role === "admin" ? [{ k: "dashboard", label: "센터 대시보드", labelShort: "대시보드", icon: "📊", badge: "" }] : []),
             { k: "info", label: "① 아동정보", labelShort: "아동", icon: "👶", badge: (info.name ? "✓" : "") },
             { k: "iep", label: "② IEP 설정", labelShort: "IEP", icon: "🎯", badge: includedGoals.length > 0 ? `${includedGoals.length}/${goals.length}` : (goals.length > 0 ? String(goals.length) : "") },
             { k: "daily", label: "③ 데일리 데이터", labelShort: "데일리", icon: "📅", badge: dailyGoals.length === 0 ? "" : (() => {
@@ -9879,14 +9892,21 @@ cleanedHTML + '\n' +
 
               const blob = new Blob([html], { type: "text/html;charset=utf-8" });
               const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = fileName;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-              setTimeout(() => URL.revokeObjectURL(url), 1000);
-              alert("HTML 파일이 다운로드됩니다.\n파일을 열면 인쇄 대화상자가 자동으로 뜹니다.\n'PDF로 저장'을 선택해주세요.");
+              const win = window.open(url, "_blank");
+              if (!win) {
+                // 팝업이 막힌 경우: 기존 다운로드 방식으로 폴백
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                alert("팝업이 차단되어 HTML 파일로 다운로드했습니다.\n파일을 열면 인쇄 대화상자가 뜹니다. 'PDF로 저장'을 선택하세요.\n\n(다음부터 바로 인쇄하려면 주소창 옆 팝업 차단을 해제해주세요.)");
+              } else {
+                // 새 창에서 자동으로 인쇄 대화상자가 열립니다 (HTML 내 onload print 스크립트)
+                setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) {} }, 60000);
+              }
             } catch (err) {
               console.error("[PDF 저장]", err);
               alert("저장 실패: " + (err && err.message ? err.message : err));
