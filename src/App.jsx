@@ -2016,10 +2016,10 @@ function buildFinalGrowth(goals, info) {
   const paragraphs = [];
 
   if (firstSessionDate) {
-    const intro = `치료 시작 시점인 ${firstSessionDate} 무렵, ${fn}${josa은는(fn)} 새로운 환경과 평가 상황에 적응하는 과정에 있었습니다. ` +
+    const intro = `치료 초기에 ${fn}${josa은는(fn)} 새로운 환경과 평가 상황에 적응하는 과정에 있었습니다. ` +
                   `낯선 공간, 새로운 치료사, 신규 학습 도구 사이에서 ${fn}${josa은는(fn)} 단계적으로 환경을 탐색하였으며, ` +
                   `초기 회기의 신중한 양상은 학습 시작 전의 적응 단계로 확인됩니다.`;
-    paragraphs.push(intro.replace(/\(가\)/g, i_ga));
+    paragraphs.push(intro);
   }
 
   if (allRates.length >= 6) {
@@ -2219,6 +2219,24 @@ function withTopicParticle(word) {
   if (last < 0xAC00 || last > 0xD7A3) return word + "는"; // 한글 아니면 기본 '는'
   const hasJong = (last - 0xAC00) % 28 !== 0;
   return word + (hasJong ? "은" : "는");
+}
+
+// 두 날짜를 항상 [이른 날짜, 늦은 날짜] 순으로 정렬 (입력이 거꾸로여도 방어)
+function orderDateRange(a, b) {
+  const sa = a || "", sb = b || "";
+  if (sa && sb && sa > sb) return [sb, sa];
+  return [sa, sb];
+}
+
+// 과제명이 보고서 문장에 넣어도 될 만큼 유효한지 판단
+// (자모만 있거나 2글자 미만이면 부적합 → 이름 생략)
+function isValidTaskName(name) {
+  if (!name) return false;
+  const trimmed = String(name).trim();
+  if (trimmed.length < 3) return false;
+  // 한글 자모(ㄱ-ㅎ, ㅏ-ㅣ)만으로 이루어졌으면 부적합
+  if (/^[ㄱ-ㅎㅏ-ㅣ\s]+$/.test(trimmed)) return false;
+  return true;
 }
 
 function calcDayRateGlobal(day, plannedTrials) {
@@ -10054,7 +10072,8 @@ cleanedHTML + '\n' +
                 })();
                 const startDate = (isFinalMode || isIepMode) ? info.evalStart : (info.pStart || firstDataDate || info.evalStart);
                 const endDate = isFinalMode ? (info.finalEndDate || info.evalEnd) : (isIepMode ? info.evalEnd : (info.pEnd || info.evalEnd));
-                return (startDate && endDate) ? `${startDate} ~ ${endDate}` : (startDate || endDate || "—");
+                const [s0, e0] = orderDateRange(startDate, endDate);
+                return (s0 && e0) ? `${s0} ~ ${e0}` : (s0 || e0 || "—");
               })()}</div>
             </div>
             <div className="no-print" style={{ fontSize: 10, color: "#999", textAlign: "right", lineHeight: 1.7 }}>
@@ -10165,10 +10184,12 @@ cleanedHTML + '\n' +
                   ["치료기간", (() => {
                     if (isFinalMode) {
                       const e = info.finalEndDate || info.evalEnd || "";
-                      return (info.evalStart && e) ? `${info.evalStart} ~ ${e}` : (info.evalStart || e || "—");
+                      const [s0, e0] = orderDateRange(info.evalStart, e);
+                      return (s0 && e0) ? `${s0} ~ ${e0}` : (s0 || e0 || "—");
                     }
                     if (isIepMode) {
-                      return (info.evalStart && info.evalEnd) ? `${info.evalStart} ~ ${info.evalEnd}` : (info.evalStart || info.evalEnd || "—");
+                      const [s0, e0] = orderDateRange(info.evalStart, info.evalEnd);
+                      return (s0 && e0) ? `${s0} ~ ${e0}` : (s0 || e0 || "—");
                     }
                     const firstDataDate = (() => {
                       if (!stosForReport || stosForReport.length === 0) return null;
@@ -10178,7 +10199,8 @@ cleanedHTML + '\n' +
                     })();
                     const reportStart = info.pStart || firstDataDate || info.evalStart || "";
                     const reportEnd = info.pEnd || info.evalEnd || "";
-                    return (reportStart && reportEnd) ? `${reportStart} ~ ${reportEnd}` : (reportStart || reportEnd || "—");
+                    const [s0, e0] = orderDateRange(reportStart, reportEnd);
+                    return (s0 && e0) ? `${s0} ~ ${e0}` : (s0 || e0 || "—");
                   })(), "프로그램", (() => {
                     const sources = [...new Set((goals || []).map(g => g.source || "ELCAR"))];
                     return sources.join(", ") || "—";
@@ -10645,11 +10667,11 @@ cleanedHTML + '\n' +
                 </div>
                 <div style={{ marginBottom: 14, pageBreakInside: "avoid", breakInside: "avoid" }}>
                   <div style={{ fontSize: 11, color: "#666", marginBottom: 6, textAlign: "center", fontWeight: 500 }}>레이더 차트 (영역별 균형)</div>
-                  <RadarChart data={domainAvgs} />
+                  <RadarChart data={domainAvgs.map(d => ({ ...d, domain: cleanDomainKey(d.domain) }))} />
                 </div>
                 <div style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                   <div style={{ fontSize: 11, color: "#666", marginBottom: 6, textAlign: "center", fontWeight: 500 }}>평균 달성률(%)</div>
-                  <BarChart data={domainAvgs} />
+                  <BarChart data={domainAvgs.map(d => ({ ...d, domain: cleanDomainKey(d.domain) }))} />
                 </div>
               </PrintSection>
             )}
@@ -13792,14 +13814,14 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     const lgRecent = lgPts.slice(-3);
     const isAccelerating = lgRecent.length >= 2 && (lgRecent[lgRecent.length - 1].value - lgRecent[0].value) > 10;
     if (g.masteredFromStart) {
-      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역에서 안정적으로 수행하고 있습니다. 요구하기(Mand)와 따라말하기(Echoic) 모두 일관되게 나오고 있고,${langCountText}${lgDone.length > 0 ? ` '${lgDone[0].name}' 등 핵심 목표에서 준거를 달성했습니다.` : ""} 일반화 단계로 넘어갈 수 있는 수준입니다.`);
+      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역에서 안정적으로 수행하고 있습니다. 요구하기(Mand)와 따라말하기(Echoic) 모두 일관되게 나오고 있고,${langCountText}${lgDone.length > 0 && isValidTaskName(lgDone[0].name) ? ` '${lgDone[0].name}' 등 핵심 목표에서 준거를 달성했습니다.` : (lgDone.length > 0 ? " 핵심 목표에서 준거를 달성했습니다." : "")} 일반화 단계로 넘어갈 수 있는 수준입니다.`);
     } else if (isAccelerating) {
-      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역 점수가 ${g.first}%에서 ${g.last}%로 +${g.diff}%p 올랐습니다. 요구하기(Mand)와 따라말하기(Echoic) 반응이 늘었고,${langCountText}${lgDone.length > 0 ? ` '${lgDone[0].name}'에서 준거를 달성했습니다.` : ""} 수용·표현 언어 전반에서 변화가 ${pv()}`);
+      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역 점수가 ${g.first}%에서 ${g.last}%로 +${g.diff}%p 올랐습니다. 요구하기(Mand)와 따라말하기(Echoic) 반응이 늘었고,${langCountText}${lgDone.length > 0 && isValidTaskName(lgDone[0].name) ? ` '${lgDone[0].name}'에서 준거를 달성했습니다.` : (lgDone.length > 0 ? " 핵심 목표에서 준거를 달성했습니다." : "")} 수용·표현 언어 전반에서 변화가 ${pv()}`);
     } else {
-      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역 점수가 ${g.first}%에서 ${g.last}%로 ${g.diff > 0 ? `+${g.diff}%p 올랐고,` : `유지되고 있고,`}${langCountText}${lgDone.length > 0 ? ` '${lgDone[0].name}' 등 ${lgDone.length}개 목표에서 준거를 달성했습니다.` : ""} 요구하기(Mand)와 따라말하기(Echoic)가 ${pg()}`);
+      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역 점수가 ${g.first}%에서 ${g.last}%로 ${g.diff > 0 ? `+${g.diff}%p 올랐고,` : `유지되고 있고,`}${langCountText}${lgDone.length > 0 && isValidTaskName(lgDone[0].name) ? ` '${lgDone[0].name}' 등 ${lgDone.length}개 목표에서 준거를 달성했습니다.` : (lgDone.length > 0 ? ` ${lgDone.length}개 목표에서 준거를 달성했습니다.` : "")} 요구하기(Mand)와 따라말하기(Echoic)가 ${pg()}`);
     }
   } else if (lgDone.length > 0) {
-    sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역에서 '${lgDone[0].name}'의 준거를 달성했습니다.${langCountText} 따라말하기(Echoic) 정확도와 요구하기(Mand) 빈도가 ${pv()} 택트(Tact)와 인트라버벌(Intraverbal) 기초가 늘고 있습니다.`);
+    sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역에서 ${isValidTaskName(lgDone[0].name) ? `'${lgDone[0].name}'의 준거를` : "핵심 목표의 준거를"} 달성했습니다.${langCountText} 따라말하기(Echoic) 정확도와 요구하기(Mand) 빈도가 ${pv()} 택트(Tact)와 인트라버벌(Intraverbal) 기초가 늘고 있습니다.`);
   } else if (total > 0) {
     sec1Parts.push(`${fn}${jEunNeun(fn)} 지금은 언어 기능의 초기 평가 단계입니다. 요구하기(Mand)와 따라말하기(Echoic) 반응이 조금씩 ${pv()}`);
   }
@@ -13821,7 +13843,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
       sec1Parts.push(`사회성 영역 점수는 ${g.first}%에서 ${g.last}%로 ${g.diff > 0 ? `+${g.diff}%p 올랐고,` : `유지되고 있고,`}${socCountText} 또래 공동주의와 눈맞춤이 ${pg()}`);
     }
   } else if (scDone.length > 0) {
-    sec1Parts.push(`사회성 영역에서 '${scDone[0].name}'의 준거를 달성했습니다.${socCountText} 자유놀이 상황에서도 차례 지키기(Turn-taking)와 공유 행동이 자발적으로 ${pv()}`);
+    sec1Parts.push(`사회성 영역에서 ${isValidTaskName(scDone[0].name) ? `'${scDone[0].name}'의 준거를` : "핵심 목표의 준거를"} 달성했습니다.${socCountText} 자유놀이 상황에서도 차례 지키기(Turn-taking)와 공유 행동이 자발적으로 ${pv()}`);
   }
 
   if (curFields[2] && curFields[2].trim()) {
@@ -13912,7 +13934,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
       : "";
     sec2Parts.push(`${fn}${jEunNeun(fn)} 이번 기간에 평균 점수가 ${firstAvg}%에서 ${lastAvg}%로 +${overallDiff}%p 올랐습니다.${done.length > 0 ? ` ${done.length}개 목표에서 준거를 달성했습니다.` : ""}${masteredTail}`);
   } else if (recentMastery.length > 0) {
-    sec2Parts.push(`최근 '${recentMastery[0].name}'에서 준거를 달성했습니다. 전체 ${total}개 STO 중 ${done.length}개가 완료되었습니다. 반응 속도와 정확도가 같이 올라가고 있습니다.`);
+    sec2Parts.push(`최근 ${isValidTaskName(recentMastery[0].name) ? `'${recentMastery[0].name}'에서` : "핵심 목표에서"} 준거를 달성했습니다. 전체 ${total}개 STO 중 ${done.length}개가 완료되었습니다. 반응 속도와 정확도가 같이 올라가고 있습니다.`);
   } else if (total > 0) {
     sec2Parts.push(`현재 ${total}개 단기 목표 중 ${prog.length}개가 진행 중입니다. 반응 정확도와 자발성이 조금씩 올라가고 있습니다.`);
   } else {
@@ -14092,8 +14114,10 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     sentences.push(`${fn}의 현재 발달 단계에 맞춰 개별화된 학습 목표를 운영하고, 데이터를 보면서 효과를 확인할 예정입니다.`);
   }
 
-  const focusList = domAvgs.filter(d => d.avg >= 60 && d.avg < 80).slice(0, 1);
-  const emerging = domAvgs.filter(d => d.avg >= 40 && d.avg < 60);
+  // 강점으로 이미 언급한 영역은 약점(focus) 후보에서 제외 (중복 방지)
+  const strengthDomainName = (best.domain !== "—" && best.avg >= 70) ? cleanDomainKey(best.domain) : null;
+  const focusList = domAvgs.filter(d => d.avg >= 60 && d.avg < 80 && cleanDomainKey(d.domain) !== strengthDomainName).slice(0, 1);
+  const emerging = domAvgs.filter(d => d.avg >= 40 && d.avg < 60 && cleanDomainKey(d.domain) !== strengthDomainName);
   if (focusList.length > 0) {
     const tgt = focusList[0];
     sentences.push(`'${cleanDomainKey(tgt.domain)}' 영역(${tgt.avg}%)은 ${lvl(tgt.avg)} 촉구(prompt)를 단계적으로 줄이고 시도 횟수를 조정해서 숙달 수준에 닿게 할 예정입니다.`);
@@ -14455,11 +14479,11 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
           <div className="responsive-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "center" }}>
             <div>
               <div style={{ fontSize: 11, color: "#888", marginBottom: 4, textAlign: "center" }}>현재 수행률 (최근 데일리 기록 평균)</div>
-              <RadarChart data={currentAvgs} />
+              <RadarChart data={currentAvgs.map(d => ({ ...d, domain: cleanDomainKey(d.domain) }))} />
             </div>
             <div>
               <div style={{ fontSize: 11, color: "#888", marginBottom: 4, textAlign: "center" }}>영역별 현재 수행률 (%)</div>
-              <BarChart data={currentAvgs} />
+              <BarChart data={currentAvgs.map(d => ({ ...d, domain: cleanDomainKey(d.domain) }))} />
             </div>
           </div>
           <div style={{ marginTop: 10, padding: "8px 12px", background: PKL, borderRadius: 8, fontSize: 11, color: PKD, lineHeight: 1.6 }}>
@@ -17112,7 +17136,7 @@ function GoalDashboard({ stos }) {
                           {status}{isCompleted ? " 🎉" : ""}
                         </span>
                       </div>
-                      <div style={{ fontSize: 10, color: "#888", marginBottom: 12 }}>{dom}</div>
+                      <div style={{ fontSize: 10, color: "#888", marginBottom: 12 }}>{cleanDomainKey(dom)}</div>
                       {growthInfo && (
                         <div style={{ background: "#FAFAFA", borderRadius: 10, padding: "10px 8px 6px", marginBottom: 10 }}>
                           <BigChart points={points} color={meta.chartLine} listBoundaries={s.listBoundaries} />
@@ -17252,7 +17276,7 @@ function DomainCompletionSection({ goals }) {
           return (
             <div key={dom}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: "#333" }}>{dom}</div>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: "#333" }}>{cleanDomainKey(dom)}</div>
                 <div style={{ fontSize: 11, color: "#5a8c1f", fontWeight: 600 }}>
                   <span style={{ fontSize: 14, fontWeight: 700 }}>{d.mastered}</span>
                   <span style={{ color: "#888" }}> / {d.total}</span>
