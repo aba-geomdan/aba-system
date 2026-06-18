@@ -1948,10 +1948,11 @@ function buildFinalSummary(goals, info) {
   const para2 = para2Parts.join(" ");
 
   let para3 = "";
+  const para3pre1 = `${fn}${josa이가(fn)} 다양한 학습 영역에서 균형적 발달 양상을 보였음을 나타내며, 각 영역 간의 통합적 진행이 확인된 결과로 해석됩니다.`;
   if (topDomains.length >= 3) {
     const [t1, t2, t3] = topDomains;
     para3 = `${t1.domain} 영역에서는 ${t1.firstAvg}%에서 ${t1.lastAvg}%로 ${t1.change}%p의 향상이 확인되었으며, ${t2.domain} 영역 ${t2.change}%p, ${t3.domain} 영역 ${t3.change}%p의 향상이 동반 확인되었습니다. ` +
-            `이러한 결과는 ${fn}이(가) 다양한 학습 영역에서 균형적 발달 양상을 보였음을 나타내며, 각 영역 간의 통합적 진행이 확인된 결과로 해석됩니다.`;
+            `이러한 결과는 ${para3pre1}`;
   } else if (topDomains.length === 2) {
     const [t1, t2] = topDomains;
     para3 = `${t1.domain} 영역에서는 ${t1.firstAvg}%에서 ${t1.lastAvg}%로 ${t1.change}%p의 향상이 확인되었으며, ${t2.domain} 영역에서도 ${t2.change}%p의 향상이 동반되어 ${fn}의 강점 영역으로 확인되었습니다. ` +
@@ -1965,8 +1966,6 @@ function buildFinalSummary(goals, info) {
       para3 = `${t1.domain} 영역에서는 시작 시점 대비 ${t1.change}%p 향상이 확인되었으며, 다른 영역도 단계적인 진전을 보였습니다.`;
     }
   }
-  para3 = para3.replace(/\(가\)/g, josa이가(fn) === "이" ? "이" : "가");
-
   let para4 = "";
   if (totalPaused > 0) {
     para4 = `${totalPaused}개 과제는 ${fn}의 발달 흐름과 학습 동기를 고려하여 우선순위를 조정하거나 일시 중단하였습니다. 이는 단순 미달성이 아닌, ${fn}의 현재 발달 시점에 적합한 학습 경로 설정에 따른 임상적 판단이며, 향후 적절한 시기에 재구성하여 도입할 것을 권고드립니다.`;
@@ -1974,10 +1973,7 @@ function buildFinalSummary(goals, info) {
 
   let para5 = `${fn}의 본 치료 기간 동안의 학습 결과가 누적되어 발달적 진전이 확인되었으며, ` +
               `보호자의 일관된 가정 협력이 학습 안정성 유지에 기여하였습니다. ` +
-              `본 종결 시점까지 형성된 학습 기반과 적응 능력은 ${fn}이(가) 향후 마주할 새로운 환경에서도 활용 가능한 자원이 될 것으로 판단됩니다.`;
-  const i_ga = josa이가(fn) === "이" ? "이" : "가";
-  para4 = para4.replace(/\(가\)/g, i_ga);
-  para5 = para5.replace(/\(가\)/g, i_ga);
+              `본 종결 시점까지 형성된 학습 기반과 적응 능력은 ${fn}${josa이가(fn)} 향후 마주할 새로운 환경에서도 활용 가능한 자원이 될 것으로 판단됩니다.`;
 
   return [para1, para2, para3, para4, para5].filter(Boolean).join("\n\n");
 }
@@ -2084,8 +2080,8 @@ function buildFinalGrowth(goals, info) {
 
   const closing = `이상의 결과는 ${fn}의 본 치료 기간 동안의 단계적 학습 진행을 종합한 내용입니다. ` +
                   `정량 지표 외에 회기별 시도와 보호자의 지원이 학습 안정성 유지에 기여하였습니다. ` +
-                  `본 종결 시점까지 형성된 학습 경험과 적응 능력은 향후 ${fn}이(가) 마주할 새로운 환경에서도 활용 가능한 자원으로 작용할 것으로 판단됩니다.`;
-  paragraphs.push(closing.replace(/\(가\)/g, i_ga));
+                  `본 종결 시점까지 형성된 학습 경험과 적응 능력은 향후 ${fn}${josa이가(fn)} 마주할 새로운 환경에서도 활용 가능한 자원으로 작용할 것으로 판단됩니다.`;
+  paragraphs.push(closing);
 
   return paragraphs.join("\n\n");
 }
@@ -2187,18 +2183,43 @@ const OBS_CATEGORY_LABELS = {
 };
 
 const DOMAIN_CONTEXT = {
-  "Ⅰ 선호물·강화제": "학습 동기 조성과 강화 체계 구축에 필수적인 영역으로, 아동의 선호 자극 식별과 조건화 과정이 이루어집니다",
-  "Ⅱ 조건화된 강화": "2차 강화물 형성과 환경 자극에 대한 적응 반응을 다루며, 공동 주의와 사회적 참조 능력이 발달합니다",
-  "Ⅲ 화자 언어 작동": "Skinner의 언어행동 분석에 기반한 맨드·택트·인트라버벌 통합 사용 능력을 평가합니다",
-  "Ⅳ 교수 준비도": "교실 상황에서 교사의 지시를 받고 주의를 유지하는 핵심 선행 기술 영역입니다",
-  "Ⅴ 자기관리": "학교 및 일상 환경에서의 자조 능력과 또래·어른과의 상호작용 기술을 포함합니다",
-  "Ⅵ 언어행동기초": "의사소통의 기초 단위인 맨드 형성과 모방, 시각적 매칭 등 학습의 토대가 되는 영역입니다",
-  "Ⅶ 청자": "언어적 지시를 이해하고 적절히 반응하며, 음성 모방과 기초 맨드 기술을 형성합니다",
-  "Ⅷ 화자": "택트·오토클리틱·인트라버벌 등 복합적 언어 표현 능력을 심화 평가합니다",
-  "Ⅸ 강화제군": "학교 환경에서 자연스럽게 작용하는 다양한 강화제에 대한 반응성을 평가합니다",
-  "Ⅹ 학습능력": "매칭·범주·개념·읽기 전 기술·초기 수학 등 학업 준비도와 인지 능력을 통합적으로 다룹니다",
-  "Ⅺ 신체발달": "소근육·대근육 협응과 조작 능력을 평가하여 학습 및 일상 수행의 신체적 기반을 확인합니다"
+  // ELCAR (부모님 친화 설명)
+  "선호물·강화제": "아동이 자발적으로 학습에 참여하도록 동기를 유발하는 강력한 보상물을 탐색하고 배치하는 영역입니다",
+  "조건화된 강화": "본래 흥미 없던 활동이나 사회적 칭찬(눈맞춤, 미소 등)을 가치 있는 보상으로 느끼도록 학습시키는 영역입니다",
+  "화자 언어 작동": "요구하기(Mand), 명명하기(Tact) 등 타인에게 자신의 의도를 말로 표현하는 언어 행동의 실제적 기능을 기르는 영역입니다",
+  "교수 준비도": "자리에 앉기, 시선 맞추기, 지시 따르기 등 본격적인 학습을 시작하기 위해 필요한 기본 태도와 순응을 배우는 영역입니다",
+  "자기관리": "스스로 자신의 행동을 모니터링하고 충동을 조절하며 일상생활을 독립적으로 수행하도록 돕는 영역입니다",
+  "언어행동기초": "모방, 소리 내기, 시각적 대칭 맞추기 등 언어를 본격적으로 정교화하기 전 단계의 인지적·행동적 기반을 다지는 영역입니다",
+  "청자": "타인의 말을 정확하게 이해하고, 그 지시나 상황에 알맞게 몸으로 반응하는 능력을 기르는 영역입니다",
+  "화자": "상황과 대화 상대방의 맥락에 맞추어 적절한 단어와 문장으로 소통하는 종합적인 구어 표현력을 다듬는 영역입니다",
+  // ESDM (부모님 친화 설명)
+  "수용 언어": "일상적인 놀이와 상호작용 속에서 어른의 말이나 몸짓 신호의 의미를 알아듣고 이해하는 영역입니다",
+  "표현 언어": "자연스러운 놀이 상황에서 말, 소리, 제스처를 사용해 자신의 욕구와 감정을 상대방에게 전달하는 영역입니다",
+  "합동 주시 행동": "상대방과 같은 사물이나 사건을 동시에 바라보며 관심사와 즐거움을 공유하는 사회적 소통의 출발점이 되는 영역입니다",
+  "사회기술: 어른/친구": "친밀한 성인 및 또래와의 눈맞춤, 주고받기 놀이, 규칙 준수를 통해 관계 맺는 법을 배우는 영역입니다",
+  "사회기술": "친밀한 성인 및 또래와의 눈맞춤, 주고받기 놀이, 규칙 준수를 통해 관계 맺는 법을 배우는 영역입니다",
+  "모방": "타인의 신체 움직임, 놀이 행동, 소리를 따라 하면서 세상의 규칙을 습득하고 사회적 유대감을 쌓는 영역입니다",
+  "인지": "놀이 속에서 사물의 인과관계를 이해하고, 문제를 해결하며, 개념을 분류하는 기초 사고력을 기르는 영역입니다",
+  // 기타 (VB-MAPP 잔여)
+  "강화제군": "학교 환경에서 자연스럽게 작용하는 다양한 강화제에 대한 반응성을 평가하는 영역입니다",
+  "학습능력": "매칭·범주·개념·읽기 전 기술·초기 수학 등 학업 준비도와 인지 능력을 통합적으로 다루는 영역입니다",
+  "신체발달": "소근육·대근육 협응과 조작 능력을 평가하여 학습 및 일상 수행의 신체적 기반을 확인하는 영역입니다"
 };
+
+// 영역명에서 로마숫자·번호 접두어 제거 (DOMAIN_CONTEXT 매칭용)
+function cleanDomainKey(domain) {
+  if (!domain) return "";
+  return domain.replace(/^[Ⅰ-Ⅺ\dIVX]+\s*[·.]?\s*/, "").trim();
+}
+
+// 받침 유무에 따라 은/는 조사를 붙임
+function withTopicParticle(word) {
+  if (!word) return word;
+  const last = word.charCodeAt(word.length - 1);
+  if (last < 0xAC00 || last > 0xD7A3) return word + "는"; // 한글 아니면 기본 '는'
+  const hasJong = (last - 0xAC00) % 28 !== 0;
+  return word + (hasJong ? "은" : "는");
+}
 
 function calcDayRateGlobal(day, plannedTrials) {
   if (!day) return null;
@@ -2268,9 +2289,9 @@ function generateCurrentLevel(goal) {
 
   const lines = [];
 
-  const ctx = DOMAIN_CONTEXT[domain];
+  const ctx = DOMAIN_CONTEXT[cleanDomainKey(domain)] || DOMAIN_CONTEXT[domain];
   if (ctx && source === "ELCAR") {
-    lines.push(`${domain}은 ${ctx}.`);
+    lines.push(`${cleanDomainKey(domain)} 영역은 ${ctx.replace(/영역입니다$/, "영역으로")}, 본 아동의 현행 수준을 평가하여 IEP에 포함하였습니다.`);
   } else if (source && source !== "ELCAR") {
     lines.push(`${source} ${domain} 영역의 목표로, ${subDomain !== "-" ? subDomain + "과 관련된 " : ""}학습자의 현재 기능 수준을 평가합니다.`);
   } else {
@@ -2514,9 +2535,9 @@ function generateDomainLevel(domain, goalsInDomain) {
 
   const lines = [];
 
-  const ctx = DOMAIN_CONTEXT[domain];
+  const ctx = DOMAIN_CONTEXT[cleanDomainKey(domain)] || DOMAIN_CONTEXT[domain];
   if (ctx) {
-    lines.push(`${domain}은 ${ctx}.`);
+    lines.push(`${withTopicParticle(cleanDomainKey(domain))} ${ctx}.`);
   } else {
     lines.push(`${domain} 영역에 대한 종합 평가를 진행하였습니다.`);
   }
@@ -2570,9 +2591,9 @@ function generatePLPText(domain, goalsInDomain) {
 
   const lines = [];
 
-  const ctx = DOMAIN_CONTEXT[domain];
+  const ctx = DOMAIN_CONTEXT[cleanDomainKey(domain)] || DOMAIN_CONTEXT[domain];
   if (ctx) {
-    lines.push(`${domain}은 ${ctx}.`);
+    lines.push(`${cleanDomainKey(domain)} 영역은 ${ctx.replace(/영역입니다$/, "영역으로")}, 본 아동의 발달 단계에서 우선적으로 다루어야 할 핵심 목표로 판단되어 IEP에 포함되었습니다.`);
   } else {
     lines.push(`${domain} 영역은 본 아동의 발달 단계에서 우선적으로 다루어야 할 핵심 영역으로 평가되어 IEP에 포함되었습니다.`);
   }
@@ -2595,7 +2616,17 @@ function generatePLPText(domain, goalsInDomain) {
     lines.push(`본 영역은 아직 기초 기술이 형성되기 전 단계로, 체계적인 선행 학습을 통해 기초 기반을 구축하는 것을 우선 과제로 합니다.`);
   }
 
-  lines.push(`총 ${goalsInDomain.length}개의 세부 목표를 설정하여, 80% 이상 2회 연속 정반응을 숙달 기준으로 단계를 잘게 나누어 지도하며, 본 아동의 강점과 선호를 고려한 개별화된 접근으로 진전을 도모합니다.`);
+  const closingVariants = [
+    `총 ${goalsInDomain.length}개의 세부 목표를 80% 이상 2회 연속 정반응의 숙달 기준에 따라 단계적으로 지도하며, 본 아동의 강점과 선호를 반영한 개별화 접근으로 진전을 도모합니다.`,
+    `세부 목표 ${goalsInDomain.length}개를 과제 분석을 통해 작은 단계로 나누어 지도하고, 80% 이상 2회 연속 정반응을 숙달 기준으로 삼아 안정적인 기술 습득을 목표로 합니다.`,
+    `본 영역에서는 ${goalsInDomain.length}개의 세부 목표를 설정하였으며, 아동의 동기와 선호를 고려한 개별화된 지도를 통해 80% 이상 2회 연속 정반응의 숙달 기준 도달을 지향합니다.`,
+    `${goalsInDomain.length}개의 세부 목표에 대해 단계를 잘게 나눈 체계적 지도를 적용하며, 80% 이상 2회 연속 정반응을 기준으로 숙달 여부를 판단하고 일반화로 확장해 나갈 계획입니다.`,
+    `설정된 ${goalsInDomain.length}개 세부 목표는 아동의 현행 수준에 맞추어 점진적으로 지도하고, 80% 이상 2회 연속 정반응의 숙달 기준 충족 시 다음 단계로 진행합니다.`,
+  ];
+  // 영역명 기준으로 패턴을 고정 선택 → 같은 영역은 항상 같은 문장(일관성), 영역끼리는 다른 문장(다양성)
+  let hash = 0;
+  for (let k = 0; k < domain.length; k++) hash = (hash * 31 + domain.charCodeAt(k)) >>> 0;
+  lines.push(closingVariants[hash % closingVariants.length]);
 
   return lines.join(" ");
 }
@@ -5506,6 +5537,17 @@ export default function App() {
     <div style={{ fontFamily: "'Pretendard','Noto Sans KR','Malgun Gothic',sans-serif", background: "linear-gradient(135deg,#fdf8f9 0%,#fff 50%,#fdf8f9 100%)", minHeight: "100vh", padding: "24px 16px", color: "#333" }}>
       {/* ★ [반응형] 좁은 화면 자동 1열 변환 + 폰트 크기 보정 */}
       <style>{`
+        /* TaskRow: 중간 너비(태블릿·좁힌 창)에서 7열 grid가 찌그러져 겹치는 문제 방지 — 세로 전환 */
+        @media (max-width: 960px) {
+          .responsive-task-grid {
+            grid-template-columns: 1fr !important;
+            gap: 6px !important;
+            padding: 10px !important;
+            background: rgba(255, 245, 246, 0.5) !important;
+            border: 1px solid #f0e0e5 !important;
+            border-radius: 8px !important;
+          }
+        }
         @media (max-width: 700px) {
           /* 2열·3열 grid → 1열 자동 전환 */
           .responsive-grid-2 { grid-template-columns: 1fr !important; }
@@ -9591,7 +9633,7 @@ function RadarChart({ data }) {
         }).join(" ")} fill="none" stroke="#e8e8e8" strokeWidth="0.6" />
       ))}
       <polygon points={target} fill="none" stroke="#639922" strokeWidth="1.2" strokeDasharray="4,4" opacity=".5" />
-      <polygon points={poly} fill="rgba(245,160,177,0.18)" stroke={PK} strokeWidth="2" />
+      <polygon points={poly} fill="rgba(245,160,177,0.14)" stroke={PK} strokeWidth="2" />
       {pts.map((p, i) => {
         const deg = (p.angle * 180 / Math.PI + 360) % 360;
         const anchor = deg > 90 && deg < 270 ? "end" : deg === 90 || deg === 270 ? "middle" : "start";
@@ -9599,7 +9641,7 @@ function RadarChart({ data }) {
         const lines = splitLabel(p.label);
         return (
           <g key={i}>
-            <circle cx={p.x} cy={p.y} r="7" fill={PK} />
+            <circle cx={p.x} cy={p.y} r="5" fill="#fff" stroke={PK} strokeWidth="2.5" />
             {lines.length === 1 ? (
               <text x={p.lx} y={p.ly} textAnchor={textAnchor} dominantBaseline="middle" fontSize="19" fill="#444" fontWeight="500">{lines[0]}</text>
             ) : (
@@ -9624,7 +9666,7 @@ function BarChart({ data }) {
       {data.map((d, i) => {
         const y = 10 + i * (rowH + gap);
         const w = (d.avg / 100) * barAreaW;
-        const c = d.avg >= 80 ? "#639922" : d.avg >= 60 ? "#378ADD" : "#E24B4A";
+        const c = d.avg >= 80 ? "#7BA05B" : d.avg >= 60 ? "#6E97B8" : "#D6A45C";
         return (
           <g key={i}>
             {/* 영역명 라벨 (왼쪽 280px) - 28글자까지 풀 표시 */}
@@ -13190,7 +13232,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
 
       {/* 모드별 입력 UI — raw: 10칸 세션 / pct: 퍼센트 직접 입력 / click: 원클릭 정·오 */}
       {/* ★ 고정 너비 컨테이너 — 모드 전환 시 옆 요소들이 밀리지 않도록 */}
-      <div style={{ width: 200, display: "inline-flex", alignItems: "flex-start", justifyContent: "flex-start" }}>
+      <div style={{ minWidth: 200, display: "inline-flex", alignItems: "flex-start", justifyContent: "flex-start" }}>
       {(() => {
         const mode = task.measureMode || "raw";
 
@@ -16830,7 +16872,7 @@ function GrowthLineChart({ goals, dates, getTimeline }) {
 
   if (points.length === 0) return <div style={{ padding: 20, textAlign: "center", fontSize: 12, color: "#aaa" }}>데이터 없음</div>;
 
-  const W = 700, H = 220, padL = 40, padR = 20, padT = 20, padB = 40;
+  const W = 700, H = 235, padL = 40, padR = 24, padT = 34, padB = 40;
   const chartW = W - padL - padR, chartH = H - padT - padB;
   const xStep = points.length > 1 ? chartW / (points.length - 1) : 0;
   const pts = points.map((p, i) => ({ x: padL + i * xStep, y: padT + (1 - p.avg / 100) * chartH, avg: p.avg, date: p.date }));
@@ -16846,18 +16888,23 @@ function GrowthLineChart({ goals, dates, getTimeline }) {
           <text x={padL - 6} y={y + 3} textAnchor="end" fontSize="9" fill="#999">{v}%</text>
         </g>;
       })}
-      <text x={W - padR - 4} y={padT + (1 - 0.8) * chartH - 4} fontSize="8" fill={GREEN} textAnchor="end" fontWeight="600">숙달 기준선 (80%)</text>
+      <text x={W - padR} y={padT - 10} fontSize="8.5" fill={GREEN} textAnchor="end" fontWeight="600">― 숙달 기준선 80%</text>
 
       {/* 라인 */}
       <path d={path} fill="none" stroke={PK} strokeWidth="2.5" strokeLinejoin="round" />
       {/* 영역 채우기 */}
-      <path d={`${path} L ${pts[pts.length - 1].x} ${padT + chartH} L ${pts[0].x} ${padT + chartH} Z`} fill={`${PK}20`} />
+      <path d={`${path} L ${pts[pts.length - 1].x} ${padT + chartH} L ${pts[0].x} ${padT + chartH} Z`} fill={`${PK}12`} />
 
       {/* 포인트 + 값 */}
       {pts.map((p, i) => (
         <g key={i}>
           <circle cx={p.x} cy={p.y} r="4" fill="#fff" stroke={PK} strokeWidth="2" />
-          <text x={p.x} y={p.y - 9} fontSize="10" fill={PKD} textAnchor="middle" fontWeight="700">{p.avg}%</text>
+          <text
+            x={i === 0 ? p.x + 6 : (i === pts.length - 1 ? p.x - 6 : p.x)}
+            y={p.y < padT + 18 ? p.y + 16 : p.y - 9}
+            fontSize="10" fill={PKD}
+            textAnchor={i === 0 ? "start" : (i === pts.length - 1 ? "end" : "middle")}
+            fontWeight="700">{p.avg}%</text>
           <text x={p.x} y={H - padB + 14} fontSize="9" fill="#888" textAnchor="middle">{p.date.slice(5)}</text>
         </g>
       ))}
