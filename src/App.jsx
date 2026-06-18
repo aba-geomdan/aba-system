@@ -793,13 +793,13 @@ function buildBehaviorChange(selected, info) {
   const 은는 = (w) => has받침(w) ? "은" : "는";
 
   const KEY_DESC = {
-    "떼쓰기 감소":          `치료 시작 시 일과 변화나 거절 상황에서 자주 나타나던 떼쓰기 행동이 종결 시점에는 빈도와 강도 모두 눈에 띄게 줄었습니다`,
-    "공격·자해 행동 감소":   `초기에 좌절 상황에서 보이던 공격적인 행동이나 자해 시도가 치료 중 대체 행동 학습을 거치면서 종결 시점에는 거의 나오지 않습니다`,
-    "자기자극 행동 감소":    `반복적인 자기자극 행동이 학습 활동을 방해하던 초기와 비교해, 종결 시점에는 활동 참여가 가능한 수준으로 안정됐습니다`,
+    "떼쓰기 감소":          `치료 시작 시 일과 변화나 거절 상황에서 자주 나타나던 떼쓰기 행동이 현재는 빈도와 강도 모두 눈에 띄게 줄었습니다`,
+    "공격·자해 행동 감소":   `초기에 좌절 상황에서 보이던 공격적인 행동이나 자해 시도가 치료 중 대체 행동 학습을 거치면서 현재는 거의 나오지 않습니다`,
+    "자기자극 행동 감소":    `반복적인 자기자극 행동이 학습 활동을 방해하던 초기와 비교해, 현재는 활동 참여가 가능한 수준으로 안정됐습니다`,
     "정서 표현 안정화":      `좌절·불안 상황에서 즉각적인 정서 폭발로 표현되던 양상이 점차 말이나 표정으로 감정을 전달하려는 시도로 바뀌었습니다`,
-    "전환 상황 적응 향상":   `환경이나 일과 변화에 거부 반응이 두드러졌던 초기와 비교해, 종결 시점에는 새로운 상황을 비교적 수월하게 받아들이는 모습입니다`,
+    "전환 상황 적응 향상":   `환경이나 일과 변화에 거부 반응이 두드러졌던 초기와 비교해, 현재는 새로운 상황을 비교적 수월하게 받아들이는 모습입니다`,
     "수면·식사 패턴 안정":   `초기에 보였던 수면·식사 패턴의 불안정함이 가정 지원과 학습 환경 적응을 거치며 점차 안정됐습니다`,
-    "언어로 의사 표현 시도 증가": `이전에는 행동으로만 표현되던 욕구나 거부의 메시지가 종결 시점에는 단어·짧은 문장 등 언어적 표현으로 바뀌는 빈도가 늘었습니다`,
+    "언어로 의사 표현 시도 증가": `이전에는 행동으로만 표현되던 욕구나 거부의 메시지가 현재는 단어·짧은 문장 등 언어적 표현으로 바뀌는 빈도가 늘었습니다`,
     "특이 문제행동 없음":    `본 치료 기간 중 임상적으로 문제가 되는 행동은 관찰되지 않았으며, 일상적 행동 외에 별도의 중재가 필요한 상황은 없었습니다`
   };
 
@@ -1826,6 +1826,8 @@ function buildFinalSummary(goals, info) {
   const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
   const startDate = info?.evalStart || "";
   const endDate = info?.finalEndDate || info?.evalEnd || "";
+  // 날짜 역전 방어 (입력이 거꾸로여도 정렬)
+  const [startDateO, endDateO] = orderDateRange(startDate, endDate);
 
   const allSessionDates = new Set();
   goals.forEach(g => {
@@ -1881,8 +1883,8 @@ function buildFinalSummary(goals, info) {
   const avgChange = validChanges.length > 0 ? Math.round(validChanges.reduce((a, b) => a + b, 0) / validChanges.length) : 0;
 
   let monthsLabel = "";
-  if (startDate && endDate) {
-    const s = new Date(startDate); const e = new Date(endDate);
+  if (startDateO && endDateO) {
+    const s = new Date(startDateO); const e = new Date(endDateO);
     const months = Math.round((e - s) / (1000 * 60 * 60 * 24 * 30));
     if (months >= 12) {
       const y = Math.floor(months / 12); const m = months % 12;
@@ -1893,11 +1895,11 @@ function buildFinalSummary(goals, info) {
   }
 
   const para1Parts = [];
-  if (startDate && endDate) {
+  if (startDateO && endDateO) {
     if (monthsLabel) {
-      para1Parts.push(`${fn}${josa은는(fn)} ${startDate}부터 ${endDate}까지 ${monthsLabel} 본 ABA 치료 프로그램에 참여하였습니다.`);
+      para1Parts.push(`${fn}${josa은는(fn)} ${startDateO}부터 ${endDateO}까지 ${monthsLabel} 본 ABA 치료 프로그램에 참여하였습니다.`);
     } else {
-      para1Parts.push(`${fn}${josa은는(fn)} ${startDate}부터 ${endDate}까지 본 ABA 치료 프로그램에 참여하였습니다.`);
+      para1Parts.push(`${fn}${josa은는(fn)} ${startDateO}부터 ${endDateO}까지 본 ABA 치료 프로그램에 참여하였습니다.`);
     }
   } else {
     para1Parts.push(`${fn}${josa은는(fn)} 본 ABA 치료 프로그램에 참여하였습니다.`);
@@ -1911,9 +1913,9 @@ function buildFinalSummary(goals, info) {
   }
   if (totalTasks > 0 && totalDomains > 0) {
     if (totalSessions > 0) {
-      para1Parts.push(`이러한 출발점에서 ${fn}의 현재 발달 수준과 강점 영역을 토대로 중재가 진행되었으며, 총 ${totalSessions}회의 회기 동안 ${totalDomains}개 영역에서 ${totalTasks}개의 학습 과제를 단계적으로 진행하였습니다.`);
+      para1Parts.push(`이러한 출발점에서 ${fn}의 현재 발달 수준과 강점 영역을 토대로 중재가 진행되었으며, 여러 영역에 걸쳐 학습 과제를 단계적으로 진행하였습니다.`);
     } else {
-      para1Parts.push(`이러한 출발점에서 ${fn}의 현재 발달 수준과 강점 영역을 토대로 중재가 진행되었으며, 총 ${totalDomains}개 영역에서 ${totalTasks}개의 학습 과제를 단계적으로 진행하였습니다.`);
+      para1Parts.push(`이러한 출발점에서 ${fn}의 현재 발달 수준과 강점 영역을 토대로 중재가 진행되었으며, 여러 영역에 걸쳐 학습 과제를 단계적으로 진행하였습니다.`);
     }
   }
   const para1 = para1Parts.join(" ");
@@ -1921,20 +1923,20 @@ function buildFinalSummary(goals, info) {
   const para2Parts = [];
   if (totalMastered > 0) {
     if (masterPct >= 80) {
-      para2Parts.push(`치료 종결 시점에 전체 ${totalTasks}개 과제 중 ${totalMastered}개(${masterPct}%)를 안정적인 수행 수준으로 습득하였습니다.`);
+      para2Parts.push(`치료 종결 시점에 대부분의 학습 과제를 안정적인 수행 수준으로 습득하였습니다.`);
       para2Parts.push(`이는 ${fn}의 학습 환경 적응과 단계적 과제 수행이 효과적으로 이루어졌음을 나타내는 결과입니다.`);
     } else if (masterPct >= 60) {
-      para2Parts.push(`치료 기간 동안 전체 ${totalTasks}개 과제 중 ${totalMastered}개(${masterPct}%)를 안정적으로 습득하였으며, 단계적 학습 진행이 확인되었습니다.`);
+      para2Parts.push(`치료 기간 동안 다수의 학습 과제를 안정적으로 습득하였으며, 단계적 학습 진행이 확인되었습니다.`);
       para2Parts.push(`습득된 기술은 회기 내 수행에 그치지 않고 ${fn}의 일상 환경에서도 발현되어 일반화 양상이 관찰되었습니다.`);
     } else if (masterPct >= 30) {
-      para2Parts.push(`치료 기간 동안 ${totalTasks}개 과제 중 ${totalMastered}개(${masterPct}%)에서 목표 수준에 도달하였으며, 나머지 과제도 단계적 진전을 보였습니다.`);
+      para2Parts.push(`치료 기간 동안 일부 과제에서 목표 수준에 도달하였으며, 나머지 과제도 단계적 진전을 보였습니다.`);
       para2Parts.push(`영역별 단계적 성취가 누적되어 학습 진행이 확인되었습니다.`);
     } else if (masterPct > 0) {
-      para2Parts.push(`치료 기간 동안 ${totalTasks}개 과제 중 ${totalMastered}개에서 목표 수준에 도달하였으며, 나머지 과제도 단계적 진전을 보였습니다.`);
+      para2Parts.push(`치료 기간 동안 일부 과제에서 목표 수준에 도달하였으며, 나머지 과제도 단계적 진전을 보였습니다.`);
       para2Parts.push(`성취 비율 외에도 ${fn}의 매 회기 참여와 시도가 본 보고 기간의 학습 진행에 기반이 되었습니다.`);
     }
   } else if (totalTasks > 0) {
-    para2Parts.push(`치료 기간 동안 ${totalTasks}개 과제를 단계적으로 진행하며 각 과제에서 학습 진행이 확인되었습니다.`);
+    para2Parts.push(`치료 기간 동안 여러 학습 과제를 단계적으로 진행하며 각 과제에서 학습 진행이 확인되었습니다.`);
   }
   if (avgChange >= 25) {
     para2Parts.push(`전반적으로 영역별 평균 정반응률이 약 ${avgChange}%p 향상되어, 치료 기간 동안 유의한 발달적 진전이 확인되었습니다.`);
@@ -10663,11 +10665,7 @@ cleanedHTML + '\n' +
             {domainAvgs.length > 0 && (
               <PrintSection num={nextSn()} title="영역별 균형 분석">
                 <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                  ※ 영역별 학습 목표의 최종 달성률을 한눈에 비교한 그래프입니다. (녹색: 80%↑ 숙달, 파랑: 60~79% 진전, 빨강: 60%↓ 추가 지원 필요)
-                </div>
-                <div style={{ marginBottom: 14, pageBreakInside: "avoid", breakInside: "avoid" }}>
-                  <div style={{ fontSize: 11, color: "#666", marginBottom: 6, textAlign: "center", fontWeight: 500 }}>레이더 차트 (영역별 균형)</div>
-                  <RadarChart data={domainAvgs.map(d => ({ ...d, domain: cleanDomainKey(d.domain) }))} />
+                  ※ 영역별 학습 목표의 최종 달성률을 한눈에 비교한 그래프입니다. (초록: 80%↑ 숙달, 파랑: 60~79% 진전, 주황: 60%↓ 집중 지도)
                 </div>
                 <div style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                   <div style={{ fontSize: 11, color: "#666", marginBottom: 6, textAlign: "center", fontWeight: 500 }}>평균 달성률(%)</div>
@@ -11493,12 +11491,12 @@ function PrintSection({ num, title, children, boxed, accent, allowSplit }) {
     );
   }
   return (
-    <div className={`print-section-block${allowSplit ? " allow-split" : ""}`} style={{ marginBottom: 18 }}>
-      <div className="print-section-title" style={{ fontSize: 14, fontWeight: 700, color: "#222", marginBottom: 8, paddingBottom: 4, borderBottom: `2px solid ${PK}`, letterSpacing: "-0.3px", pageBreakAfter: "avoid", breakAfter: "avoid" }}>
+    <div className={`print-section-block${allowSplit ? " allow-split" : ""}`} style={{ marginBottom: 26 }}>
+      <div className="print-section-title" style={{ fontSize: 14, fontWeight: 700, color: "#222", marginBottom: 10, paddingBottom: 5, borderBottom: `2px solid ${PK}`, letterSpacing: "-0.3px", pageBreakAfter: "avoid", breakAfter: "avoid" }}>
         {title}
       </div>
       {/* 제목 + 첫 자식이 절대 분리되지 않게 wrap. 본문이 너무 크면 본문 안에서만 분리됨 */}
-      <div style={{ pageBreakBefore: "avoid", breakBefore: "avoid" }}>{children}</div>
+      <div style={{ pageBreakBefore: "avoid", breakBefore: "avoid", lineHeight: 1.8 }}>{children}</div>
     </div>
   );
 }
@@ -14104,12 +14102,11 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   const bestSto = stableMasteredList[0] || recentMastery[0];
   const bestDomain = best.domain !== "—" && best.avg >= 70 ? best.domain : null;
   if (bestSto || bestDomain) {
-    const refName = bestSto ? (bestSto.name || cleanDomainKey(bestSto.domain) || "강점 영역") : cleanDomainKey(bestDomain);
-    const refSuffix = bestDomain && best.avg > 0 ? `(평균 ${best.avg}%)` : "";
-    const refFull = `'${refName}' 영역${refSuffix}`;
-    const lastChar = refSuffix ? refSuffix.slice(-1) : refName.slice(-1);
-    const particle = withParticle(lastChar, "을", "를");
-    sentences.push(`${fn}${josa이가(fn)} 잘하는 ${refFull}${particle} 동기 유발 도구로 활용해 학습을 통합적으로 진행할 계획입니다.`);
+    const refName = bestSto && isValidTaskName(bestSto.name)
+      ? bestSto.name
+      : (bestSto ? (cleanDomainKey(bestSto.domain) || "강점 영역") : cleanDomainKey(bestDomain));
+    const refSuffix = bestDomain && best.avg > 0 ? `(${best.avg}%)` : "";
+    sentences.push(`${fn}${josa이가(fn)} 잘하는 '${refName}'${refSuffix} 영역을 동기 유발 도구로 활용해 학습을 통합적으로 진행할 계획입니다.`);
   } else {
     sentences.push(`${fn}의 현재 발달 단계에 맞춰 개별화된 학습 목표를 운영하고, 데이터를 보면서 효과를 확인할 예정입니다.`);
   }
@@ -17124,10 +17121,9 @@ function GoalDashboard({ stos }) {
                     growthInfo = { first, last, diff, startDate, endDate, hasMultiplePoints, minVal, maxVal, variance, milestoneMsg, milestoneIcon, milestoneColor, rangeMsg };
                   }
                   pdfCardIdx++;
-                  const isPdfBreak = pdfCardIdx > 1 && pdfCardIdx % 2 === 1;
-                  const cardBreakStyle = isPdfBreak ? { pageBreakBefore: "always", breakBefore: "page" } : {};
+                  const cardBreakStyle = { breakInside: "avoid", pageBreakInside: "avoid" };
                   return (
-                    <div key={si} className={"dashboard-card" + (isPdfBreak ? " pdf-card-break" : "")} style={{ background: "#fff", border: "1px solid #E5E5E5", borderLeft: `5px solid ${meta.accent}`, borderRadius: 12, padding: "14px 16px", marginBottom: 10, ...cardBreakStyle }}>
+                    <div key={si} className="dashboard-card" style={{ background: "#fff", border: "1px solid #E5E5E5", borderLeft: `5px solid ${meta.accent}`, borderRadius: 12, padding: "14px 16px", marginBottom: 10, ...cardBreakStyle }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 3 }}>
                         <div style={{ fontSize: 14, fontWeight: 700, color: "#222", lineHeight: 1.4, flex: 1 }}>
                           {s.name}
@@ -17153,14 +17149,6 @@ function GoalDashboard({ stos }) {
                             </div>
                           ) : (
                             <div style={{ fontSize: 16, fontWeight: 700, color: meta.chartLine }}>현재 {growthInfo.last}%</div>
-                          )}
-                          <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px dashed #E5E5E5", fontSize: 11, color: growthInfo.milestoneColor, fontWeight: 600, lineHeight: 1.5 }}>
-                            <span style={{ marginRight: 4 }}>{growthInfo.milestoneIcon}</span>{growthInfo.milestoneMsg}
-                          </div>
-                          {growthInfo.hasMultiplePoints && growthInfo.variance >= 10 && (
-                            <div style={{ marginTop: 4, fontSize: 10, color: "#888", lineHeight: 1.5 }}>
-                              측정 범위 <b style={{ color: "#555" }}>{growthInfo.minVal}%~{growthInfo.maxVal}%</b> · {growthInfo.rangeMsg}
-                            </div>
                           )}
                         </div>
                       )}
