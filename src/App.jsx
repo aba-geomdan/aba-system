@@ -126,6 +126,30 @@ window.storage = {
 
 const PK = "#F5A0B1", PKL = "#FFF0F3", PKD = "#D4728A";
 const GREEN = "#639922", BLUE = "#378ADD", ORANGE = "#EF9F27", RED = "#E24B4A";
+
+// ★ textarea 자동 높이 — 내용만큼 늘어나 내부 스크롤 제거
+function autoGrow(el) {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = (el.scrollHeight + 2) + "px";
+  el.style.overflowY = "hidden";
+}
+// ref 콜백: 마운트 시 1회 높이 맞춤
+const autoGrowRef = (el) => { if (el) autoGrow(el); };
+// value가 바뀌어도(자동생성 등) 높이를 다시 맞추는 공용 textarea
+function AutoTextarea({ value, onChange, style, ...rest }) {
+  const ref = React.useRef(null);
+  React.useEffect(() => { autoGrow(ref.current); }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={e => { autoGrow(e.target); onChange && onChange(e); }}
+      style={{ ...style, resize: "none", overflowY: "hidden" }}
+      {...rest}
+    />
+  );
+}
 const SUPERVISOR_NAME = "민다혜";
 const LOGO_B64 = "data:image/png;base64,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";
 const SUPERVISOR_TITLE = "검단ABA언어행동연구소";
@@ -3829,6 +3853,8 @@ export default function App() {
   const [dashFilter, setDashFilter] = useState("all"); // ★ 대시보드 카드 필터: all | active | terminated
   const [expandedTeachers, setExpandedTeachers] = useState({}); // ★ 대시보드 선생님 펼침 상태 (기본 접힘)
   const [openIepInfoSection, setOpenIepInfoSection] = useState(null); // ★ IEP 추가정보 아코디언 (한 번에 하나, 기본 전체 접힘)
+  const [collapsedSubs, setCollapsedSubs] = useState({}); // ★ IEP 커리큘럼 세부영역 접힘 (사용자가 직접 토글한 것만 기록)
+  const [masteredOpen, setMasteredOpen] = useState(false); // ★ IEP 포함 목표 - 습득 완료 그룹 펼침 (기본 접힘)
 
   const visibleChildren = useMemo(() => {
     // 1) 권한 필터링
@@ -7247,15 +7273,15 @@ export default function App() {
                             {selectedSet.size > 0 ? `선택 ${selectedSet.size}개` : "키워드 선택 후 [✨ 자동 생성]"}
                           </span>
                         </div>
-                        <textarea
+                        <AutoTextarea
                           value={visibleText}
                           onChange={e => {
                             const marker = selected.length > 0 ? `\n\n<!--SELECTED:${selected.join("|")}-->` : "";
                             setInfo(prev => ({ ...prev, [sec.key]: e.target.value + marker }));
                           }}
                           placeholder={`${sec.title}을(를) 자유롭게 작성하거나 위 칩을 사용해 자동 생성하세요. 비워두면 인쇄 생략됩니다.`}
-                          rows={Math.min(8, Math.max(3, (visibleText || "").split("\n").length + 1))}
-                          style={{ width: "100%", padding: "8px 10px", border: "1px solid #e8d0d6", borderRadius: 6, fontSize: 11, fontFamily: "inherit", lineHeight: 1.7, resize: "vertical", boxSizing: "border-box" }}
+                          rows={3}
+                          style={{ width: "100%", padding: "8px 10px", border: "1px solid #e8d0d6", borderRadius: 6, fontSize: 11, fontFamily: "inherit", lineHeight: 1.7, boxSizing: "border-box", minHeight: 60 }}
                         />
                         </div>
                         )}
@@ -7578,12 +7604,23 @@ export default function App() {
                     else if (/레벨\s*3\b/.test(sub.n)) { headerBg = "#f0e6f7"; headerColor = "#7b4ba1"; }
                     else if (/레벨\s*4\b/.test(sub.n)) { headerBg = "#fdecd4"; headerColor = "#b8651a"; }
                   }
+                  const subKey = currentDomain.d + "|" + sub.n;
+                  const userToggled = Object.prototype.hasOwnProperty.call(collapsedSubs, subKey);
+                  const isSubOpen = userToggled ? !collapsedSubs[subKey] : subIncluded > 0;
                   return (
-                    <div key={sub.n} style={{ marginBottom: 10 }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: headerColor, margin: "6px 0 5px", padding: "4px 8px", background: headerBg, borderRadius: 5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div key={sub.n} style={{ marginBottom: 8 }}>
+                      <div
+                        role="button" tabIndex={0}
+                        onClick={() => setCollapsedSubs(prev => ({ ...prev, [subKey]: isSubOpen }))}
+                        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setCollapsedSubs(prev => ({ ...prev, [subKey]: isSubOpen })); } }}
+                        style={{ fontSize: 11, fontWeight: 600, color: headerColor, margin: "6px 0 5px", padding: "5px 9px", background: headerBg, borderRadius: 5, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
                         <span>{sub.n}</span>
-                        <span style={{ fontSize: 9, color: "#aaa" }}>{subIncluded > 0 ? `${subIncluded}/${sub.i.length}개 IEP 포함` : `${sub.i.length}개 항목`}</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 9, color: subIncluded > 0 ? headerColor : "#aaa", fontWeight: subIncluded > 0 ? 700 : 400 }}>{subIncluded > 0 ? `${subIncluded}/${sub.i.length} 포함` : `${sub.i.length}개 항목`}</span>
+                          <span style={{ fontSize: 10, opacity: 0.7 }}>{isSubOpen ? "▾" : "▸"}</span>
+                        </span>
                       </div>
+                      {isSubOpen && (
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 5 }}>
                         {sub.i.map(item => {
                           const existing = goals.find(g => g.domain === currentDomain.d && g.subDomain === sub.n && g.item === item);
@@ -7623,6 +7660,7 @@ export default function App() {
                           );
                         })}
                       </div>
+                      )}
                     </div>
                   );
                 })}
@@ -7636,7 +7674,13 @@ export default function App() {
                     <div>
                       <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: PKD }}>IEP 포함 목표 ({includedGoals.length}개)</h3>
                       <div style={{ fontSize: 11, color: "#767676", marginTop: 3 }}>
-                        전체 {goals.length}개 중 {includedGoals.length}개가 IEP·데이터 시트·보고서에 반영됩니다.
+                        {(() => {
+                          const m = includedGoals.filter(g => g.status === "mastered").length;
+                          const a = includedGoals.length - m;
+                          return m > 0
+                            ? <>진행 중 <b style={{ color: PKD }}>{a}개</b> · <span style={{ color: "#5a8c1f", fontWeight: 600 }}>습득 완료 {m}개</span> (아래 묶음)</>
+                            : <>전체 {goals.length}개 중 {includedGoals.length}개가 IEP·데이터 시트·보고서에 반영됩니다.</>;
+                        })()}
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: 6 }}>
@@ -7663,10 +7707,13 @@ export default function App() {
                   )}
 
                   {includedGoals.length > 0 && (
-                    <div style={{ maxHeight: "55vh", overflowY: "auto", paddingRight: 2 }}>
+                    <div style={{ paddingRight: 2 }}>
                       {(() => {
+                        const activeGoals = includedGoals.filter(g => g.status !== "mastered");
+                        const masteredGoals = includedGoals.filter(g => g.status === "mastered");
+                        const renderGroup = (goalList) => {
                         const bySource = { "ELCAR": [], "VB-MAPP": [], "ESDM": [], "기타": [] };
-                        includedGoals.forEach(g => {
+                        goalList.forEach(g => {
                           const src = g.source || "ELCAR";
                           if (bySource[src]) bySource[src].push(g);
                           else bySource["기타"].push(g);
@@ -7720,6 +7767,35 @@ export default function App() {
                             </div>
                           );
                         });
+                        };
+                        return (
+                          <>
+                            {activeGoals.length > 0 ? renderGroup(activeGoals) : (
+                              <div style={{ fontSize: 12, color: "#aaa", textAlign: "center", padding: "16px 0" }}>진행 중인 목표가 없습니다 (모두 습득 완료)</div>
+                            )}
+                            {masteredGoals.length > 0 && (
+                              <div style={{ marginTop: 14, border: `1px solid ${GREEN}`, borderRadius: 8, overflow: "hidden", background: "#f7fbf2" }}>
+                                <div
+                                  role="button" tabIndex={0}
+                                  onClick={() => setMasteredOpen(v => !v)}
+                                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setMasteredOpen(v => !v); } }}
+                                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", cursor: "pointer", background: masteredOpen ? "#eef7e3" : "#f7fbf2" }}>
+                                  <span style={{ fontSize: 12.5, fontWeight: 700, color: "#3d6014" }}>✓ 습득 완료 목표 {masteredGoals.length}개</span>
+                                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <span style={{ fontSize: 9.5, color: "#5a8c1f" }}>{masteredOpen ? "접기" : "펼치기"}</span>
+                                    <span style={{ fontSize: 12, color: "#7bb33f" }}>{masteredOpen ? "▾" : "▸"}</span>
+                                  </span>
+                                </div>
+                                {masteredOpen && (
+                                  <div style={{ padding: "4px 10px 10px", borderTop: `1px solid ${GREEN}` }}>
+                                    <div style={{ height: 4 }} />
+                                    {renderGroup(masteredGoals)}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        );
                       })()}
                     </div>
                   )}
@@ -7872,12 +7948,12 @@ export default function App() {
                                     </button>
                                   ))}
                                 </div>
-                                <textarea
+                                <AutoTextarea
                                   value={value}
                                   onChange={e => updateObs(c.key, e.target.value)}
                                   readOnly={!unlocked}
                                   placeholder="3단계 버튼을 누르면 예시 문구가 자동 입력됩니다. 직접 입력·수정은 [✏️ 클릭하여 수정] 버튼을 눌러주세요."
-                                  rows={4}
+                                  rows={3}
                                   style={{
                                     width: "100%",
                                     border: "none",
@@ -7885,12 +7961,12 @@ export default function App() {
                                     fontSize: 12,
                                     lineHeight: 1.6,
                                     fontFamily: "inherit",
-                                    resize: "vertical",
                                     outline: "none",
                                     background: unlocked ? "#fff" : "#fafafa",
                                     color: unlocked ? "#333" : "#555",
                                     cursor: unlocked ? "text" : "default",
-                                    boxSizing: "border-box"
+                                    boxSizing: "border-box",
+                                    minHeight: 56
                                   }}
                                 />
                               </div>
@@ -7942,20 +8018,20 @@ export default function App() {
                                 </button>
                               </div>
                               {hasLevelData || hasOverride ? (
-                                <textarea
+                                <AutoTextarea
                                   value={displayValue}
                                   onChange={e => setInfo(prev => ({ ...prev, iepObservationSummaryOverride: e.target.value }))}
                                   readOnly={!summaryUnlocked}
-                                  rows={5}
+                                  rows={4}
                                   style={{
                                     width: "100%", border: "none", padding: "12px 14px",
                                     fontSize: 12, lineHeight: 1.85,
                                     color: summaryUnlocked ? "#333" : "#555",
-                                    fontFamily: "inherit", outline: "none", resize: "vertical",
+                                    fontFamily: "inherit", outline: "none",
                                     boxSizing: "border-box",
                                     background: summaryUnlocked ? "#fff" : "#fafafa",
                                     cursor: summaryUnlocked ? "text" : "default",
-                                    textAlign: "justify"
+                                    textAlign: "justify", minHeight: 70
                                   }}
                                   placeholder="종합 요약을 자유롭게 작성/수정하세요. 인쇄 시 4번 섹션 표 아래에 표시됩니다."
                                 />
@@ -9752,16 +9828,16 @@ function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSectio
                   });
                   rows.forEach(row => {
                     const firstTd = row.querySelector("td");
-                    if (firstTd && firstTd.style.minWidth === "140px") {
-                      firstTd.style.width = "200px";
-                      firstTd.style.maxWidth = "200px";
-                      firstTd.style.minWidth = "200px";
+                    if (firstTd && (firstTd.style.minWidth === "140px" || firstTd.style.minWidth === "118px")) {
+                      firstTd.style.width = "90pt";
+                      firstTd.style.maxWidth = "90pt";
+                      firstTd.style.minWidth = "90pt";
                       firstTd.style.whiteSpace = "nowrap";
                       firstTd.style.overflow = "hidden";
                       firstTd.style.textOverflow = "ellipsis";
                       firstTd.style.wordBreak = "normal";
-                      firstTd.style.fontSize = "9pt";
-                      firstTd.style.padding = "3px 8px";
+                      firstTd.style.fontSize = "8pt";
+                      firstTd.style.padding = "1pt 6pt";
                       firstTd.style.setProperty("border-right", "1.5px solid #555", "important");
                     }
                   });
@@ -9772,11 +9848,11 @@ function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSectio
                   });
                   const firstHeaderTh = tbl.querySelector("thead tr:last-child th:first-child") || tbl.querySelector("thead th:first-child");
                   if (firstHeaderTh) {
-                    firstHeaderTh.style.width = "200px";
-                    firstHeaderTh.style.minWidth = "200px";
-                    firstHeaderTh.style.maxWidth = "200px";
-                    firstHeaderTh.style.fontSize = "9pt";
-                    firstHeaderTh.style.padding = "3px 8px";
+                    firstHeaderTh.style.width = "90pt";
+                    firstHeaderTh.style.minWidth = "90pt";
+                    firstHeaderTh.style.maxWidth = "90pt";
+                    firstHeaderTh.style.fontSize = "8pt";
+                    firstHeaderTh.style.padding = "1pt 6pt";
                     firstHeaderTh.style.setProperty("border-right", "1.5px solid #555", "important");
                   }
                   tbl.querySelectorAll("thead th").forEach(th => {
@@ -9820,6 +9896,8 @@ function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSectio
 '/* VB-MAPP 표 */\n' +
 '.vbmapp-grid{border:1.5px solid #666!important;border-collapse:collapse!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;page-break-inside:avoid!important;break-inside:avoid!important}\n' +
 '.vbmapp-grid td,.vbmapp-grid th{border:1px solid #888!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;background:inherit!important;color:#333!important}\n' +
+'.vbmapp-grid td:not(:first-child),.vbmapp-grid thead th:not(:first-child){width:13pt!important;min-width:13pt!important;max-width:13pt!important;height:13pt!important;padding:0!important;font-size:7pt!important}\n' +
+'.vbmapp-grid td:first-child{width:90pt!important;min-width:90pt!important;max-width:90pt!important;font-size:8pt!important;padding:1pt 6pt!important}\n' +
 '.vbmapp-grid td:first-child,.vbmapp-grid th:first-child{border-right:1.5px solid #555!important}\n' +
 '.vbmapp-grid thead th{border-bottom:1.5px solid #555!important}\n' +
 '/* 차트 */\n' +
@@ -9973,14 +10051,14 @@ cleanedHTML + '\n' +
             </div>
           )}
           {isIepMode && (
-            <div style={{ fontSize: 20, fontWeight: 400, color: "#444", marginTop: 12, marginBottom: 72 }}>
+            <div style={{ fontSize: 20, fontWeight: 400, color: "#444", marginTop: 12, marginBottom: 48 }}>
               (IEP, Individualized Educational Plan)
             </div>
           )}
 
           {/* IEP 표지 정보표 — 표지와 같은 페이지에 포함 */}
           {isIepMode && (
-            <div style={{ paddingTop: 110 }}>
+            <div style={{ paddingTop: 60 }}>
               <table className="iep-cover-info-table" style={{
                 margin: "0 auto",
                 borderCollapse: "collapse",
@@ -10000,8 +10078,8 @@ cleanedHTML + '\n' +
                     ["수업 시작일", info.startDate || today]
                   ].map(([k, v]) => (
                     <tr key={k}>
-                      <td style={{ padding: "10px 14px", border: `1.5px solid ${PK}`, background: PKL, fontWeight: 600, color: "#555", textAlign: "center", letterSpacing: "1px", boxSizing: "border-box", whiteSpace: "nowrap" }}>{k}</td>
-                      <td style={{ padding: "10px 14px", border: `1.5px solid ${PK}`, background: "#fff", textAlign: "center", color: "#333", boxSizing: "border-box" }}>{v}</td>
+                      <td style={{ padding: "6px 14px", border: `1.5px solid ${PK}`, background: PKL, fontWeight: 600, color: "#555", textAlign: "center", letterSpacing: "1px", boxSizing: "border-box", whiteSpace: "nowrap" }}>{k}</td>
+                      <td style={{ padding: "6px 14px", border: `1.5px solid ${PK}`, background: "#fff", textAlign: "center", color: "#333", boxSizing: "border-box" }}>{v}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -10935,7 +11013,7 @@ cleanedHTML + '\n' +
         {/* 두 모드 모두 동일한 디자인 (중간보고서 스타일로 통일) — IEP는 동의 본문만 추가 */}
         {isIepMode ? (
           <div className="signature-section" style={{ pageBreakBefore: "always", breakBefore: "page", pageBreakInside: "avoid", breakInside: "avoid" }}>
-           <div style={{ borderTop: `2px solid ${PK}`, paddingTop: 18 }}>
+           <div style={{ paddingTop: 4 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: PKD, marginBottom: 12, letterSpacing: "0.5px", textAlign: "center" }}>개별화 중재 계획안 작성 확인</div>
             {/* IEP 고유: 작성 확인 본문 */}
             <div style={{ textAlign: "center", padding: "10px 0 16px", fontSize: 11, lineHeight: 1.85, color: "#555" }}>
@@ -10982,7 +11060,7 @@ cleanedHTML + '\n' +
         ) : (
           /* ═══ 서명란 — USER_APP 4076~4097줄 그대로 ═══ */
           <div className="signature-section" style={{ pageBreakBefore: "always", breakBefore: "page", pageBreakInside: "avoid", breakInside: "avoid" }}>
-           <div style={{ borderTop: `2px solid ${PK}`, paddingTop: 18 }}>
+           <div style={{ paddingTop: 4 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: PKD, marginBottom: 12, letterSpacing: "0.5px", textAlign: "center" }}>확인 및 서명</div>
             <table style={{ width: "75%", margin: "0 auto", borderCollapse: "collapse", fontSize: 11 }} className="signature-table">
               <thead><tr>
@@ -11035,9 +11113,7 @@ cleanedHTML + '\n' +
             return `${childName}의 본 보고 기간 동안 확인된 진행 양상을 토대로, 다음 단계의 중재를 진행합니다.`;
           })()}
         </div>
-        <div style={{ marginTop: 12, fontSize: 9, color: "#999", textAlign: "center", letterSpacing: "0.3px", lineHeight: 1.6, paddingTop: 8, borderTop: "0.5px solid #eee" }} className="report-copyright">
-          {REPORT_COPYRIGHT}
-        </div>
+        {/* ★ [제거] 본문 끝 전체 저작권 문구 — 매 페이지 하단(@bottom-center) 문구와 중복되어 삭제 */}
       </div>
 
       {/* 인쇄 전용 CSS — USER_APP과 100% 동일 (4140~4207줄) */}
@@ -14685,14 +14761,14 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                       {selectedSet.size > 0 ? `선택: ${selectedSet.size}개 — [✨ 자동 생성] 누르면 단락 작성됩니다` : "키워드를 먼저 선택하세요"}
                     </span>
                   </div>
-                  <textarea
+                  <AutoTextarea
                     value={visibleText}
                     onChange={e => {
                       const marker = selected.length > 0 ? `\n\n<!--SELECTED:${selected.join("|")}-->` : "";
                       setInfo(prev => ({ ...prev, finalReferralReason: e.target.value + marker }));
                     }}
                     placeholder="키워드 선택 후 [✨ 자동 생성]을 누르면 자연스러운 단락이 들어갑니다. 직접 입력·수정도 가능합니다."
-                    rows={6}
+                    rows={3}
                     style={{ width: "100%", padding: "8px 10px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 11.5, fontFamily: "inherit", lineHeight: 1.75, resize: "vertical", boxSizing: "border-box" }}
                   />
                 </>
@@ -14784,14 +14860,14 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                       {selectedSetEnd.size > 0 ? `선택: ${selectedSetEnd.size}개 — [✨ 자동 생성] 누르면 단락 작성됩니다` : "키워드를 먼저 선택하세요"}
                     </span>
                   </div>
-                  <textarea
+                  <AutoTextarea
                     value={visibleTextEnd}
                     onChange={e => {
                       const marker = selectedEnd.length > 0 ? `\n\n<!--SELECTED:${selectedEnd.join("|")}-->` : "";
                       setInfo(prev => ({ ...prev, finalEndReason: e.target.value + marker }));
                     }}
                     placeholder="키워드 선택 후 [✨ 자동 생성]을 누르면 자연스러운 단락이 들어갑니다. 직접 입력·수정도 가능합니다."
-                    rows={5}
+                    rows={3}
                     style={{ width: "100%", padding: "8px 10px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 11.5, fontFamily: "inherit", lineHeight: 1.75, resize: "vertical", boxSizing: "border-box" }}
                   />
                 </>
@@ -14823,11 +14899,11 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
               ✨ 자동 생성
             </button>
           </div>
-          <textarea
+          <AutoTextarea
             value={info.finalSummary || ""}
             onChange={e => setInfo(prev => ({ ...prev, finalSummary: e.target.value }))}
             placeholder="[✨ 자동 생성] 버튼을 눌러 시작하거나 직접 작성하세요"
-            rows={8}
+            rows={3}
             style={{ width: "100%", padding: "10px 12px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 12, fontFamily: "inherit", lineHeight: 1.8, resize: "vertical", boxSizing: "border-box" }}
           />
         </div>
@@ -14853,11 +14929,11 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
               ✨ 자동 생성
             </button>
           </div>
-          <textarea
+          <AutoTextarea
             value={info.finalGrowth || ""}
             onChange={e => setInfo(prev => ({ ...prev, finalGrowth: e.target.value }))}
             placeholder="[✨ 자동 생성] 버튼을 눌러 시작하거나 직접 작성하세요"
-            rows={8}
+            rows={3}
             style={{ width: "100%", padding: "10px 12px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 12, fontFamily: "inherit", lineHeight: 1.8, resize: "vertical", boxSizing: "border-box" }}
           />
         </div>
@@ -14962,14 +15038,14 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                     {selectedSet.size > 0 ? `선택: ${selectedSet.size}개 — [✨ 자동 생성] 누르면 변화 양상이 작성됩니다` : "특이 문제행동 없으면 비워두셔도 됩니다"}
                   </span>
                 </div>
-                <textarea
+                <AutoTextarea
                   value={visibleText}
                   onChange={e => {
                     const marker = selected.length > 0 ? `\n\n<!--SELECTED:${selected.join("|")}-->` : "";
                     setInfo(prev => ({ ...prev, finalBehaviorChange: e.target.value + marker }));
                   }}
                   placeholder="치료 시작 시 보였던 문제행동의 변화를 작성하세요. 비워두면 인쇄에서 자동 생략됩니다."
-                  rows={6}
+                  rows={3}
                   style={{ width: "100%", padding: "10px 12px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 12, fontFamily: "inherit", lineHeight: 1.85, resize: "vertical", boxSizing: "border-box" }}
                 />
               </>
@@ -15080,14 +15156,14 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                     {selectedSet.size > 0 ? `선택: ${selectedSet.size}개 — [✨ 자동 생성] 누르면 가정 유지방안이 작성됩니다` : "키워드를 먼저 선택하세요"}
                   </span>
                 </div>
-                <textarea
+                <AutoTextarea
                   value={visibleText}
                   onChange={e => {
                     const marker = selected.length > 0 ? `\n\n<!--SELECTED:${selected.join("|")}-->` : "";
                     setInfo(prev => ({ ...prev, finalHomeMaintenance: e.target.value + marker }));
                   }}
                   placeholder="키워드 선택 후 [✨ 자동 생성]을 누르면 자연스러운 가정 유지방안이 들어갑니다. 직접 입력·수정도 가능합니다."
-                  rows={10}
+                  rows={3}
                   style={{ width: "100%", padding: "10px 12px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 12, fontFamily: "inherit", lineHeight: 1.85, resize: "vertical", boxSizing: "border-box" }}
                 />
               </>
@@ -15199,14 +15275,14 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                     {selectedSet.size > 0 ? `선택: ${selectedSet.size}개 — 다른 기관 이동 시 참고용` : "다른 기관으로 이동 예정 시에만 작성하세요"}
                   </span>
                 </div>
-                <textarea
+                <AutoTextarea
                   value={visibleText}
                   onChange={e => {
                     const marker = selected.length > 0 ? `\n\n<!--SELECTED:${selected.join("|")}-->` : "";
                     setInfo(prev => ({ ...prev, finalHandover: e.target.value + marker }));
                   }}
                   placeholder="다른 기관으로 이동할 경우, 효과적이었던 강화제·선호 활동·주의사항 등을 작성합니다. 비워두면 인쇄 시 자동 생략됩니다."
-                  rows={8}
+                  rows={3}
                   style={{ width: "100%", padding: "10px 12px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 12, fontFamily: "inherit", lineHeight: 1.85, resize: "vertical", boxSizing: "border-box" }}
                 />
               </>
@@ -15314,14 +15390,14 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                     {selectedSet.size > 0 ? `선택: ${selectedSet.size}개 — [✨ 자동 생성] 누르면 권고사항이 작성됩니다` : "키워드를 먼저 선택하세요"}
                   </span>
                 </div>
-                <textarea
+                <AutoTextarea
                   value={visibleText}
                   onChange={e => {
                     const marker = selected.length > 0 ? `\n\n<!--SELECTED:${selected.join("|")}-->` : "";
                     setInfo(prev => ({ ...prev, finalRecommendations: e.target.value + marker }));
                   }}
                   placeholder="키워드 선택 후 [✨ 자동 생성]을 누르면 자연스러운 권고사항이 들어갑니다. 직접 입력·수정도 가능합니다."
-                  rows={8}
+                  rows={3}
                   style={{ width: "100%", padding: "10px 12px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 12, fontFamily: "inherit", lineHeight: 1.85, resize: "vertical", boxSizing: "border-box" }}
                 />
               </>
@@ -16217,7 +16293,7 @@ function ReportGeneratorSection({
         {/* 중재 전략 */}
         <div style={{ padding: 12, background: "#fff", borderRadius: 10, border: "1px solid #f0e0e5" }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 8 }}>🎯 사용 중인 중재 전략</div>
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", maxHeight: 130, overflowY: "auto", marginBottom: 8 }}>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
             {REPORT_STRATS.map(s => {
               const on = reportSelStrats.includes(s);
               return (
@@ -16509,13 +16585,13 @@ function ReportGeneratorSection({
                       {selectedSet.size > 0 ? `선택: ${selectedSet.size}개` : "키워드를 먼저 선택하세요"}
                     </span>
                   </div>
-                  <textarea
+                  <AutoTextarea
                     value={visibleText}
                     onChange={e => {
                       const marker = selected.length > 0 ? `\n\n<!--SELECTED:${selected.join("|")}-->` : "";
                       updateSection(key, e.target.value + marker);
                     }}
-                    rows={Math.min(10, (visibleText || "").split("\n").length + 2)}
+                    rows={3}
                     placeholder={placeholderText}
                     style={{
                       width: "100%", padding: "10px 12px",
@@ -16532,16 +16608,16 @@ function ReportGeneratorSection({
             return (
               <div key={key} style={{ marginBottom: 18 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 6 }}>{displayLabel(key)}</div>
-                <textarea
+                <AutoTextarea
                   value={reportSections[key] || ""}
                   onChange={e => updateSection(key, e.target.value)}
-                  rows={Math.min(10, (reportSections[key] || "").split("\n").length + 2)}
+                  rows={3}
                   style={{
                     width: "100%", padding: "10px 12px",
                     border: "1px solid #e8d0d6", borderRadius: 8,
                     fontSize: 12, lineHeight: 1.8, color: "#333",
-                    fontFamily: "inherit", outline: "none", resize: "vertical",
-                    boxSizing: "border-box", background: "#fafbfc"
+                    fontFamily: "inherit", outline: "none",
+                    boxSizing: "border-box", background: "#fafbfc", minHeight: 70
                   }}
                 />
               </div>
