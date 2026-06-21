@@ -22,7 +22,7 @@ function _currentOwner() {
     const raw = localStorage.getItem("gd-aba-current-user");
     if (!raw) return "__nobody__";
     const u = JSON.parse(raw);
-    return (u && u.name) ? u.name : "__noboday__";
+    return (u && u.name) ? u.name : "__nobody__";
   } catch (e) {
     return "__nobody__";
   }
