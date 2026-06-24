@@ -10622,15 +10622,27 @@ cleanedHTML + '\n' +
               if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
                 cutoffDate = cutoffArchives[0].savedAt.slice(0, 10);
               }
+              // ★ 보고 기간 연동 — 표지 '치료기간'과 동일한 범위로 그래프 날짜 제한
+              const periodStart = isFinalMode
+                ? (info.evalStart || "")
+                : (info.pStart || info.evalStart || "");
+              const periodEnd = isFinalMode
+                ? (info.finalEndDate || info.evalEnd || "")
+                : (info.pEnd || info.evalEnd || "");
+              const inPeriod = (d) => {
+                if (periodStart && d < periodStart) return false;
+                if (periodEnd && d > periodEnd) return false;
+                return true;
+              };
               const dateSet = new Set();
               goals.forEach(g => {
                 (g.tasks || []).forEach(t => {
                   Object.keys(t.daily || {}).forEach(d => {
-                    if (!cutoffDate || d >= cutoffDate) dateSet.add(d);
+                    if ((!cutoffDate || d >= cutoffDate) && inPeriod(d)) dateSet.add(d);
                   });
                 });
                 Object.keys(g.daily || {}).forEach(d => {
-                  if (!cutoffDate || d >= cutoffDate) dateSet.add(d);
+                  if ((!cutoffDate || d >= cutoffDate) && inPeriod(d)) dateSet.add(d);
                 });
               });
               const allDates = [...dateSet].sort();
@@ -14161,6 +14173,18 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
     if (effectiveArchiveList && effectiveArchiveList.length > 0 && effectiveArchiveList[0].savedAt) {
       cutoffDate = effectiveArchiveList[0].savedAt.slice(0, 10);
     }
+    // ★ 보고 기간 연동 — 보고서 상단 '치료기간'과 동일한 시작/종료일로 그래프 날짜를 제한
+    const periodStart = isFinalMode
+      ? (info.evalStart || "")
+      : (info.pStart || info.evalStart || "");
+    const periodEnd = isFinalMode
+      ? (info.finalEndDate || info.evalEnd || "")
+      : (info.pEnd || info.evalEnd || "");
+    const inPeriod = (d) => {
+      if (periodStart && d < periodStart) return false;
+      if (periodEnd && d > periodEnd) return false;
+      return true;
+    };
     const hasAnyData = (day) => {
       if (!day) return false;
       if (Array.isArray(day.trials)) return day.trials.some(x => x === "+" || x === "-");
@@ -14172,16 +14196,18 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
       (g.tasks || []).forEach(t => {
         Object.keys(t.daily || {}).forEach(d => {
           if (cutoffDate && d <= cutoffDate) return;  // 컷오프 이전 제외
+          if (!inPeriod(d)) return;                   // ★ 보고 기간 밖 제외
           if (hasAnyData(t.daily[d])) set.add(d);
         });
       });
       Object.keys(g.daily || {}).forEach(d => {
         if (cutoffDate && d <= cutoffDate) return;  // 컷오프 이전 제외
+        if (!inPeriod(d)) return;                   // ★ 보고 기간 밖 제외
         if (hasAnyData(g.daily[d])) set.add(d);
       });
     });
     return [...set].sort();
-  }, [goals, effectiveArchiveList]);
+  }, [goals, effectiveArchiveList, isFinalMode, info.evalStart, info.evalEnd, info.pStart, info.pEnd, info.finalEndDate]);
 
   const goalsWithStats = useMemo(() => goals.map(g => {
     const tl = getTimeline(g);
