@@ -5030,6 +5030,15 @@ export default function App() {
         cutoffDate = latestArchive.savedAt.slice(0, 10);
       }
     }
+    // ★ 보고 기간 연동 — stosForReport와 동일 (이 정의가 없어서 흰화면 발생했었음)
+    const _isFinal = reportMode === "final";
+    const periodStart = _isFinal ? (info.evalStart || "") : (info.pStart || info.evalStart || "");
+    const periodEnd = _isFinal ? (info.finalEndDate || info.evalEnd || "") : (info.pEnd || info.evalEnd || "");
+    const inPeriod = (d) => {
+      if (periodStart && d < periodStart) return false;
+      if (periodEnd && d > periodEnd) return false;
+      return true;
+    };
     return includedGoals
       .filter(g => {
         if (cutoffDate && g.status === "mastered") {
@@ -5091,7 +5100,7 @@ export default function App() {
       if (g.status === "완료" && g.points.length === 0) return false;
       return true;
     });
-  }, [includedGoals, effectiveArchiveList, needsReportCalc]);
+  }, [includedGoals, effectiveArchiveList, needsReportCalc, reportMode, info.evalStart, info.evalEnd, info.pStart, info.pEnd, info.finalEndDate]);
 
   const currentAvgs = useMemo(() => {
     if (!needsReportCalc) return [];
