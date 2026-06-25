@@ -16940,6 +16940,7 @@ function GoalDashboard({ stos }) {
 
   const BigChart = ({ points, color, listBoundaries }) => {
     if (!points || points.length < 1) return null;
+    const safeColor = (typeof color === "string" && color) ? color : "#D4728A";
     const W = 320, H = 150, padL = 34, padR = 14, padTop = 22, padBottom = 30;
     const innerW = W - padL - padR;
     const innerH = H - padTop - padBottom;
@@ -16973,8 +16974,8 @@ function GoalDashboard({ stos }) {
           {grid}
           <line x1={padL} y1={y80} x2={W - padR} y2={y80} stroke="#3D7A0F" strokeWidth="1.2" strokeDasharray="4,3" opacity="0.85" />
           <text x={W - padR - 2} y={y80 - 3} fontSize="8.5" fill="#3D7A0F" textAnchor="end" fontWeight="800">숙달 80%</text>
-          <circle cx={cx} cy={cy} r="5" fill={color} stroke="#fff" strokeWidth="2" />
-          <text x={cx} y={cy - 10} fontSize="9" fill={color} textAnchor="middle" fontWeight="700">{p.value}%</text>
+          <circle cx={cx} cy={cy} r="5" fill={safeColor} stroke="#fff" strokeWidth="2" />
+          <text x={cx} y={cy - 10} fontSize="9" fill={safeColor} textAnchor="middle" fontWeight="700">{p.value}%</text>
           <text x={cx} y={H - padBottom + 14} fontSize="8" fill="#888" textAnchor="middle">{shortDate(p.date)}</text>
           {listBoundaries && listBoundaries.length > 0 && (
             <text x={padL + 2} y={padTop - 7} fontSize="8.5" fill="#888" fontWeight="700">{listBoundaries[0].listLabel}</text>
@@ -16986,29 +16987,29 @@ function GoalDashboard({ stos }) {
     const coords = points.map((p, i) => ({ x: padL + i * stepX, y: yOf(p.value), value: p.value, date: p.date }));
     const pathD = coords.map((c, i) => `${i === 0 ? "M" : "L"}${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(" ");
     const fillD = pathD + ` L${coords[coords.length - 1].x.toFixed(1)},${(H - padBottom).toFixed(1)} L${coords[0].x.toFixed(1)},${(H - padBottom).toFixed(1)} Z`;
-    const gradId = `grad-${color.replace("#", "")}-${Math.random().toString(36).substr(2, 5)}`;
+    const gradId = `grad-${safeColor.replace("#", "")}-${Math.random().toString(36).substr(2, 5)}`;
     const every = labelEvery(coords.length);
     return (
       <svg className="dashboard-bigchart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "0 auto", width: `${W}px`, height: `${H}px`, maxWidth: "100%" }}>
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.25" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
+            <stop offset="0%" stopColor={safeColor} stopOpacity="0.25" />
+            <stop offset="100%" stopColor={safeColor} stopOpacity="0" />
           </linearGradient>
         </defs>
         {grid}
         <line x1={padL} y1={y80} x2={W - padR} y2={y80} stroke="#3D7A0F" strokeWidth="1.2" strokeDasharray="4,3" opacity="0.85" />
         <text x={W - padR - 2} y={y80 - 3} fontSize="8.5" fill="#3D7A0F" textAnchor="end" fontWeight="800">숙달 80%</text>
         <path d={fillD} fill={`url(#${gradId})`} />
-        <path d={pathD} fill="none" stroke={color} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={pathD} fill="none" stroke={safeColor} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
         {/* 점 + 값 + 날짜 */}
         {coords.map((c, i) => {
           const isLast = i === coords.length - 1;
           const showDate = (i % every === 0) || isLast;
           return (
             <g key={"pt" + i}>
-              <circle cx={c.x} cy={c.y} r={isLast ? 3.8 : 2.6} fill={color} stroke={isLast ? "#fff" : "none"} strokeWidth={isLast ? 1.5 : 0} />
-              <text x={c.x} y={c.y - 7} fontSize="8" fill={color} textAnchor="middle" fontWeight="700">{c.value}%</text>
+              <circle cx={c.x} cy={c.y} r={isLast ? 3.8 : 2.6} fill={safeColor} stroke={isLast ? "#fff" : "none"} strokeWidth={isLast ? 1.5 : 0} />
+              <text x={c.x} y={c.y - 7} fontSize="8" fill={safeColor} textAnchor="middle" fontWeight="700">{c.value}%</text>
               {showDate && <text x={c.x} y={H - padBottom + 14} fontSize="7.5" fill="#888" textAnchor="middle">{shortDate(c.date)}</text>}
             </g>
           );
@@ -17054,7 +17055,7 @@ function GoalDashboard({ stos }) {
         return currCategoryOrder.map(curr => {
           const domains = currOrder[curr];
           if (domains.length === 0) return null;
-          const meta = CURR_COLOR[curr];
+          const meta = CURR_COLOR[curr] || CURR_COLOR.other || { accent: "#D4728A", bg: "#FFF0F3", label: "평가", chartLine: "#D4728A", deep: "#A64B63" };
           let pdfCardIdx = 0;
           const isPdfCurrBreak = renderedCurrCount > 0;
           renderedCurrCount++;
