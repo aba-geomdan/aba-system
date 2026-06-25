@@ -1270,6 +1270,13 @@ function buildInterimStrengths(domAvgs, stos, info) {
   const 이가 = (w) => has받침(w) ? "이" : "가";
   const 은는 = (w) => has받침(w) ? "은" : "는";
   const 을를 = (w) => has받침(w) ? "을" : "를";
+  // ★ 데이터 측정 날짜를 한글로 (예: "6월 22일")
+  const kDate = (d) => {
+    if (!d) return "";
+    const m = String(d).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (!m) return "";
+    return `${parseInt(m[2])}월 ${parseInt(m[3])}일`;
+  };
 
   const strengths = [];
 
@@ -1360,6 +1367,12 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
     return (code - 0xAC00) % 28 !== 0;
   };
   const 이가 = (w) => has받침(w) ? "이" : "가";
+  const kDate = (d) => {
+    if (!d) return "";
+    const m = String(d).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (!m) return "";
+    return `${parseInt(m[2])}월 ${parseInt(m[3])}일`;
+  };
 
   const highlights = [];
   const activeStos = stos.filter(s => !s.isPaused);
@@ -2295,6 +2308,9 @@ function isValidTaskName(name) {
 function calcDayRateGlobal(day, plannedTrials) {
   if (!day) return null;
   if (Array.isArray(day.trials)) {
+    // ★ 실제 입력된 시도(+/-)가 하나도 없으면 '측정 안 한 날' → null (그래프에 점 안 찍힘)
+    const entered = day.trials.filter(x => x === "+" || x === "-");
+    if (entered.length === 0) return null;
     if (plannedTrials != null) {
       const N = Math.max(1, Math.min(99, plannedTrials));
       let pluses = 0;
@@ -2303,8 +2319,6 @@ function calcDayRateGlobal(day, plannedTrials) {
       }
       return Math.round((pluses / N) * 100);
     }
-    const entered = day.trials.filter(x => x === "+" || x === "-");
-    if (entered.length === 0) return null;
     const pluses = entered.filter(x => x === "+").length;
     return Math.round((pluses / entered.length) * 100);
   }
@@ -4940,6 +4954,15 @@ export default function App() {
         cutoffDate = latestArchive.savedAt.slice(0, 10);
       }
     }
+    // ★ 보고 기간 연동 — 성장추이 그래프와 동일한 범위로 세부목표 차트/본문 날짜 제한
+    const _isFinal = reportMode === "final";
+    const periodStart = _isFinal ? (info.evalStart || "") : (info.pStart || info.evalStart || "");
+    const periodEnd = _isFinal ? (info.finalEndDate || info.evalEnd || "") : (info.pEnd || info.evalEnd || "");
+    const inPeriod = (d) => {
+      if (periodStart && d < periodStart) return false;
+      if (periodEnd && d > periodEnd) return false;
+      return true;
+    };
     const result = [];
     includedGoals.forEach(g => {
       (g.tasks || []).forEach(t => {
@@ -4953,6 +4976,7 @@ export default function App() {
           const v = calcDayRateGlobal(day, t.plannedTrials);
           if (v === null) return null;
           if (cutoffDate && date <= cutoffDate) return null;
+          if (!inPeriod(date)) return null;
           return { date, value: v };
         }).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date));
         const latestPoint = points.length > 0 ? points[points.length - 1] : null;
@@ -4981,7 +5005,7 @@ export default function App() {
       });
     });
     return result;
-  }, [includedGoals, effectiveArchiveList, needsReportCalc]);
+  }, [includedGoals, effectiveArchiveList, needsReportCalc, reportMode, info.evalStart, info.evalEnd, info.pStart, info.pEnd, info.finalEndDate]);
 
   const firstDataDate = useMemo(() => {
     if (!needsReportCalc) return null;
@@ -5024,6 +5048,7 @@ export default function App() {
           const v = calcDayRateGlobal(day, t.plannedTrials);
           if (v === null) return null;
           if (cutoffDate && date <= cutoffDate) return null;
+          if (!inPeriod(date)) return null;
           return { date, value: v };
         }).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date));
         if (taskPoints.length > 0) {
@@ -8946,7 +8971,7 @@ function DomainLevelEditor({ includedGoals, overrides, setOverrides }) {
             📝 영역별 현행 수준 편집
           </h3>
           <div style={{ fontSize: 12, color: "#777", marginTop: 4, lineHeight: 1.6 }}>
-            각 영역의 초안이 자동 생성되어 있습니다. <b style={{ color: PKD }}>textarea에 수정하면 타이핑 멈춘 뒤 자동 저장</b>되며, <b>IEP 계획안 인쇄물과 중간보고서에 즉시 반영</b>됩니다.
+            각 영역의 초안이 자동 생성되어 있습니다. <b style={{ color: PKD }}>입력칸에서 수정하면 타이핑 멈춘 뒤 자동 저장</b>되며, <b>IEP 계획안 인쇄물과 중간보고서에 즉시 반영</b>됩니다.
           </div>
         </div>
         <div style={{ padding: "6px 12px", background: PKL, color: PKD, borderRadius: 8, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>
@@ -9050,18 +9075,18 @@ function DomainLevelEditInline({ domain, autoText, override, onSave, onReset }) 
 
   return (
     <div style={{ background: "#fff" }}>
-      <textarea
+      <AutoTextarea
         value={text}
         onChange={e => handleChange(e.target.value)}
-        rows={9}
+        rows={6}
         placeholder="이 영역의 현행 수준을 자유롭게 작성하세요. 타이핑 멈추면 자동 저장됩니다."
         style={{
           width: "100%", border: "none",
           padding: "16px 20px",
           fontSize: 13.5, lineHeight: 1.9, color: "#333",
-          fontFamily: "inherit", outline: "none", resize: "vertical",
+          fontFamily: "inherit", outline: "none",
           boxSizing: "border-box", background: "#fff",
-          minHeight: 200
+          minHeight: 160
         }}
       />
       <div style={{
@@ -9484,16 +9509,23 @@ function DomainTrendChart({ series }) {
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: W, height: "auto", display: "block", margin: "0 auto" }}>
-        {/* 가로 기준선 — 아주 연하게, 100/50/0만 살짝 진하게 */}
-        {[0, 25, 50, 75, 100].map(v => (
+        {/* 가로 기준선 — 80은 숙달 기준선(초록 점선)으로 강조 */}
+        {[0, 20, 40, 60, 80, 100].map(v => {
+          const is80 = v === 80;
+          return (
           <g key={v}>
             <line
               x1={padL} y1={yFor(v)} x2={W - padR} y2={yFor(v)}
-              stroke={v === 0 ? "#e3e3e3" : "#f2f2f2"} strokeWidth="1"
+              stroke={is80 ? GREEN : (v === 0 ? "#e3e3e3" : "#f2f2f2")}
+              strokeWidth={is80 ? 1.2 : 1}
+              strokeDasharray={is80 ? "4,3" : "none"}
+              opacity={is80 ? 0.85 : 1}
             />
-            <text x={padL - 9} y={yFor(v) + 3.5} fontSize="9.5" fill="#bcbcbc" textAnchor="end" fontFamily="inherit">{v}</text>
+            <text x={padL - 9} y={yFor(v) + 3.5} fontSize="9.5" fill={is80 ? GREEN : "#bcbcbc"} textAnchor="end" fontFamily="inherit" fontWeight={is80 ? 700 : 400}>{v}</text>
           </g>
-        ))}
+          );
+        })}
+        <text x={W - padR} y={yFor(80) - 4} fontSize="8.5" fill={GREEN} textAnchor="end" fontWeight="700" fontFamily="inherit">숙달 80%</text>
         {/* x축 날짜 라벨 — 솎아내고 연하게 */}
         {allDates.map((d, i) => (i % labelStep === 0 || i === allDates.length - 1) && (
           <text key={d} x={xFor(i)} y={H - padB + 18} fontSize="9.5" fill="#aeaeae" textAnchor="middle" fontFamily="inherit">{fmtDate(d)}</text>
@@ -12055,107 +12087,6 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
         </div>
       )}
 
-      {/* ★ [v19 신규] 고급 분석: 추세선 + 예측 + 통계 */}
-      <div style={{ marginBottom: 18, padding: 16, background: "#f9f5f7", borderRadius: 10, border: `1px solid ${PKL}` }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: PKD, marginBottom: 12 }}>📈 목표별 진행 분석</div>
-        
-        {/* 통계 표시 */}
-        {(() => {
-          const allData = [];
-          goals.forEach(g => {
-            (g.tasks || []).filter(t => t.showInDaily && t.isActive).forEach(t => {
-              Object.entries(t.daily || {}).forEach(([date, trials]) => {
-                if (!Array.isArray(trials)) return;
-                const correct = trials.filter(x => x === "○").length;
-                const total = trials.filter(x => x === "○" || x === "×").length;
-                if (total > 0) {
-                  allData.push({ date, correct, total, rate: Math.round((correct / total) * 100) });
-                }
-              });
-            });
-          });
-          
-          allData.sort((a, b) => a.date.localeCompare(b.date));
-          const recent30 = allData.slice(-30);
-          
-          const stats = {
-            total: recent30.length,
-            average: recent30.length > 0 ? Math.round(recent30.reduce((s, d) => s + d.rate, 0) / recent30.length) : 0,
-            max: recent30.length > 0 ? Math.max(...recent30.map(d => d.rate)) : 0,
-            min: recent30.length > 0 ? Math.min(...recent30.map(d => d.rate)) : 0,
-            trend: recent30.length >= 2 ? (recent30[recent30.length - 1].rate - recent30[0].rate) : 0
-          };
-          
-          return (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 12 }}>
-                <div style={{ background: "#fff", padding: 10, borderRadius: 8, textAlign: "center", border: "1px solid #f0e0e5" }}>
-                  <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>최근 30일</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: PKD }}>{stats.total}회</div>
-                </div>
-                <div style={{ background: "#fff", padding: 10, borderRadius: 8, textAlign: "center", border: "1px solid #f0e0e5" }}>
-                  <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>평균 정반응률</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: stats.average >= 70 ? "#10b981" : stats.average >= 50 ? "#f59e0b" : "#dc2626" }}>{stats.average}%</div>
-                </div>
-                <div style={{ background: "#fff", padding: 10, borderRadius: 8, textAlign: "center", border: "1px solid #f0e0e5" }}>
-                  <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>최고 / 최저</div>
-                  <div style={{ fontSize: 18, fontWeight: 700 }}>{stats.max}% / {stats.min}%</div>
-                </div>
-                <div style={{ background: "#fff", padding: 10, borderRadius: 8, textAlign: "center", border: "1px solid #f0e0e5" }}>
-                  <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>추세</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: stats.trend > 0 ? "#10b981" : stats.trend < 0 ? "#dc2626" : "#888" }}>
-                    {stats.trend > 0 ? "↑" : stats.trend < 0 ? "↓" : "→"} {Math.abs(stats.trend)}%
-                  </div>
-                </div>
-              </div>
-
-              {/* 미니 그래프 (ASCII) */}
-              <div style={{ fontSize: 10, color: "#666", fontFamily: "monospace", lineHeight: 1.4, padding: 10, background: "#fff", borderRadius: 6, overflow: "auto" }}>
-                {(() => {
-                  const recent14Data = [];
-                  goals.forEach(g => {
-                    (g.tasks || []).filter(t => t.showInDaily && t.isActive).forEach(t => {
-                      Object.entries(t.daily || {}).forEach(([date, trials]) => {
-                        if (!Array.isArray(trials)) return;
-                        const correct = trials.filter(x => x === "○").length;
-                        const total = trials.filter(x => x === "○" || x === "×").length;
-                        if (total > 0) {
-                          recent14Data.push({ date, rate: Math.round((correct / total) * 100) });
-                        }
-                      });
-                    });
-                  });
-                  
-                  recent14Data.sort((a, b) => a.date.localeCompare(b.date));
-                  const recent14 = recent14Data.slice(-14);
-                  
-                  if (recent14.length === 0) {
-                    return "📊 아직 데이터가 없습니다. 데이터를 입력하면 그래프가 표시됩니다.";
-                  }
-                  
-                  return (
-                    <>
-                      <div style={{ marginBottom: 8 }}>최근 14일 추세 (각 █ = 10%)</div>
-                      {recent14.map((d, i) => (
-                        <div key={i}>
-                          {d.date} {i === recent14.length - 1 ? "→" : "  "} 
-                          {"█".repeat(Math.round(d.rate / 10))}
-                          {"░".repeat(10 - Math.round(d.rate / 10))} {d.rate}%
-                        </div>
-                      ))}
-                    </>
-                  );
-                })()}
-              </div>
-
-              <div style={{ fontSize: 10, color: "#888", marginTop: 8, fontStyle: "italic" }}>
-                💡 팁: 추세선이 우상향(↑)이면 진전이 있는 것입니다. 70% 이상 2일 연속 달성 시 자동 습득 완료!
-              </div>
-            </>
-          );
-        })()}
-      </div>
-
       {/* ★ [A] 보고서 발행 알림 배너 — 가장 최근 보관본의 시점 알림 */}
       {/* ★ [종결보관본 제외] isFinal=true는 cutoff 기준에 사용하지 않음 */}
       {(() => {
@@ -14497,7 +14428,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
             <BarChart data={currentAvgs.map(d => ({ ...d, domain: cleanDomainKey(d.domain) }))} />
           </div>
           <div style={{ marginTop: 10, padding: "8px 12px", background: PKL, borderRadius: 8, fontSize: 11, color: PKD, lineHeight: 1.6 }}>
-            💡 이 그래프는 [③ 데일리 데이터]에서 기록한 <b>정반응률의 최근 수치</b>를 영역별로 평균한 것입니다. 데일리 기록이 없는 목표는 기초선 값이 사용됩니다.
+            💡 이 그래프는 [③ 데일리 데이터]에서 기록한 <b>정반응률의 최근 수치</b>를 영역별로 평균한 것입니다. 데일리 기록이 아직 없는 목표는 평균에 포함되지 않습니다.
           </div>
         </div>
       )}
@@ -16951,11 +16882,12 @@ function GrowthLineChart({ goals, dates, getTimeline }) {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: "100%", display: "block" }}>
       {/* 수평 grid */}
-      {[0, 25, 50, 75, 100].map(v => {
+      {[0, 20, 40, 60, 80, 100].map(v => {
         const y = padT + (1 - v / 100) * chartH;
+        const is80 = v === 80;
         return <g key={v}>
-          <line x1={padL} y1={y} x2={W - padR} y2={y} stroke={v === 80 ? GREEN : "#eee"} strokeWidth={v === 80 ? 1 : 0.5} strokeDasharray={v === 80 ? "4,3" : "none"} />
-          <text x={padL - 6} y={y + 3} textAnchor="end" fontSize="9" fill="#999">{v}%</text>
+          <line x1={padL} y1={y} x2={W - padR} y2={y} stroke={is80 ? GREEN : "#eee"} strokeWidth={is80 ? 1 : 0.5} strokeDasharray={is80 ? "4,3" : "none"} />
+          <text x={padL - 6} y={y + 3} textAnchor="end" fontSize="9" fill={is80 ? GREEN : "#999"} fontWeight={is80 ? 700 : 400}>{v}%</text>
         </g>;
       })}
       <text x={W - padR} y={padT - 10} fontSize="8.5" fill={GREEN} textAnchor="end" fontWeight="600">― 숙달 기준선 80%</text>
@@ -17008,32 +16940,54 @@ function GoalDashboard({ stos }) {
 
   const BigChart = ({ points, color, listBoundaries }) => {
     if (!points || points.length < 1) return null;
-    const W = 290, H = 80, padX = 8, padTop = 18, padBottom = 18;
+    const W = 320, H = 150, padL = 34, padR = 14, padTop = 22, padBottom = 30;
+    const innerW = W - padL - padR;
     const innerH = H - padTop - padBottom;
     const yOf = v => padTop + (1 - v / 100) * innerH;
     const y80 = yOf(80);
+    // 날짜 짧게 (6.22)
+    const shortDate = (d) => {
+      if (!d) return "";
+      const m = String(d).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      return m ? `${parseInt(m[2])}.${parseInt(m[3])}` : "";
+    };
+    // Y축 grid (0/20/40/60/80/100) + % 라벨 — 80은 숙달 기준선과 일치
+    const grid = [0, 20, 40, 60, 80, 100].map(v => {
+      const y = yOf(v);
+      const is80 = v === 80;
+      return (
+        <g key={"g" + v}>
+          <line x1={padL} y1={y} x2={W - padR} y2={y} stroke={is80 ? "none" : "#eee"} strokeWidth="0.7" />
+          <text x={padL - 5} y={y + 3} fontSize="7.5" fill={is80 ? "#3D7A0F" : "#aaa"} textAnchor="end" fontWeight={is80 ? 700 : 400}>{v}</text>
+        </g>
+      );
+    });
+    // 날짜 라벨 솎기 (많으면 일부만)
+    const labelEvery = (n) => n <= 6 ? 1 : Math.ceil(n / 6);
+
     if (points.length === 1) {
       const p = points[0];
-      const cx = W / 2, cy = yOf(p.value);
+      const cx = padL + innerW / 2, cy = yOf(p.value);
       return (
         <svg className="dashboard-bigchart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "0 auto", width: `${W}px`, height: `${H}px`, maxWidth: "100%" }}>
-          <line x1={padX} y1={y80} x2={W - padX} y2={y80} stroke="#3D7A0F" strokeWidth="1.2" strokeDasharray="4,3" opacity="0.85" />
-          <text x={W - padX - 2} y={y80 - 3} fontSize="9" fill="#3D7A0F" textAnchor="end" fontWeight="800">숙달 80%</text>
+          {grid}
+          <line x1={padL} y1={y80} x2={W - padR} y2={y80} stroke="#3D7A0F" strokeWidth="1.2" strokeDasharray="4,3" opacity="0.85" />
+          <text x={W - padR - 2} y={y80 - 3} fontSize="8.5" fill="#3D7A0F" textAnchor="end" fontWeight="800">숙달 80%</text>
           <circle cx={cx} cy={cy} r="5" fill={color} stroke="#fff" strokeWidth="2" />
           <text x={cx} y={cy - 10} fontSize="9" fill={color} textAnchor="middle" fontWeight="700">{p.value}%</text>
-          <text x={cx} y={H - padBottom + 12} fontSize="8" fill="#999" textAnchor="middle">시작 데이터</text>
-          {/* L1 라벨 (단일 포인트일 때도 표시) */}
+          <text x={cx} y={H - padBottom + 14} fontSize="8" fill="#888" textAnchor="middle">{shortDate(p.date)}</text>
           {listBoundaries && listBoundaries.length > 0 && (
-            <text x={padX + 2} y={padTop - 6} fontSize="8.5" fill="#888" fontWeight="700">{listBoundaries[0].listLabel}</text>
+            <text x={padL + 2} y={padTop - 7} fontSize="8.5" fill="#888" fontWeight="700">{listBoundaries[0].listLabel}</text>
           )}
         </svg>
       );
     }
-    const stepX = (W - padX * 2) / (points.length - 1);
-    const coords = points.map((p, i) => ({ x: padX + i * stepX, y: yOf(p.value), value: p.value, date: p.date }));
+    const stepX = innerW / (points.length - 1);
+    const coords = points.map((p, i) => ({ x: padL + i * stepX, y: yOf(p.value), value: p.value, date: p.date }));
     const pathD = coords.map((c, i) => `${i === 0 ? "M" : "L"}${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(" ");
     const fillD = pathD + ` L${coords[coords.length - 1].x.toFixed(1)},${(H - padBottom).toFixed(1)} L${coords[0].x.toFixed(1)},${(H - padBottom).toFixed(1)} Z`;
     const gradId = `grad-${color.replace("#", "")}-${Math.random().toString(36).substr(2, 5)}`;
+    const every = labelEvery(coords.length);
     return (
       <svg className="dashboard-bigchart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "0 auto", width: `${W}px`, height: `${H}px`, maxWidth: "100%" }}>
         <defs>
@@ -17042,28 +16996,36 @@ function GoalDashboard({ stos }) {
             <stop offset="100%" stopColor={color} stopOpacity="0" />
           </linearGradient>
         </defs>
-        <line x1={padX} y1={y80} x2={W - padX} y2={y80} stroke="#3D7A0F" strokeWidth="1.2" strokeDasharray="4,3" opacity="0.85" />
-        <text x={W - padX - 2} y={y80 - 3} fontSize="9" fill="#3D7A0F" textAnchor="end" fontWeight="800">숙달 80%</text>
+        {grid}
+        <line x1={padL} y1={y80} x2={W - padR} y2={y80} stroke="#3D7A0F" strokeWidth="1.2" strokeDasharray="4,3" opacity="0.85" />
+        <text x={W - padR - 2} y={y80 - 3} fontSize="8.5" fill="#3D7A0F" textAnchor="end" fontWeight="800">숙달 80%</text>
         <path d={fillD} fill={`url(#${gradId})`} />
         <path d={pathD} fill="none" stroke={color} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+        {/* 점 + 값 + 날짜 */}
         {coords.map((c, i) => {
           const isLast = i === coords.length - 1;
-          return <circle key={i} cx={c.x} cy={c.y} r={isLast ? 3.8 : 2.6} fill={color} stroke={isLast ? "#fff" : "none"} strokeWidth={isLast ? 1.5 : 0} />;
+          const showDate = (i % every === 0) || isLast;
+          return (
+            <g key={"pt" + i}>
+              <circle cx={c.x} cy={c.y} r={isLast ? 3.8 : 2.6} fill={color} stroke={isLast ? "#fff" : "none"} strokeWidth={isLast ? 1.5 : 0} />
+              <text x={c.x} y={c.y - 7} fontSize="8" fill={color} textAnchor="middle" fontWeight="700">{c.value}%</text>
+              {showDate && <text x={c.x} y={H - padBottom + 14} fontSize="7.5" fill="#888" textAnchor="middle">{shortDate(c.date)}</text>}
+            </g>
+          );
         })}
-        {/* ★ list 경계선 + L1/L2/L3 라벨 */}
+        {/* list 경계선 + L1/L2/L3 라벨 */}
         {listBoundaries && listBoundaries.map((b, i) => {
-          const x = coords[b.atIndex] ? coords[b.atIndex].x : padX;
-          // 라벨이 오른쪽 끝에 너무 가까우면 끝 정렬(안쪽으로), 아니면 시작 정렬
-          const nearRight = x > W - padX - 16;
+          const x = coords[b.atIndex] ? coords[b.atIndex].x : padL;
+          const nearRight = x > W - padR - 16;
           const isFirst = i === 0;
           return (
-            <g key={i}>
+            <g key={"lb" + i}>
               {i > 0 && (
                 <line x1={x} y1={padTop} x2={x} y2={H - padBottom} stroke="#bbb" strokeWidth="1" strokeDasharray="3,2" opacity="0.7" />
               )}
               <text
-                x={isFirst ? padX + 2 : (nearRight ? x - 2 : x + 2)}
-                y={padTop - 6}
+                x={isFirst ? padL + 2 : (nearRight ? x - 2 : x + 2)}
+                y={padTop - 7}
                 fontSize="8.5"
                 fill="#888"
                 fontWeight="700"
@@ -17076,7 +17038,6 @@ function GoalDashboard({ stos }) {
       </svg>
     );
   };
-
   const fmtDate = d => {
     if (!d) return "";
     const m = String(d).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
@@ -17187,20 +17148,7 @@ function GoalDashboard({ stos }) {
                           <BigChart points={points} color={meta.chartLine} listBoundaries={s.listBoundaries} />
                         </div>
                       )}
-                      {growthInfo && (
-                        <div style={{ padding: "10px 12px", background: "#FAFAFA", borderRadius: 10, textAlign: "center" }}>
-                          <div style={{ fontSize: 10, color: "#888", fontWeight: 500, marginBottom: 5 }}>
-                            {fmtDate(growthInfo.startDate)}{growthInfo.hasMultiplePoints ? ` ~ ${fmtDate(growthInfo.endDate)}` : ""}
-                          </div>
-                          {growthInfo.hasMultiplePoints ? (
-                            <div style={{ fontSize: 14, fontWeight: 700, color: "#333" }}>
-                              시작 {growthInfo.first}% <span style={{ color: meta.chartLine, fontWeight: 800, margin: "0 8px" }}>→</span> 현재 {growthInfo.last}%
-                            </div>
-                          ) : (
-                            <div style={{ fontSize: 16, fontWeight: 700, color: meta.chartLine }}>현재 {growthInfo.last}%</div>
-                          )}
-                        </div>
-                      )}
+                      {/* ★ [제거] 시작/현재 % 박스 — 차트에 % 축·날짜가 들어가 중복이므로 삭제 */}
                       {/* 학습 내용 박스 — list별 task 정보 (L1, L2, L3 각각) */}
                       {s.listBoundaries && s.listBoundaries.length > 0 && (
                         <div style={{
