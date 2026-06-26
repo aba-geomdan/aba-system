@@ -2881,6 +2881,49 @@ function simpleHash(str) {
   return String(hash);
 }
 
+// ★ 강화된 비밀번호 해싱 — PBKDF2 + SHA-256 (브라우저 내장 crypto)
+//   형식: "pbkdf2$<반복수>$<salt(hex)>$<hash(hex)>"  — simpleHash와 구분됨
+const PBKDF2_ITER = 120000;
+function _bufToHex(buf) {
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function _hexToBuf(hex) {
+  const arr = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < arr.length; i++) arr[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return arr;
+}
+async function hashPasswordSecure(password, saltHex) {
+  // saltHex 없으면 새로 생성 (신규 비번), 있으면 그대로 (검증용)
+  const enc = new TextEncoder();
+  const salt = saltHex ? _hexToBuf(saltHex) : crypto.getRandomValues(new Uint8Array(16));
+  const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations: PBKDF2_ITER, hash: "SHA-256" },
+    keyMaterial, 256
+  );
+  const saltOut = saltHex || _bufToHex(salt.buffer);
+  return `pbkdf2$${PBKDF2_ITER}$${saltOut}$${_bufToHex(bits)}`;
+}
+// 비밀번호 검증 — 저장된 해시가 PBKDF2면 PBKDF2로, 옛 simpleHash면 옛 방식으로 (기존 비번 호환)
+async function verifyPassword(password, storedHash) {
+  if (!storedHash) return false;
+  if (typeof storedHash === "string" && storedHash.startsWith("pbkdf2$")) {
+    const parts = storedHash.split("$");
+    if (parts.length !== 4) return false;
+    const saltHex = parts[2];
+    try {
+      const computed = await hashPasswordSecure(password, saltHex);
+      return computed === storedHash;
+    } catch (e) { return false; }
+  }
+  // 옛 형식 (simpleHash) — 기존 비번 그대로 인정
+  return simpleHash(password) === storedHash;
+}
+// 저장된 해시가 옛 형식인지 (로그인 후 자동 업그레이드 판단용)
+function isLegacyHash(storedHash) {
+  return typeof storedHash === "string" && !storedHash.startsWith("pbkdf2$");
+}
+
 const ARCHIVE_INDEX_PREFIX = "gd-aba-archives:";  // + childId → 인덱스 배열
 const ARCHIVE_ITEM_PREFIX = "gd-aba-archive:";    // + archiveId → 개별 스냅샷
 
@@ -3280,6 +3323,7 @@ function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder="이름 입력 (관리자는 '관리자')"
+              autoComplete="off"
               onKeyDown={e => { if (e.key === "Enter") document.getElementById("auth-pw-input")?.focus(); }}
               style={{
                 width: "100%", padding: "10px 12px",
@@ -3301,6 +3345,7 @@ function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
             value={pw}
             onChange={e => setPw(e.target.value)}
             placeholder="비밀번호 입력"
+            autoComplete="new-password"
             onKeyDown={e => {
               if (e.key === "Enter") {
                 if (view === "setup") document.getElementById("auth-pw-confirm")?.focus();
@@ -3325,6 +3370,7 @@ function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
               value={pwConfirm}
               onChange={e => setPwConfirm(e.target.value)}
               placeholder="비밀번호 다시 입력"
+              autoComplete="new-password"
               onKeyDown={e => { if (e.key === "Enter") handleSubmit(); }}
               style={{
                 width: "100%", padding: "10px 12px",
@@ -3530,7 +3576,7 @@ function AdminPanel({ onClose }) {
     const newTeacher = {
       id: "t_" + Date.now(),
       name: newName.trim(),
-      pwHash: simpleHash(newPw),
+      pwHash: await hashPasswordSecure(newPw),
       createdAt: new Date().toISOString()
     };
     await saveTeachers([...teachers, newTeacher]);
@@ -3548,8 +3594,9 @@ function AdminPanel({ onClose }) {
       alert("새 비밀번호는 최소 4자 이상이어야 합니다.");
       return;
     }
+    const newHash = await hashPasswordSecure(editPw);
     const updated = teachers.map(t =>
-      t.id === id ? { ...t, pwHash: simpleHash(editPw) } : t
+      t.id === id ? { ...t, pwHash: newHash } : t
     );
     await saveTeachers(updated);
     setEditingId(null); setEditPw("");
@@ -5549,7 +5596,7 @@ export default function App() {
             return;
           }
           try {
-            const pwHash = simpleHash(pw);
+            const pwHash = await hashPasswordSecure(pw);
             
             if (typeof localStorage !== "undefined") {
               localStorage.setItem(AUTH_ADMIN_PW_KEY, pwHash);
@@ -5581,7 +5628,6 @@ export default function App() {
             setAuthMessage("⚠️ 이름과 비밀번호를 모두 입력하세요.");
             return;
           }
-          const pwHash = simpleHash(pw);
           
           try {
             if (name === SUPERVISOR_NAME || name === "관리자" || name === "센터장") {
@@ -5597,7 +5643,17 @@ export default function App() {
                 } catch (e) {}
               }
               
-              if (adminPwHash === pwHash) {
+              if (await verifyPassword(pw, adminPwHash)) {
+                // 옛 형식(simpleHash) 비번이면 PBKDF2로 자동 업그레이드
+                if (isLegacyHash(adminPwHash)) {
+                  try {
+                    const upgraded = await hashPasswordSecure(pw);
+                    if (typeof localStorage !== "undefined") localStorage.setItem(AUTH_ADMIN_PW_KEY, upgraded);
+                    if (typeof window !== "undefined" && window.storage) {
+                      await window.storage.set(AUTH_ADMIN_PW_KEY, upgraded, true).catch(() => {});
+                    }
+                  } catch (e) {}
+                }
                 const adminUser = { role: "admin", name: SUPERVISOR_NAME };
                 
                 // ★ [수정] 로그인 정보는 브라우저별 독립 — localStorage만 사용
@@ -5632,9 +5688,21 @@ export default function App() {
               setAuthMessage(`⚠️ '${name}' 선생님이 등록되어 있지 않습니다. 관리자에게 문의하세요.`);
               return;
             }
-            if (teacher.pwHash !== pwHash) {
+            if (!(await verifyPassword(pw, teacher.pwHash))) {
               setAuthMessage("⚠️ 비밀번호가 틀렸습니다.");
               return;
+            }
+            // 옛 형식(simpleHash) 비번이면 PBKDF2로 자동 업그레이드
+            if (isLegacyHash(teacher.pwHash)) {
+              try {
+                const upgraded = await hashPasswordSecure(pw);
+                const newTeachers = teachers.map(t => t.name === teacher.name ? { ...t, pwHash: upgraded } : t);
+                const json = JSON.stringify(newTeachers);
+                if (typeof window !== "undefined" && window.storage) {
+                  await window.storage.set(AUTH_TEACHERS_KEY, json, true).catch(() => {});
+                }
+                if (typeof localStorage !== "undefined") localStorage.setItem(AUTH_TEACHERS_KEY, json);
+              } catch (e) {}
             }
             const teacherUser = { role: "teacher", name: teacher.name };
             
