@@ -3067,7 +3067,7 @@ const blankChild = () => ({
   info: {
     name: "", birth: "", room: "개별 ABA",
     therapist: "", evalStart: "", evalEnd: "",
-    startDate: new Date().toISOString().slice(0, 10),
+    startDate: "",
     ownerName: "",  // 이 아동을 담당하는 선생님 이름 (빈 문자열 = 미지정)
     isPinned: false,
     sWeek: "", sMin: "", sTotal: "",  // 주 N회, N분, 총 세션
@@ -3188,6 +3188,37 @@ const migrateChild = (c) => ({
   reportSections: c.reportSections || {},
   dailyMemos: c.dailyMemos && typeof c.dailyMemos === "object" ? c.dailyMemos : {}
 });
+
+// ★ 동시 편집 충돌 방지 — 아동(child) 단위로 두 목록을 병합한다.
+//   같은 아동이면 updatedAt이 더 최근인 쪽을 채택. 한쪽에만 있는 아동은 그대로 유지.
+//   이렇게 하면 A선생님이 자기 아동을, B선생님이 다른 아동을 동시에 수정해도 서로 안 덮어쓴다.
+function _childTime(c) {
+  const t = c && c.updatedAt ? Date.parse(c.updatedAt) : 0;
+  return isNaN(t) ? 0 : t;
+}
+function mergeChildren(localList, cloudList) {
+  const local = Array.isArray(localList) ? localList : [];
+  const cloud = Array.isArray(cloudList) ? cloudList : [];
+  const byId = new Map();
+  const order = [];
+  // 우선 로컬을 기준으로 순서 보존
+  local.forEach(c => { if (c && c.id) { byId.set(c.id, c); order.push(c.id); } });
+  cloud.forEach(c => {
+    if (!c || !c.id) return;
+    if (!byId.has(c.id)) {
+      // 클라우드에만 있는 아동(다른 기기에서 새로 추가됨) → 추가
+      byId.set(c.id, c);
+      order.push(c.id);
+    } else {
+      // 양쪽에 있으면 더 최근 수정본 채택
+      const localC = byId.get(c.id);
+      if (_childTime(c) > _childTime(localC)) {
+        byId.set(c.id, c);
+      }
+    }
+  });
+  return order.map(id => byId.get(id)).filter(Boolean);
+}
 
 function ManualModal({ onClose }) {
   const sec = (title, lines) => (
@@ -4083,6 +4114,8 @@ export default function App() {
       const nc = blankChild();
       nc.info.name = trimmedName;
       nc.info.ownerName = ownerName || "";
+      // ★ 담당 치료사도 담당 선생님 이름으로 자동 입력 (나중에 수정 가능)
+      if (ownerName) nc.info.therapist = ownerName;
       setChildren(prev => [...prev, nc]);
       setActiveChildId(nc.id);
     };
@@ -4301,13 +4334,35 @@ export default function App() {
       } catch (e) {}
       try {
         if (typeof window !== "undefined" && window.storage) {
-          window.storage.set(FILE_KEY, JSON.stringify({ 
-            children, 
-            activeChildId, 
-            savedAt: new Date().toISOString(),
-            lastEditor: currentUser?.name || "(unknown)",
-            lastEditTime: Date.now()
-          }), true).catch(() => {});
+          // ★ 저장 직전 클라우드 최신본과 병합 → 다른 사람이 수정한 아동을 덮어쓰지 않음
+          (async () => {
+            try {
+              let cloudChildren = null;
+              try {
+                const res = await window.storage.get(FILE_KEY, true);
+                if (res?.value) {
+                  const parsed = JSON.parse(res.value);
+                  if (Array.isArray(parsed.children)) cloudChildren = parsed.children.map(migrateChild);
+                }
+              } catch (e) {}
+              const toSave = cloudChildren ? mergeChildren(children, cloudChildren) : children;
+              await window.storage.set(FILE_KEY, JSON.stringify({
+                children: toSave,
+                activeChildId,
+                savedAt: new Date().toISOString(),
+                lastEditor: currentUser?.name || "(unknown)",
+                lastEditTime: Date.now()
+              }), true);
+              // 병합 결과가 현재 메모리와 다르면(다른 사람 아동이 합쳐졌으면) 화면에도 반영
+              if (cloudChildren) {
+                const mergedIds = toSave.map(c => c.id).join("|");
+                const localIds = children.map(c => c.id).join("|");
+                if (mergedIds !== localIds) {
+                  setChildren(toSave);
+                }
+              }
+            } catch (e) {}
+          })();
         }
       } catch (e) {}
     }, 500);
@@ -4456,21 +4511,12 @@ export default function App() {
           const isRecent = Date.now() - parsed.lastEditTime < 30000;  // 30초 이내
           
           if (isOtherUser && isNewer && isRecent) {
-            setCollaboratorAlert({
-              editor: parsed.lastEditor,
-              timestamp: parsed.lastEditTime
-            });
-            
-            setTimeout(() => setCollaboratorAlert(null), 5000);
-            
-            const myLastChange = lastChangeAtRef.current ? new Date(lastChangeAtRef.current).getTime() : 0;
-            const otherLastChange = parsed.lastEditTime;
-            
-            if (otherLastChange > myLastChange && (Date.now() - myLastChange > 5000)) {
-              if (Array.isArray(parsed.children)) {
-                const migratedChildren = parsed.children.map(migrateChild);
-                setChildren(migratedChildren);
-              }
+            // ★ [옵션2] 자동 덮어쓰기 절대 안 함 — 작업 중 데이터가 사라지는 일 방지
+            //    다른 사람 변경은 화면을 자동으로 바꾸지 않고, 사용자가 직접 새로고침할 때만 반영됨.
+            // ★ 알림은 '관리자'에게만 표시 — 치료사끼리는 서로의 수정을 알 필요 없음
+            if (currentUser?.role === "admin") {
+              setCollaboratorAlert({ editor: parsed.lastEditor, timestamp: parsed.lastEditTime });
+              setTimeout(() => setCollaboratorAlert(null), 4000);
             }
           }
           
@@ -6456,7 +6502,29 @@ export default function App() {
                         <div style={{ padding: 20, textAlign: "center", fontSize: 11, color: "#999" }}>
                           검색 결과 없음
                         </div>
-                      ) : filtered.map(c => {
+                      ) : (() => {
+                        // ★ 선생님(담당자)별로 그룹화. 미할당은 맨 뒤.
+                        const groupsMap = {};
+                        filtered.forEach(c => {
+                          const owner = (c.info?.ownerName || "").trim() || "(미할당)";
+                          if (!groupsMap[owner]) groupsMap[owner] = [];
+                          groupsMap[owner].push(c);
+                        });
+                        const ownerNames = Object.keys(groupsMap).sort((a, b) => {
+                          if (a === "(미할당)") return 1;
+                          if (b === "(미할당)") return -1;
+                          if (a === currentUser?.name) return -1;  // 본인(관리자) 먼저
+                          if (b === currentUser?.name) return 1;
+                          return a.localeCompare(b);
+                        });
+                        return ownerNames.map(owner => (
+                          <div key={"grp-" + owner}>
+                            {/* 선생님 그룹 헤더 */}
+                            <div style={{ padding: "6px 12px", background: "#FCEEF2", borderTop: "1px solid #f0e0e5", borderBottom: "1px solid #f5d8e0", fontSize: 10.5, fontWeight: 700, color: PKD, position: "sticky", top: 0 }}>
+                              {owner === currentUser?.name ? `👑 ${owner} (본인)` : owner === "(미할당)" ? "👤 (미할당)" : `👤 ${owner} 선생님`}
+                              <span style={{ fontWeight: 400, color: "#aaa", marginLeft: 6 }}>{groupsMap[owner].length}명</span>
+                            </div>
+                            {groupsMap[owner].map(c => {
                         const isActive = c.id === activeChildId;
                         const isEditing = editingChildNameId === c.id;
                         const isArchived = !!c.info?.archivedAt;  // ★ [신규] 아카이브 여부
@@ -6620,7 +6688,10 @@ export default function App() {
                             )}
                           </div>
                         );
-                      })}
+                            })}
+                          </div>
+                        ));
+                      })()}
                     </div>
                     {/* 추가 버튼 (하단 고정) */}
                     <div style={{ padding: 8, borderTop: "1px solid #f0e0e5", background: "#fafafa" }}>
@@ -6957,7 +7028,14 @@ export default function App() {
                               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={{ fontWeight: 600, color: "#333", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                                    <span>🧒 {child.info?.name || "(이름없음)"}</span>
+                                    <span
+                                      onClick={() => { setActiveChildId(child.id); setTab("info"); }}
+                                      title="이 아동의 시트로 이동"
+                                      style={{ cursor: "pointer", textDecoration: "underline", textDecorationColor: "#f0c0cc", textUnderlineOffset: 2 }}
+                                      onMouseEnter={e => { e.currentTarget.style.color = PKD; }}
+                                      onMouseLeave={e => { e.currentTarget.style.color = "inherit"; }}>
+                                      🧒 {child.info?.name || "(이름없음)"}
+                                    </span>
                                     {/* ★ [신규] 상태 배지 */}
                                     {isTerminated ? (
                                       <span style={{ fontSize: 9.5, padding: "1px 6px", borderRadius: 6, background: "#fee2e2", color: "#991b1b", fontWeight: 700 }}>
@@ -7052,7 +7130,7 @@ export default function App() {
                     ...(currentUser?.name ? [currentUser.name] : []),
                     ...(teachers || []).map(t => t.name)
                   ];
-                  const matched = knownNames.find(n => n === trimmed);
+                  const matched = knownNames.find(n => (n || "").trim() === trimmed);
                   const oldOwner = info.ownerName || "";
                   setInfo(p => ({
                     ...p,
@@ -7083,6 +7161,14 @@ export default function App() {
                     addHistory("info_update", `평가 종료일 변경: ${oldEnd} → ${newEnd}`, oldEnd, newEnd, "evalEnd");
                   }
                 }} /></div>
+                <div><label style={LS}>수업 시작일 <span style={{ color: PK, fontSize: 10, fontWeight: 500 }}>(IEP 표지)</span></label><input style={IS} type="date" value={info.startDate || ""} onChange={e => {
+                  const newStart = e.target.value;
+                  const oldStart = info.startDate || "";
+                  setInfo(p => ({ ...p, startDate: newStart }));
+                  if (newStart !== oldStart) {
+                    addHistory("info_update", `수업 시작일 변경: ${oldStart || "(미입력)"} → ${newStart || "(미입력)"}`, oldStart, newStart, "startDate");
+                  }
+                }} /></div>
                 {/* ★ [신규] 관리자 전용 — 담당 선생님(시스템) 변경 드롭다운 */}
                 {currentUser?.role === "admin" && (
                   <div>
@@ -7095,9 +7181,20 @@ export default function App() {
                       onChange={e => {
                         const newOwner = e.target.value;
                         const oldOwner = info.ownerName || "";
-                        setInfo(p => ({ ...p, ownerName: newOwner }));
+                        const oldTherapist = (info.therapist || "").trim();
+                        setInfo(p => {
+                          const next = { ...p, ownerName: newOwner };
+                          // ★ 담당 치료사 칸이 비어있거나 이전 담당자와 같았으면, 새 담당 선생님 이름으로 자동 채움
+                          if (newOwner && (!oldTherapist || oldTherapist === oldOwner)) {
+                            next.therapist = newOwner;
+                          }
+                          return next;
+                        });
                         if (newOwner !== oldOwner) {
                           addHistory("info_update", `담당 선생님 변경: "${oldOwner || "(미할당)"}" → "${newOwner || "(미할당)"}"`, oldOwner, newOwner, "ownerName");
+                          if (newOwner && (!oldTherapist || oldTherapist === oldOwner)) {
+                            addHistory("info_update", `담당 치료사 자동 입력: "${oldTherapist || "(비어있음)"}" → "${newOwner}"`, oldTherapist, newOwner, "therapist");
+                          }
                         }
                       }}>
                       <option value="">— (미할당) —</option>
@@ -7502,7 +7599,7 @@ export default function App() {
                     <div style={{ fontSize: 11, color: "#666", marginBottom: 10 }}>
                       🎯 <b style={{ color: PKD }}>{results.length}건</b>의 결과를 찾았습니다
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: 400, overflowY: "auto" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                       {Object.entries(grouped).map(([curr, items]) => {
                         if (items.length === 0) return null;
                         const color = items[0].color;
@@ -8961,7 +9058,7 @@ function ArchiveViewModal({ item, onClose }) {
                     if (!ps && !pe) return null;
                     return <><br /><b style={{ color: PKD }}>기간:</b> {ps || "—"} ~ {pe || "—"}</>;
                   })()}
-                  {snapshot.info.sWeek && <> · <b style={{ color: PKD }}>치료 강도:</b> 주 {snapshot.info.sWeek}회 × {snapshot.info.sMin || "—"}분 (총 {snapshot.info.sTotal || "—"}세션)</>}
+                  {snapshot.info.sWeek && <> · <b style={{ color: PKD }}>치료 강도:</b> 주 {snapshot.info.sWeek}회 × {snapshot.info.sMin || "—"}분</>}
                 </div>
               )}
               {/* 영역별 평균 */}
@@ -9987,7 +10084,7 @@ function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSectio
 '#printable-report svg{display:block!important;margin-left:auto!important;margin-right:auto!important}\n' +
 'body{font-family:\'Malgun Gothic\',\'Noto Sans KR\',sans-serif;font-size:10.5pt;line-height:1.75;color:#333;word-break:keep-all;overflow-wrap:break-word;-webkit-hyphens:none;hyphens:none;orphans:3;widows:3}\n' +
 '*{word-break:keep-all;overflow-wrap:break-word}\n' +
-'@page{size:A4 portrait;margin:22mm 14mm 20mm 14mm;@top-center{content:"검단ABA언어행동연구소";font-family:\'Pretendard\',\'Malgun Gothic\',sans-serif;font-size:8.5pt;color:#D4728A;font-weight:600;letter-spacing:0.5px}@bottom-left{content:"검단ABA언어행동연구소";font-family:\'Pretendard\',\'Malgun Gothic\',sans-serif;font-size:7.5pt;color:#999}@bottom-center{content:"© 검단ABA언어행동연구소 · 민다혜(BCBA) — 무단 복제·배포·재판매 금지";font-family:\'Pretendard\',\'Malgun Gothic\',sans-serif;font-size:6.5pt;color:#bbb;letter-spacing:0.2px}@bottom-right{content:"Page " counter(page) " / " counter(pages);font-family:\'Pretendard\',\'Malgun Gothic\',sans-serif;font-size:7.5pt;color:#999}}\n' +
+'@page{size:A4 portrait;margin:22mm 14mm 20mm 14mm;@top-center{content:"검단ABA언어행동연구소";font-family:\'Pretendard\',\'Malgun Gothic\',sans-serif;font-size:8.5pt;color:#D4728A;font-weight:600;letter-spacing:0.5px}@bottom-left{content:""}@bottom-center{content:"© 검단ABA언어행동연구소 · 민다혜(BCBA) — 무단 복제·배포·재판매 금지";font-family:\'Pretendard\',\'Malgun Gothic\',sans-serif;font-size:6.5pt;color:#bbb;letter-spacing:0.2px}@bottom-right{content:"Page " counter(page) " / " counter(pages);font-family:\'Pretendard\',\'Malgun Gothic\',sans-serif;font-size:7.5pt;color:#999}}\n' +
 '/* 본문 배경 워터마크 - 복제 방지 */\n' +
 '#printable-report{position:relative}\n' +
 '#printable-report::before{content:"검단ABA";position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:100pt;font-weight:900;color:rgba(212,114,138,0.05);z-index:0;pointer-events:none;letter-spacing:8px;font-family:\'Malgun Gothic\',\'Noto Sans KR\',sans-serif;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}\n' +
@@ -10185,7 +10282,7 @@ cleanedHTML + '\n' +
                     ["소 속 반", info.room || "개별 ABA"],
                     ["치 료 사", info.therapist || "—"],
                     ["평가 진행일", (() => { const [s, e] = orderDateRange(info.evalStart, info.evalEnd); return (s && e) ? `${s} ~ ${e}` : (s || e || "—"); })()],
-                    ["수업 시작일", info.startDate || today]
+                    ["수업 시작일", info.startDate || "—"]
                   ].map(([k, v]) => (
                     <tr key={k}>
                       <td style={{ padding: "6px 14px", border: `1.5px solid ${PK}`, background: PKL, fontWeight: 600, color: "#555", textAlign: "center", letterSpacing: "1px", boxSizing: "border-box", whiteSpace: "nowrap" }}>{k}</td>
@@ -10218,14 +10315,9 @@ cleanedHTML + '\n' +
           const effectiveTotal = userTotal || (autoTotal !== null ? String(autoTotal) : "");
 
           const sessionCellContent = (() => {
-            const totalVal = effectiveTotal;
+            // ★ 총 세션수는 결석·보강으로 부정확하므로 표시하지 않음. 회기 시간(분)만 표시.
             const minVal = info.sMin || info.sessionMin;
-            let mainText;
-            if (totalVal && minVal) mainText = `${totalVal}세션 / ${minVal}분`;
-            else if (totalVal) mainText = `${totalVal}세션`;
-            else if (minVal) mainText = `${minVal}분`;
-            else mainText = "—";
-            return <span>{mainText}</span>;
+            return <span>{minVal ? `${minVal}분` : "—"}</span>;
           })();
           return (
             <table className="info-table-main" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 16 }}>
@@ -10257,7 +10349,7 @@ cleanedHTML + '\n' +
                     const sources = [...new Set((goals || []).map(g => g.source || "ELCAR"))];
                     return sources.join(", ") || "—";
                   })()],
-                  ["주 횟수", (info.sWeek || info.weeklyFreq) ? `주 ${info.sWeek || info.weeklyFreq}회` : "—", "총 세션/시간", sessionCellContent]
+                  ["주 횟수", (info.sWeek || info.weeklyFreq) ? `주 ${info.sWeek || info.weeklyFreq}회` : "—", "회기 시간", sessionCellContent]
                 ].map((row, i) => (
                   <tr key={i}>
                     {row.map((cell, j) => (
@@ -11256,10 +11348,7 @@ cleanedHTML + '\n' +
               letter-spacing: 0.5px;
             }
             @bottom-left {
-              content: "검단ABA언어행동연구소";
-              font-family: 'Pretendard','Noto Sans KR','Malgun Gothic',sans-serif;
-              font-size: 7.5pt;
-              color: #999;
+              content: "";
             }
             @bottom-center {
               content: "© 검단ABA언어행동연구소 · 민다혜(BCBA) — 무단 복제·배포·재판매 금지";
@@ -13682,13 +13771,11 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   const socDoneCount = socStos.filter(s => s.status === "완료").length;
 
   const sessionInfo = (() => {
-    const total = info?.sTotal || info?.totalSessions;
     const sMin = info?.sMin || info?.sessionMin;
     const sWeek = info?.sWeek || info?.weeklyFreq;
     const minPart = sMin ? `${sMin}분` : "";
     const wkPart = sWeek ? `주 ${sWeek}회` : "";
-    const totPart = total ? `총 ${total}회기` : "";
-    const parts = [wkPart, minPart, totPart].filter(Boolean);
+    const parts = [wkPart, minPart].filter(Boolean);
     if (parts.length === 0) return "";
     return parts.join(" · ");
   })();
@@ -14647,55 +14734,6 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                 onChange={e => setInfo(prev => ({ ...prev, sMin: e.target.value }))}
                 style={{ width: "100%", padding: "5px 8px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 11.5, fontFamily: "inherit", boxSizing: "border-box" }}
               />
-            </div>
-            <div>
-              <label style={{ fontSize: 10.5, color: "#5a8c1f", fontWeight: 500, display: "block", marginBottom: 4 }}>총 예정 회기</label>
-              {(() => {
-                const computeAuto = () => {
-                  const start = info.evalStart;
-                  const end = info.finalEndDate || info.evalEnd;
-                  const week = parseInt(info.sWeek, 10);
-                  if (!start || !end || isNaN(week) || week <= 0) return null;
-                  const ds = new Date(start), de = new Date(end);
-                  if (isNaN(ds.getTime()) || isNaN(de.getTime())) return null;
-                  const diffDays = Math.floor((de - ds) / (1000 * 60 * 60 * 24));
-                  if (diffDays < 0) return null;
-                  const weeks = diffDays / 7;
-                  return Math.round(weeks * week);
-                };
-                const autoVal = computeAuto();
-                const userVal = info.sTotal || "";
-                const isAuto = userVal === "" && autoVal !== null;
-                // ★ [버그수정] 자동/수동 토글: 자동 상태에서 칸을 누르면 자동값을 sTotal로 채택해 바로 수정 가능,
-                //    수동 상태에서는 ↺ 버튼으로 다시 자동으로 되돌릴 수 있게 함 (항상 표시).
-                return (
-                  <div style={{ position: "relative" }}>
-                    <input
-                      type="text"
-                      placeholder={autoVal !== null ? `자동: ${autoVal}` : "자동 계산"}
-                      value={isAuto ? String(autoVal) : userVal}
-                      onFocus={() => {
-                        // 자동 상태에서 포커스되면 자동값을 채택 → 수동 편집 가능
-                        if (isAuto) setInfo(prev => ({ ...prev, sTotal: String(autoVal) }));
-                      }}
-                      onChange={e => setInfo(prev => ({ ...prev, sTotal: e.target.value }))}
-                      title={isAuto ? "자동 계산값 (치료 시작/종료일과 주 N회로부터 산출). 칸을 누르면 직접 수정할 수 있습니다." : "직접 입력된 값입니다. ↺ 버튼으로 자동 계산으로 되돌릴 수 있습니다."}
-                      style={{
-                        width: "100%", padding: "5px 8px", paddingRight: (!isAuto && autoVal !== null) ? 26 : 8, border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 11.5, fontFamily: "inherit", boxSizing: "border-box",
-                        ...(isAuto ? { color: "#a87108", background: "#fffaf0" } : {})
-                      }}
-                    />
-                    {!isAuto && autoVal !== null && (
-                      <button
-                        onClick={() => setInfo(prev => ({ ...prev, sTotal: "" }))}
-                        title={`자동 계산값(${autoVal})으로 되돌리기`}
-                        style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", color: "#a87108", fontSize: 12, cursor: "pointer", padding: "2px 4px", fontFamily: "inherit" }}>
-                        ↺
-                      </button>
-                    )}
-                  </div>
-                );
-              })()}
             </div>
           </div>
 
@@ -15954,7 +15992,7 @@ function ReportGeneratorSection({
     <strong>생년월일:</strong> ${info.birth || "—"} &nbsp;&nbsp;
     <strong>치료사:</strong> ${info.therapist || "—"}<br/>
     <strong>보고 기간:</strong> ${info.pStart || "—"} ~ ${info.pEnd || "—"} &nbsp;&nbsp;
-    <strong>치료 강도:</strong> 주 ${info.sWeek || "—"}회 / ${info.sMin || "—"}분 / 총 ${info.sTotal || "—"}세션<br/>
+    <strong>치료 강도:</strong> 주 ${info.sWeek || "—"}회 / ${info.sMin || "—"}분<br/>
     <strong>발행일:</strong> ${today} &nbsp;&nbsp;
     <strong>슈퍼바이저:</strong> ${SUPERVISOR_NAME} (${SUPERVISOR_CERT})
   </div>
@@ -16139,54 +16177,6 @@ function ReportGeneratorSection({
                       style={{ ...IS, padding: "5px 8px", fontSize: 11.5, flex: 1 }}
                       value={v}
                       onChange={e => setInfo(prev => ({ ...prev, sMin: e.target.value }))} />
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-          <div>
-            <label style={{ ...LS, fontSize: 10 }}>총 세션수 <span style={{ fontSize: 8.5, color: "#767676", fontWeight: 400 }}>(자동 계산)</span></label>
-            {/* W-14: 보고 시작일/종료일/주N회로부터 자동 계산. 사용자가 직접 입력하면 그 값 유지 */}
-            {(() => {
-              const computeAuto = () => {
-                const start = info.evalStart;
-                const end = info.pEnd;
-                const week = parseInt(info.sWeek, 10);
-                if (!start || !end || isNaN(week) || week <= 0) return null;
-                const ds = new Date(start), de = new Date(end);
-                if (isNaN(ds.getTime()) || isNaN(de.getTime())) return null;
-                const diffDays = Math.floor((de - ds) / (1000 * 60 * 60 * 24));
-                if (diffDays < 0) return null;
-                const weeks = diffDays / 7;
-                return Math.round(weeks * week);
-              };
-              const autoVal = computeAuto();
-              const userVal = info.sTotal || "";
-              const isAuto = userVal === "" && autoVal !== null;
-              // ★ [버그수정] 자동/수동 토글: 자동 상태에서 칸을 누르면 자동값을 채택해 바로 수정 가능
-              return (
-                <div style={{ position: "relative" }}>
-                  <input
-                    type="text"
-                    placeholder={autoVal !== null ? `자동: ${autoVal}` : "예: 24"}
-                    style={{
-                      ...IS, padding: "5px 8px", paddingRight: (!isAuto && autoVal !== null) ? 26 : 8, fontSize: 11.5,
-                      ...(isAuto ? { color: "#a87108", background: "#fffaf0" } : {})
-                    }}
-                    value={isAuto ? String(autoVal) : userVal}
-                    onFocus={() => {
-                      if (isAuto) setInfo(prev => ({ ...prev, sTotal: String(autoVal) }));
-                    }}
-                    onChange={e => setInfo(prev => ({ ...prev, sTotal: e.target.value }))}
-                    title={isAuto ? "자동 계산값 (보고 시작/종료일과 주 N회로부터 산출). 칸을 누르면 직접 수정할 수 있습니다." : "직접 입력된 값입니다. ↺ 버튼으로 자동 계산으로 되돌릴 수 있습니다."}
-                  />
-                  {!isAuto && autoVal !== null && (
-                    <button
-                      onClick={() => setInfo(prev => ({ ...prev, sTotal: "" }))}
-                      title={`자동 계산값(${autoVal})으로 되돌리기`}
-                      style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", color: "#a87108", fontSize: 12, cursor: "pointer", padding: "2px 4px", fontFamily: "inherit" }}>
-                      ↺
-                    </button>
                   )}
                 </div>
               );
