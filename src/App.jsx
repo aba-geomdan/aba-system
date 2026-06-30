@@ -3196,6 +3196,17 @@ function _childTime(c) {
   const t = c && c.updatedAt ? Date.parse(c.updatedAt) : 0;
   return isNaN(t) ? 0 : t;
 }
+// 삭제 표식(tombstone) 시각 — deletedAt이 있으면 그 시각, 없으면 0
+function _childDelTime(c) {
+  const t = c && c.deletedAt ? Date.parse(c.deletedAt) : 0;
+  return isNaN(t) ? 0 : t;
+}
+// 두 아동 레코드 중 "더 최근 상태"를 채택. 삭제 표식과 일반 수정 시각을 함께 비교.
+function _pickNewerChild(a, b) {
+  const aTime = Math.max(_childTime(a), _childDelTime(a));
+  const bTime = Math.max(_childTime(b), _childDelTime(b));
+  return bTime > aTime ? b : a;
+}
 function mergeChildren(localList, cloudList) {
   const local = Array.isArray(localList) ? localList : [];
   const cloud = Array.isArray(cloudList) ? cloudList : [];
@@ -3206,18 +3217,20 @@ function mergeChildren(localList, cloudList) {
   cloud.forEach(c => {
     if (!c || !c.id) return;
     if (!byId.has(c.id)) {
-      // 클라우드에만 있는 아동(다른 기기에서 새로 추가됨) → 추가
+      // 클라우드에만 있는 아동 → 추가 (삭제 표식이 달려 있어도 그대로 들고 있어야
+      //   다른 기기에서의 삭제가 이 기기에도 반영됨. 화면 노출은 visibleChildren에서 거름)
       byId.set(c.id, c);
       order.push(c.id);
     } else {
-      // 양쪽에 있으면 더 최근 수정본 채택
-      const localC = byId.get(c.id);
-      if (_childTime(c) > _childTime(localC)) {
-        byId.set(c.id, c);
-      }
+      // 양쪽에 있으면 더 최근 상태(수정/삭제 중 최신) 채택
+      byId.set(c.id, _pickNewerChild(byId.get(c.id), c));
     }
   });
   return order.map(id => byId.get(id)).filter(Boolean);
+}
+// 화면에 보일 아동만 — 삭제 표식이 달린 아동 제외
+function liveChildren(list) {
+  return (Array.isArray(list) ? list : []).filter(c => c && !c.deletedAt);
 }
 
 function ManualModal({ onClose }) {
@@ -3963,12 +3976,14 @@ export default function App() {
   const [masteredOpen, setMasteredOpen] = useState(false); // ★ IEP 포함 목표 - 습득 완료 그룹 펼침 (기본 접힘)
 
   const visibleChildren = useMemo(() => {
+    // 0) 삭제 표식(tombstone) 제외 — 삭제된 아동은 화면에 절대 노출 안 함
+    const alive = liveChildren(children);
     // 1) 권한 필터링
     let list;
     if (currentUser?.role === "admin") {
-      list = children;  // 관리자는 모든 아동 보임
+      list = alive;  // 관리자는 모든 아동 보임
     } else if (currentUser?.role === "teacher") {
-      list = children.filter(c => (c.info?.ownerName || "") === currentUser.name);
+      list = alive.filter(c => (c.info?.ownerName || "") === currentUser.name);
     } else {
       return [];  // 인증 안 된 경우
     }
@@ -4172,16 +4187,20 @@ export default function App() {
       alert("❌ 다른 선생님의 아동은 삭제할 수 없습니다.");
       return;
     }
-    if (children.length === 1) {
+    if (liveChildren(children).length === 1) {
       alert("최소 한 명의 아동 데이터는 유지되어야 합니다.\n완전 초기화를 원하시면 '아동 데이터 초기화' 버튼을 사용하세요.");
       return;
     }
     askConfirm(`'${target.info.name || "이름없음"}' 아동의 모든 데이터를 삭제하시겠습니까?\n(IEP, 데일리 기록, 보고서 전체 삭제 — 되돌릴 수 없음)`, () => {
-      const filtered = children.filter(c => c.id !== id);
-      if (validateChildrenBeforeSave(filtered)) {
-        setChildren(filtered);
-        if (id === activeChildId && filtered.length > 0) {
-          setActiveChildId(filtered[0].id);
+      const stamp = new Date().toISOString();
+      // ★ 삭제 표식(tombstone): 배열에서 빼지 않고 deletedAt을 달아 저장 →
+      //   클라우드 병합 시 부활하지 않고, 다른 기기에도 삭제가 전파됨.
+      const next = children.map(c => c.id === id ? { ...c, deletedAt: stamp, updatedAt: stamp } : c);
+      if (validateChildrenBeforeSave(next)) {
+        setChildren(next);
+        if (id === activeChildId) {
+          const remaining = liveChildren(next);
+          if (remaining.length > 0) setActiveChildId(remaining[0].id);
         }
       }
     });
@@ -4322,10 +4341,11 @@ export default function App() {
 
         if (childrenList && childrenList.length > 0) {
           setChildren(childrenList);
-          const validActive = lastActive && childrenList.find(c => c.id === lastActive);
-          setActiveChildId(validActive ? lastActive : childrenList[0].id);
+          const aliveList = liveChildren(childrenList);
+          const validActive = lastActive && aliveList.find(c => c.id === lastActive);
+          setActiveChildId(validActive ? lastActive : (aliveList[0]?.id || childrenList[0].id));
         } else {
-          const firstId = children[0]?.id;
+          const firstId = liveChildren(children)[0]?.id || children[0]?.id;
           if (firstId) setActiveChildId(firstId);
         }
       } catch (e) { /* 무시 */ }
@@ -5444,9 +5464,10 @@ export default function App() {
 
   const exportAllChildren = async (silent = false) => {
     try {
-      const childCount = children.length;
-      const goalCount = children.reduce((sum, c) => sum + (c.goals?.length || 0), 0);
-      const archiveCount = children.reduce((sum, c) => sum + (Array.isArray(c.archiveList) ? c.archiveList.length : 0), 0);
+      const _live = liveChildren(children);
+      const childCount = _live.length;
+      const goalCount = _live.reduce((sum, c) => sum + (c.goals?.length || 0), 0);
+      const archiveCount = _live.reduce((sum, c) => sum + (Array.isArray(c.archiveList) ? c.archiveList.length : 0), 0);
       const payload = {
         type: "gd-aba-iep-backup",
         version: 1,
@@ -5455,7 +5476,7 @@ export default function App() {
           childCount,
           goalCount,
           archiveCount,
-          childNames: children.map(c => c.info?.name || "(이름없음)").filter(Boolean)
+          childNames: _live.map(c => c.info?.name || "(이름없음)").filter(Boolean)
         },
         activeChildId,
         children
@@ -5548,10 +5569,11 @@ export default function App() {
         const savedAtLabel = data.savedAt ? new Date(data.savedAt).toLocaleString("ko-KR") : "알 수 없음";
         const importedNames = data.children.map(c => c.info?.name || "(이름없음)").filter(Boolean);
 
-        const currentChildCount = children.length;
-        const currentGoalCount = children.reduce((sum, c) => sum + ((c.goals && c.goals.length) || 0), 0);
-        const currentArchiveCount = children.reduce((sum, c) => sum + ((c.archiveList && c.archiveList.length) || 0), 0);
-        const currentNames = children.map(c => c.info?.name || "(이름없음)").filter(Boolean);
+        const _liveCur = liveChildren(children);
+        const currentChildCount = _liveCur.length;
+        const currentGoalCount = _liveCur.reduce((sum, c) => sum + ((c.goals && c.goals.length) || 0), 0);
+        const currentArchiveCount = _liveCur.reduce((sum, c) => sum + ((c.archiveList && c.archiveList.length) || 0), 0);
+        const currentNames = _liveCur.map(c => c.info?.name || "(이름없음)").filter(Boolean);
 
         const childDiff = importedChildCount - currentChildCount;
         const goalDiff = importedGoalCount - currentGoalCount;
@@ -6783,11 +6805,13 @@ export default function App() {
         {/* ═══════════════════════════════════════════════════ */}
         {tab === "dashboard" && currentUser?.role === "admin" && (() => {
           // ★ [수정] 보관(아카이브)된 아동은 통계에서 제외 — 활동/종료만 카운트
-          const visibleForStats = children.filter(c => !c.info?.archivedAt);
+          //   삭제 표식(deletedAt)이 달린 아동도 제외
+          const _liveAll = liveChildren(children);
+          const visibleForStats = _liveAll.filter(c => !c.info?.archivedAt);
           const totalChildren = visibleForStats.length;
           const activeChildren = visibleForStats.filter(c => !c.info?.finalEndDate).length;
           const terminatedChildren = visibleForStats.filter(c => c.info?.finalEndDate).length;
-          const archivedChildren = children.filter(c => c.info?.archivedAt).length;
+          const archivedChildren = _liveAll.filter(c => c.info?.archivedAt).length;
           
           const teacherStats = {};
           visibleForStats.forEach(child => {
@@ -6837,7 +6861,7 @@ export default function App() {
                         ["아동 이름", "담당 선생님", "상태", "IEP 목표 수", "데이터 입력 횟수", "최근 입력일", "정반응률(%)"]
                       ];
                       
-                      children.forEach(child => {
+                      liveChildren(children).forEach(child => {
                         const goals = (child.goals || []).filter(g => g.includeInIep);
                         let totalRecords = 0, correctCount = 0, totalCount = 0, latestDate = "";
                         
