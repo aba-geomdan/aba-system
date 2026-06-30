@@ -3264,15 +3264,30 @@ function ManualModal({ onClose }) {
           "ELCAR / VB-MAPP / ESDM 세 가지 커리큘럼을 선택해 평가합니다.",
           "각 영역의 현행 수준을 입력하면 기초선 그래프가 자동으로 그려집니다."
         ])}
-        {sec("4. 보고서 자동 생성", [
+        {sec("4. 목표 정하기 — 2단계로 나뉩니다 (중요)", [
+          "1단계 · \"+ IEP에 추가\" : 커리큘럼에서 이 아동이 배울 목표를 골라 담습니다. → 이게 켜져야 IEP·보고서에 들어갑니다.",
+          "2단계 · \"시트\" 스위치 ON : IEP에 담은 목표 중, 지금 매일 기록할 목표만 켭니다. → 켜야 ③ 데일리 데이터 탭에 올라와 +/− 로 기록됩니다.",
+          "쉽게: IEP 추가 = 목표 바구니에 담기 / 시트 ON = 그중 오늘부터 실제로 기록할 것만 꺼내 켜기",
+          "IEP에서 빼면 시트도 같이 꺼집니다."
+        ])}
+        {sec("5. 진행 / 습득 상태는 자동으로 바뀝니다", [
+          "목표마다 진행 ⟷ 습득 스위치가 있습니다.",
+          "2일 연속 정반응 80% 이상이면 자동으로 습득(완료)으로 바뀝니다.",
+          "직접 눌러서 바꾸면 🔒이 걸려 자동 전환이 멈춥니다(수동 고정). 다시 누르면 풀립니다.",
+          "중단은 잠시 보류하는 목표로, 보고서에는 \"임상적 판단에 따른 조정\"으로 표기됩니다."
+        ])}
+        {sec("6. 보고서 자동 생성", [
           "IEP(개별화 교육 계획) / 중간보고서 / 종결보고서를 자동으로 생성합니다.",
+          "중간보고서는 1년 3구간으로 작성합니다: 1~4월 / 5~8월 / 9~12월. 보고 기간 칸에 해당 구간을 입력하면 그 기간의 기록만 모아 보고서가 만들어집니다.",
+          "종결보고서는 아동이 센터를 마칠 때 전체 기간으로 한 번 작성합니다.",
+          "활동 사진은 중간보고서에만 들어갑니다(종결보고서 제외). 보고서 탭 하단에서 들어갈 사진을 고를 수 있습니다.",
           "각 영역 문장이 자동으로 채워지며, 필요하면 직접 수정할 수 있습니다.",
           "수정한 내용은 자동 저장됩니다."
         ])}
-        {sec("5. 인쇄 (PDF)", [
+        {sec("7. 인쇄 (PDF)", [
           "완성된 보고서는 공문서 양식으로 인쇄하거나 PDF로 저장할 수 있습니다."
         ])}
-        {sec("6. 데이터 저장", [
+        {sec("8. 데이터 저장", [
           "입력한 모든 데이터는 클라우드에 자동 저장됩니다.",
           "관리자는 모든 선생님의 아동을, 선생님은 본인 아동을 조회할 수 있습니다."
         ])}
@@ -7868,6 +7883,14 @@ export default function App() {
 
               {/* 아래쪽 — IEP 포함 요약 + 영역별 현행수준 편집 */}
               <div>
+                {/* ★ 핵심 안내 — 목표 2단계 개념 */}
+                <div style={{
+                  background: PKL, border: `1px solid ${PK}`, borderRadius: 10,
+                  padding: "10px 13px", marginBottom: 12,
+                  fontSize: 12, color: PKD, lineHeight: 1.65, fontWeight: 600
+                }}>
+                  💡 목표는 <b>2단계</b>예요. ① <b>"+ IEP에 추가"</b>로 담고 → ② <b>"시트"를 켜야</b> ③데일리에 올라가 +/− 로 기록됩니다.
+                </div>
                 {/* ═ 섹션 A: IEP 포함 목표 요약 ═ */}
                 <div style={CS}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
@@ -11223,6 +11246,46 @@ cleanedHTML + '\n' +
         {/* 7번 교수 방법·전략 총괄 — 새 3번 4열 표에 통합되어 제거 */}
         {/* 8번 세부 목표별 설정 사유 — 모범 IEP 양식에 없으므로 제거 */}
 
+        {/* ═══ 활동 사진 (보고 기간 내 첨부분만) — 중간보고서 전용, IEP·종결 제외 ═══ */}
+        {!isIepMode && !isFinalMode && (() => {
+          const all = info?.mediaList || [];
+          if (all.length === 0) return null;
+          // 보고 기간 범위 계산 (성장 추이 섹션과 동일 기준)
+          let cutoffDate = null;
+          const cutoffArchives = (archiveList || []).filter(item => !item.isFinal);
+          if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
+            cutoffDate = cutoffArchives[0].savedAt.slice(0, 10);
+          }
+          const periodStart = info.pStart || info.evalStart || "";
+          const periodEnd = info.pEnd || info.evalEnd || "";
+          const photos = all.filter(m => {
+            const d = m.uploadedAt || "";
+            if (!d) return false;
+            if (m.type !== "image") return false;
+            if (m.excludeFromReport) return false;
+            if (cutoffDate && d < cutoffDate) return false;
+            if (periodStart && d < periodStart) return false;
+            if (periodEnd && d > periodEnd) return false;
+            return true;
+          }).sort((a, b) => (a.uploadedAt || "").localeCompare(b.uploadedAt || ""));
+          if (photos.length === 0) return null;
+          return (
+            <PrintSection num={nextSn()} title="활동 사진">
+              <div style={{ fontSize: 9.5, color: "#aaa", marginBottom: 10 }}>
+                ※ 본 보고 기간 중 회기에서 촬영한 활동 사진입니다.
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                {photos.map(m => (
+                  <figure key={m.id} style={{ margin: 0, pageBreakInside: "avoid", breakInside: "avoid", border: "1px solid #e8e8e8", borderRadius: 8, overflow: "hidden", background: "#fff" }}>
+                    <img src={m.base64} alt={m.name} style={{ width: "100%", height: 190, objectFit: "cover", display: "block" }} />
+                    <figcaption style={{ fontSize: 9, color: "#777", padding: "5px 8px", textAlign: "center", borderTop: "1px solid #f0f0f0" }}>📅 {m.uploadedAt}</figcaption>
+                  </figure>
+                ))}
+              </div>
+            </PrintSection>
+          );
+        })()}
+
         {/* ═══ 10. 승인서 / 확인 및 서명 ═══ */}
         {/* 두 모드 모두 동일한 디자인 (중간보고서 스타일로 통일) — IEP는 동의 본문만 추가 */}
         {isIepMode ? (
@@ -12110,9 +12173,12 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
               💡 입력 방법
             </button>
             {showInputHelp && (
-              <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 50, background: "#fff", border: `1px solid ${PK}`, borderRadius: 8, padding: "8px 12px", boxShadow: "0 4px 16px rgba(0,0,0,0.12)", whiteSpace: "nowrap", fontSize: 11, color: "#555", lineHeight: 1.7 }}>
+              <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 50, background: "#fff", border: `1px solid ${PK}`, borderRadius: 8, padding: "8px 12px", boxShadow: "0 4px 16px rgba(0,0,0,0.12)", width: 260, fontSize: 11, color: "#555", lineHeight: 1.7 }}>
                 셀을 누를 때마다 바뀝니다:<br/>
                 <b style={{ color: GREEN }}>＋</b> 정반응 → <b style={{ color: RED }}>－</b> 오반응 → <b style={{ color: "#777" }}>NA</b> 해당없음 → 빈칸
+                <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #f0e0e6", color: "#777" }}>
+                  💡 <b style={{ color: GREEN }}>2일 연속 80%↑</b> → 자동 <b>'습득'</b> 전환. 진행⟷습득 스위치를 직접 누르면 <b>🔒 고정</b>(자동전환 멈춤).
+                </div>
               </div>
             )}
           </div>
@@ -15501,6 +15567,66 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
           archiveList={effectiveArchiveList}
         />
       )}
+
+      {/* ═ 활동 사진 선택 — 보고 기간 내 사진, 끄면 보고서에서 제외 (종결 제외) ═ */}
+      {!isFinalMode && (() => {
+        const all = info?.mediaList || [];
+        let cutoffDate = null;
+        const cutoffArchives = (effectiveArchiveList || []).filter(item => !item.isFinal);
+        if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
+          cutoffDate = cutoffArchives[0].savedAt.slice(0, 10);
+        }
+        const pStart = info.pStart || info.evalStart || "";
+        const pEnd = info.pEnd || info.evalEnd || "";
+        const photos = all.filter(m => {
+          const d = m.uploadedAt || "";
+          if (!d || m.type !== "image") return false;
+          if (cutoffDate && d < cutoffDate) return false;
+          if (pStart && d < pStart) return false;
+          if (pEnd && d > pEnd) return false;
+          return true;
+        }).sort((a, b) => (a.uploadedAt || "").localeCompare(b.uploadedAt || ""));
+        if (photos.length === 0) return null;
+        const includedCount = photos.filter(m => !m.excludeFromReport).length;
+        const togglePhoto = (id) => setInfo(p => ({
+          ...p,
+          mediaList: (p.mediaList || []).map(m => m.id === id ? { ...m, excludeFromReport: !m.excludeFromReport } : m)
+        }));
+        return (
+          <div style={{ ...CS, marginTop: 18 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: PKD }}>📸 보고서에 넣을 활동 사진</h3>
+              <span style={{ fontSize: 11, color: "#888" }}>보고 기간 내 {photos.length}장 중 <b style={{ color: PKD }}>{includedCount}장</b> 포함</span>
+            </div>
+            <div style={{ fontSize: 11, color: "#888", marginBottom: 12, lineHeight: 1.6 }}>
+              보고 기간에 첨부한 사진이 보고서 맨 뒤에 자동으로 들어갑니다. 빼고 싶은 사진은 눌러서 꺼주세요.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 10 }}>
+              {photos.map(m => {
+                const on = !m.excludeFromReport;
+                return (
+                  <div key={m.id} onClick={() => togglePhoto(m.id)}
+                    title={on ? "보고서에 포함됨 — 누르면 제외" : "제외됨 — 누르면 포함"}
+                    style={{
+                      position: "relative", cursor: "pointer", borderRadius: 8, overflow: "hidden",
+                      border: `2px solid ${on ? PK : "#e0e0e0"}`,
+                      opacity: on ? 1 : 0.45, transition: "opacity 0.15s, border-color 0.15s"
+                    }}>
+                    <img src={m.base64} alt={m.name} style={{ width: "100%", height: 90, objectFit: "cover", display: "block" }} />
+                    <div style={{
+                      position: "absolute", top: 4, right: 4, width: 20, height: 20, borderRadius: "50%",
+                      background: on ? PK : "rgba(255,255,255,0.9)", color: on ? "#fff" : "#bbb",
+                      display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700,
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.2)"
+                    }}>{on ? "✓" : "✕"}</div>
+                    <div style={{ fontSize: 8.5, color: "#888", padding: "3px 4px", textAlign: "center", background: "#fafafa" }}>📅 {m.uploadedAt}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ═ W-35: 보관된 이전 보고서 (IEP 보관본 제외 — IEP 보관함은 별도) ═ */}
       <ArchiveListCard
