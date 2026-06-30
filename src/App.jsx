@@ -4032,17 +4032,14 @@ export default function App() {
 
   const validateChildrenBeforeSave = (newChildren) => {
     if (currentUser?.role === "teacher") {
-      const modifiedIds = newChildren
-        .filter((newC, i) => {
-          const oldC = children[i];
-          return JSON.stringify(newC) !== JSON.stringify(oldC);
-        })
-        .map(c => c.id);
-
-      for (const id of modifiedIds) {
-        const child = newChildren.find(c => c.id === id);
-        if (child && child.info.ownerName !== currentUser.name) {
-          console.warn(`⚠️ [권한 오류] 선생님 '${currentUser.name}'이 다른 선생님 아동을 수정하려 함:`, child.info.name, child.info.ownerName);
+      // ★ id 기준으로 비교 — 삭제/순서변경으로 배열 인덱스가 밀려도 오판 없음
+      const oldById = new Map(children.map(c => [c.id, c]));
+      for (const newC of newChildren) {
+        const oldC = oldById.get(newC.id);
+        // 새로 추가된 아동이거나 내용이 바뀐 아동만 검사 대상
+        const changed = !oldC || JSON.stringify(newC) !== JSON.stringify(oldC);
+        if (changed && newC.info.ownerName !== currentUser.name) {
+          console.warn(`⚠️ [권한 오류] 선생님 '${currentUser.name}'이 다른 선생님 아동을 수정하려 함:`, newC.info.name, newC.info.ownerName);
           alert("❌ 다른 선생님의 아동은 수정할 수 없습니다. 변경사항이 저장되지 않았습니다.");
           return false;  // 저장 금지
         }
@@ -6738,12 +6735,6 @@ export default function App() {
             </div>
             <div style={{ fontSize: 10, color: "#aaa", marginLeft: "auto" }}>
               총 <b style={{ color: PKD }}>{visibleChildren.length}명</b> 등록
-              {/* ★ [v19] 선생님용 안내 */}
-              {currentUser?.role === "teacher" && visibleChildren.length < children.length && (
-                <div style={{ fontSize: 9.5, color: "#999", marginTop: 4 }}>
-                  💡 다른 선생님 {children.length - visibleChildren.length}명 아동은 보이지 않습니다.
-                </div>
-              )}
             </div>
           </div>
         </div>
