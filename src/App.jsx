@@ -4879,7 +4879,7 @@ export default function App() {
   };
 
   const fillTaskTrials = (goalId, taskId, date, value) => {
-    if (value !== "+" && value !== "NA") return;
+    if (value !== "+" && value !== "-") return;
     setGoals(prev => prev.map(g => {
       if (g.id !== goalId) return g;
       return {
@@ -12190,7 +12190,10 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
             {showInputHelp && (
               <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 50, background: "#fff", border: `1px solid ${PK}`, borderRadius: 8, padding: "8px 12px", boxShadow: "0 4px 16px rgba(0,0,0,0.12)", width: 260, fontSize: 11, color: "#555", lineHeight: 1.7 }}>
                 셀을 누를 때마다 바뀝니다:<br/>
-                <b style={{ color: GREEN }}>＋</b> 정반응 → <b style={{ color: RED }}>－</b> 오반응 → <b style={{ color: "#777" }}>NA</b> 해당없음 → 빈칸
+                <b style={{ color: GREEN }}>＋</b> 정반응 → <b style={{ color: RED }}>－</b> 오반응 → <b style={{ color: "#777" }}>NA</b> 해당없음 → 다시 <b style={{ color: GREEN }}>＋</b>
+                <div style={{ marginTop: 4, color: "#999", fontSize: 10 }}>
+                  · 되돌리기: 키보드 <b>0</b>(그 칸부터 뒤로 지움) · <b>초기화</b> 버튼(과제 전체 지움)
+                </div>
                 <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #f0e0e6", color: "#777" }}>
                   💡 <b style={{ color: GREEN }}>2일 연속 80%↑</b> → 자동 <b>'습득'</b> 전환. 진행⟷습득 스위치를 직접 누르면 <b>🔒 고정</b>(자동전환 멈춤).
                 </div>
@@ -13431,11 +13434,13 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
           if (isMastered || !setTaskTrial) return;
           if (!canEnter(idx)) return;
           const current = cells[idx];
+          // 순환: (빈칸)→＋→－→NA→＋→－→NA … (빈칸으로는 되돌아가지 않음)
+          // 개별 취소로 뒤 칸이 연쇄 삭제되던 문제 방지 — 되돌리려면 '초기화' 버튼 사용
           const next =
             current === null ? "+" :
             current === "+" ? "-" :
             current === "-" ? "NA" :
-            null;  // current === "NA" → null
+            "+";  // current === "NA" → ＋ (빈칸 아님)
           setTaskTrial(goal.id, task.id, date, idx, next);
         };
         const handleCellKeyDown = (idx, e) => {
@@ -13500,7 +13505,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
               onKeyDown={(e) => handleCellKeyDown(idx, e)}
               data-task-cell={`${task.id}-${idx}`}
               disabled={!enabled || isMastered}
-              title={isMastered ? "습득 완료 과제는 수정 불가" : enabled ? `${idx + 1}번 시도 — 클릭 또는 키보드: 1=＋, 2=－, 3=NA, 0=취소` : `앞 칸을 먼저 입력해주세요`}
+              title={isMastered ? "습득 완료 과제는 수정 불가" : enabled ? `${idx + 1}번 시도 — 클릭: ＋→－→NA 순환 / 키보드: 1=＋, 2=－, 3=NA, 0=이 칸부터 비움` : `앞 칸을 먼저 입력해주세요`}
               style={cellStyle(val, enabled)}>
               {label}
             </button>
@@ -13523,7 +13528,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                 </div>
               ))}
             </div>
-            {/* ★ [신규] 일괄 입력 버튼 3개 — 빈 칸 채우기 + 모두 NA + 초기화 */}
+            {/* ★ 일괄 입력 버튼 3개 — 빈 칸 모두 ＋ / 빈 칸 모두 － / 초기화 */}
             {!isMastered && (
               <div style={{ display: "inline-flex", flexDirection: "column", gap: 4, paddingLeft: 8, borderLeft: "1px dashed #d8d8d8" }}>
                 <button
@@ -13542,19 +13547,19 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                   ＋ 전체
                 </button>
                 <button
-                  onClick={() => fillTaskTrials && fillTaskTrials(goal.id, task.id, date, "NA")}
+                  onClick={() => fillTaskTrials && fillTaskTrials(goal.id, task.id, date, "-")}
                   disabled={!hasEmpty}
-                  title={hasEmpty ? "빈 칸을 모두 NA로 채우기 (시간 부족·미시도 회기 마무리)" : "이미 모든 칸 입력됨"}
+                  title={hasEmpty ? "빈 칸을 모두 −로 채우기 (오반응만 나온 회기 마무리)" : "이미 모든 칸 입력됨"}
                   style={{
                     padding: "3px 8px", fontSize: 10,
-                    border: `1px solid ${hasEmpty ? "#888" : "#ddd"}`,
+                    border: `1px solid ${hasEmpty ? RED : "#ddd"}`,
                     borderRadius: 5,
-                    background: hasEmpty ? "#f0f0f0" : "#f5f5f5",
-                    color: hasEmpty ? "#555" : "#aaa",
+                    background: hasEmpty ? "#fbeeee" : "#f5f5f5",
+                    color: hasEmpty ? "#a83232" : "#aaa",
                     cursor: hasEmpty ? "pointer" : "not-allowed",
                     fontFamily: "inherit", fontWeight: 600, whiteSpace: "nowrap"
                   }}>
-                  NA 전체
+                  － 전체
                 </button>
                 <button
                   onClick={() => {
