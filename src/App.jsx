@@ -5077,6 +5077,54 @@ export default function App() {
   // 데일리 입력 시 매번 차트 데이터를 재계산하지 않도록 가드
   const needsReportCalc = tab === "report" || view === "print" || view === "iep-print";
 
+  // ★ 컷오프 이후로 한정 — 보고서 필터(stosForReport)와 동일 기준.
+  //   저장된 아카이브 savedAt 이하 데이터는 이전 차수라 제외.
+  const reportCutoffDate = useMemo(() => {
+    if (!effectiveArchiveList || effectiveArchiveList.length === 0) return null;
+    const latest = effectiveArchiveList[0];
+    return latest && latest.savedAt ? latest.savedAt.slice(0, 10) : null;
+  }, [effectiveArchiveList]);
+  // ★ 데이터 첫 날 — 원본 goals에서 계산(보고 기간 필터 전, 단 컷오프는 반영).
+  //   pStart가 비었을 때 시작일 대타.
+  const firstDataDate = useMemo(() => {
+    if (!needsReportCalc) return null;
+    let first = "";
+    const consider = (d) => {
+      if (reportCutoffDate && d <= reportCutoffDate) return;
+      if (!first || d < first) first = d;
+    };
+    (includedGoals || []).forEach(g => {
+      (g.tasks || []).forEach(t => { Object.keys(t.daily || {}).forEach(consider); });
+      Object.keys(g.daily || {}).forEach(consider);
+    });
+    return first || null;
+  }, [includedGoals, needsReportCalc, reportCutoffDate]);
+  // ★ 데이터 마지막 날 — 원본 goals에서 계산(컷오프 반영).
+  //   pEnd가 비었을 때 종료일 대타로 evalEnd(초기 평가 종료일) 대신 이걸 쓴다.
+  const lastDataDate = useMemo(() => {
+    if (!needsReportCalc) return null;
+    let last = "";
+    const consider = (d) => {
+      if (reportCutoffDate && d <= reportCutoffDate) return;
+      if (d > last) last = d;
+    };
+    (includedGoals || []).forEach(g => {
+      (g.tasks || []).forEach(t => { Object.keys(t.daily || {}).forEach(consider); });
+      Object.keys(g.daily || {}).forEach(consider);
+    });
+    return last || null;
+  }, [includedGoals, needsReportCalc, reportCutoffDate]);
+  // ★★ 보고 기간 단일 진실원(single source) — 모든 계산이 이 두 값을 쓴다.
+  //   evalEnd 대타 완전 제거: pEnd 비면 데이터 마지막날, pStart 비면 데이터 첫날.
+  const _isFinalReport = reportMode === "final";
+  const reportPeriodStart = _isFinalReport
+    ? (effectiveInfo.evalStart || "")
+    : (effectiveInfo.pStart || firstDataDate || effectiveInfo.evalStart || "");
+  const reportPeriodEnd = _isFinalReport
+    ? (effectiveInfo.finalEndDate || lastDataDate || "")
+    : (effectiveInfo.pEnd || lastDataDate || "");
+  const effectivePStart = effectiveInfo.pStart || firstDataDate || effectiveInfo.evalStart || "";
+
   const stosForReport = useMemo(() => {
     if (!needsReportCalc) return [];
     let cutoffDate = null;
@@ -5086,10 +5134,9 @@ export default function App() {
         cutoffDate = latestArchive.savedAt.slice(0, 10);
       }
     }
-    // ★ 보고 기간 연동 — 성장추이 그래프와 동일한 범위로 세부목표 차트/본문 날짜 제한
-    const _isFinal = reportMode === "final";
-    const periodStart = _isFinal ? (info.evalStart || "") : (info.pStart || info.evalStart || "");
-    const periodEnd = _isFinal ? (info.finalEndDate || info.evalEnd || "") : (info.pEnd || info.evalEnd || "");
+    // ★ 보고 기간 연동 — 단일 진실원(reportPeriodStart/End) 사용. evalEnd 대타 제거.
+    const periodStart = reportPeriodStart;
+    const periodEnd = reportPeriodEnd;
     const inPeriod = (d) => {
       if (periodStart && d < periodStart) return false;
       if (periodEnd && d > periodEnd) return false;
@@ -5139,21 +5186,7 @@ export default function App() {
       });
     });
     return result;
-  }, [includedGoals, effectiveArchiveList, needsReportCalc, reportMode, info.evalStart, info.evalEnd, info.pStart, info.pEnd, info.finalEndDate]);
-
-  const firstDataDate = useMemo(() => {
-    if (!needsReportCalc) return null;
-    if (!stosForReport || stosForReport.length === 0) return null;
-    const allDates = [];
-    stosForReport.forEach(s => {
-      (s.points || []).forEach(p => {
-        if (p.date) allDates.push(p.date);
-      });
-    });
-    if (allDates.length === 0) return null;
-    return allDates.sort()[0];
-  }, [stosForReport, needsReportCalc]);
-  const effectivePStart = info.pStart || firstDataDate || info.evalStart || "";
+  }, [includedGoals, effectiveArchiveList, needsReportCalc, reportMode, reportPeriodStart, reportPeriodEnd]);
 
   const goalsForReport = useMemo(() => {
     if (!needsReportCalc) return [];
@@ -5164,10 +5197,9 @@ export default function App() {
         cutoffDate = latestArchive.savedAt.slice(0, 10);
       }
     }
-    // ★ 보고 기간 연동 — stosForReport와 동일 (이 정의가 없어서 흰화면 발생했었음)
-    const _isFinal = reportMode === "final";
-    const periodStart = _isFinal ? (info.evalStart || "") : (info.pStart || info.evalStart || "");
-    const periodEnd = _isFinal ? (info.finalEndDate || info.evalEnd || "") : (info.pEnd || info.evalEnd || "");
+    // ★ 보고 기간 연동 — stosForReport와 동일한 단일 진실원 사용. evalEnd 대타 제거.
+    const periodStart = reportPeriodStart;
+    const periodEnd = reportPeriodEnd;
     const inPeriod = (d) => {
       if (periodStart && d < periodStart) return false;
       if (periodEnd && d > periodEnd) return false;
@@ -5235,7 +5267,7 @@ export default function App() {
       if (g.status === "완료" && g.points.length === 0) return false;
       return true;
     });
-  }, [includedGoals, effectiveArchiveList, needsReportCalc, reportMode, info.evalStart, info.evalEnd, info.pStart, info.pEnd, info.finalEndDate]);
+  }, [includedGoals, effectiveArchiveList, needsReportCalc, reportMode, reportPeriodStart, reportPeriodEnd]);
 
   const currentAvgs = useMemo(() => {
     if (!needsReportCalc) return [];
@@ -5353,8 +5385,16 @@ export default function App() {
     if (!hasContent && !autoMode && !finalMode) {
       return { skipped: true, reason: "empty" };
     }
-    const periodStart = info.evalStart || info.pStart || "";
-    const periodEnd = finalMode ? (info.finalEndDate || info.evalEnd || info.pEnd || "") : (info.evalEnd || info.pEnd || "");
+    // ★ 보고 기간 규칙과 일치: 시작=pStart||첫데이터||evalStart, 종료=finalEndDate/pEnd||마지막데이터.
+    //   evalEnd 대타 제거. reportMode에 의존하지 않도록 finalMode로 분기.
+    const resolvedStart = finalMode
+      ? (info.evalStart || "")
+      : (info.pStart || firstDataDate || info.evalStart || "");
+    const resolvedEnd = finalMode
+      ? (info.finalEndDate || lastDataDate || "")
+      : (info.pEnd || lastDataDate || "");
+    const periodStart = resolvedStart;
+    const periodEnd = resolvedEnd;
     const period = fmtArchivePeriod(periodStart, periodEnd);
     const interimCount = (archiveList || []).filter(a => !a.isFinal).length;
     const order = interimCount + 1;
@@ -5376,8 +5416,8 @@ export default function App() {
       period,
       info: { ...info },
       isFinal: finalMode,
-      prevEvalStart: info.pStart || info.evalStart || "",
-      prevEvalEnd: info.pEnd || info.evalEnd || "",
+      prevEvalStart: resolvedStart,
+      prevEvalEnd: resolvedEnd,
       reportSections: { ...sections },
       reportSelStrats: [...(reportSelStrats || [])],
       reportSelStratsCustom: reportSelStratsCustom || "",
@@ -5648,6 +5688,7 @@ export default function App() {
       reportSelStrats={reportSelStrats} reportSelStratsCustom={reportSelStratsCustom}
       reportSelPrein={reportSelPrein} reportSelSrein={reportSelSrein} reportReinfSchedule={reportReinfSchedule}
       reportBehaviors={reportBehaviors} stosForReport={stosForReport} goalsForReport={goalsForReport}
+      firstDataDate={firstDataDate} lastDataDate={lastDataDate} reportPeriodStart={reportPeriodStart} reportPeriodEnd={reportPeriodEnd}
       archiveList={effectiveArchiveList} dailyMemos={dailyMemos}
       autoPrint={autoPrintAction} onAutoPrintDone={() => setAutoPrintAction("")}
       mode="iep" onBack={() => { setAutoPrintAction(""); setView("edit"); }} />;
@@ -5657,6 +5698,7 @@ export default function App() {
       reportSelStrats={reportSelStrats} reportSelStratsCustom={reportSelStratsCustom}
       reportSelPrein={reportSelPrein} reportSelSrein={reportSelSrein} reportReinfSchedule={reportReinfSchedule}
       reportBehaviors={reportBehaviors} stosForReport={stosForReport} goalsForReport={goalsForReport}
+      firstDataDate={firstDataDate} lastDataDate={lastDataDate} reportPeriodStart={reportPeriodStart} reportPeriodEnd={reportPeriodEnd}
       archiveList={effectiveArchiveList} dailyMemos={dailyMemos}
       autoPrint={autoPrintAction} onAutoPrintDone={() => { setAutoPrintAction(""); if (printingSuppressArchiveId) { setPrintingSuppressArchiveId(""); applyCutoff(); } }}
       mode={reportMode === "final" ? "final" : "report"} onBack={() => { setAutoPrintAction(""); if (printingSuppressArchiveId) { setPrintingSuppressArchiveId(""); applyCutoff(); } setView("edit"); }} />;
@@ -8398,6 +8440,10 @@ export default function App() {
             getTimeline={getTimeline}
             stosForReport={stosForReport}
             goalsForReport={goalsForReport}
+            firstDataDate={firstDataDate}
+            lastDataDate={lastDataDate}
+            reportPeriodStart={reportPeriodStart}
+            reportPeriodEnd={reportPeriodEnd}
             askConfirm={askConfirm}
             reportFields={reportFields}
             reportSelStrats={reportSelStrats}
@@ -9954,7 +10000,7 @@ function VbmappGrid({ goals }) {
   );
 }
 
-function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSections, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportBehaviors, stosForReport, goalsForReport, archiveList, dailyMemos, mode, onBack, autoPrint = "", onAutoPrintDone }) {
+function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSections, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportBehaviors, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, archiveList, dailyMemos, mode, onBack, autoPrint = "", onAutoPrintDone }) {
   const isIepMode = mode === "iep";
   const isFinalMode = mode === "final";  // ★ 종결보고서 모드
   const grouped = useMemo(() => {
@@ -10245,14 +10291,9 @@ cleanedHTML + '\n' +
             <div style={{ fontSize: 10, color: "#999", textAlign: "left", lineHeight: 1.7 }}>
               <div><span style={{ fontWeight: 500, color: "#777" }}>보고유형</span> {isIepMode ? "개별화 교육 계획안 (IEP)" : isFinalMode ? "종결보고서" : "중간보고서"}</div>
               <div><span style={{ fontWeight: 500, color: "#777" }}>보고기간</span> {(() => {
-                const firstDataDate = (() => {
-                  if (!stosForReport || stosForReport.length === 0) return null;
-                  const dates = [];
-                  stosForReport.forEach(s => (s.points || []).forEach(p => { if (p.date) dates.push(p.date); }));
-                  return dates.length > 0 ? dates.sort()[0] : null;
-                })();
-                const startDate = (isFinalMode || isIepMode) ? info.evalStart : (info.pStart || firstDataDate || info.evalStart);
-                const endDate = isFinalMode ? (info.finalEndDate || info.evalEnd) : (isIepMode ? info.evalEnd : (info.pEnd || info.evalEnd));
+                // IEP는 계획안이라 평가기간(evalStart~evalEnd) 유지. 중간/종결은 데이터 기반 단일 진실원.
+                const startDate = isIepMode ? info.evalStart : reportPeriodStart;
+                const endDate = isIepMode ? info.evalEnd : reportPeriodEnd;
                 const [s0, e0] = orderDateRange(startDate, endDate);
                 return (s0 && e0) ? `${s0} ~ ${e0}` : (s0 || e0 || "—");
               })()}</div>
@@ -10359,23 +10400,14 @@ cleanedHTML + '\n' +
                   ["소속반", info.room || "개별 ABA", "담당 치료사", info.therapist || "—"],
                   ["치료기간", (() => {
                     if (isFinalMode) {
-                      const e = info.finalEndDate || info.evalEnd || "";
-                      const [s0, e0] = orderDateRange(info.evalStart, e);
+                      const [s0, e0] = orderDateRange(reportPeriodStart, reportPeriodEnd);
                       return (s0 && e0) ? `${s0} ~ ${e0}` : (s0 || e0 || "—");
                     }
                     if (isIepMode) {
                       const [s0, e0] = orderDateRange(info.evalStart, info.evalEnd);
                       return (s0 && e0) ? `${s0} ~ ${e0}` : (s0 || e0 || "—");
                     }
-                    const firstDataDate = (() => {
-                      if (!stosForReport || stosForReport.length === 0) return null;
-                      const dates = [];
-                      stosForReport.forEach(s => (s.points || []).forEach(p => { if (p.date) dates.push(p.date); }));
-                      return dates.length > 0 ? dates.sort()[0] : null;
-                    })();
-                    const reportStart = info.pStart || firstDataDate || info.evalStart || "";
-                    const reportEnd = info.pEnd || info.evalEnd || "";
-                    const [s0, e0] = orderDateRange(reportStart, reportEnd);
+                    const [s0, e0] = orderDateRange(reportPeriodStart, reportPeriodEnd);
                     return (s0 && e0) ? `${s0} ~ ${e0}` : (s0 || e0 || "—");
                   })(), "프로그램", (() => {
                     const sources = [...new Set((goals || []).map(g => g.source || "ELCAR"))];
@@ -10855,13 +10887,9 @@ cleanedHTML + '\n' +
               if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
                 cutoffDate = cutoffArchives[0].savedAt.slice(0, 10);
               }
-              // ★ 보고 기간 연동 — 표지 '치료기간'과 동일한 범위로 그래프 날짜 제한
-              const periodStart = isFinalMode
-                ? (info.evalStart || "")
-                : (info.pStart || info.evalStart || "");
-              const periodEnd = isFinalMode
-                ? (info.finalEndDate || info.evalEnd || "")
-                : (info.pEnd || info.evalEnd || "");
+              // ★ 보고 기간 연동 — 단일 진실원(props) 사용. evalEnd 대타 제거.
+              const periodStart = reportPeriodStart;
+              const periodEnd = reportPeriodEnd;
               const inPeriod = (d) => {
                 if (periodStart && d < periodStart) return false;
                 if (periodEnd && d > periodEnd) return false;
@@ -11265,8 +11293,8 @@ cleanedHTML + '\n' +
           if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
             cutoffDate = cutoffArchives[0].savedAt.slice(0, 10);
           }
-          const periodStart = info.pStart || info.evalStart || "";
-          const periodEnd = info.pEnd || info.evalEnd || "";
+          const periodStart = reportPeriodStart || "";
+          const periodEnd = reportPeriodEnd || "";
           const photos = all.filter(m => {
             const d = m.uploadedAt || "";
             if (!d) return false;
@@ -14324,7 +14352,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   return r;
 }
 
-function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domainLevelOverrides, getTimeline, stosForReport, goalsForReport, askConfirm, reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportBehaviors, reportSections, dailyMemos, setReportField, setReportPatch, setInfo, archiveList, cutoffDisabled, setCutoffDisabled, reportMode, setReportMode, onArchiveSave, onArchiveDelete, onArchiveView, onPrev, onPreview, onPrint }) {
+function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domainLevelOverrides, getTimeline, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, askConfirm, reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportBehaviors, reportSections, dailyMemos, setReportField, setReportPatch, setInfo, archiveList, cutoffDisabled, setCutoffDisabled, reportMode, setReportMode, onArchiveSave, onArchiveDelete, onArchiveView, onPrev, onPreview, onPrint }) {
   const [showReportHelp, setShowReportHelp] = useState(false); // ★ 인쇄 안내 박스 접기 (기본 접힘)
   const visibleArchiveList = useMemo(() => {
     if (!archiveList || archiveList.length === 0) return [];
@@ -14348,13 +14376,9 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
     if (effectiveArchiveList && effectiveArchiveList.length > 0 && effectiveArchiveList[0].savedAt) {
       cutoffDate = effectiveArchiveList[0].savedAt.slice(0, 10);
     }
-    // ★ 보고 기간 연동 — 보고서 상단 '치료기간'과 동일한 시작/종료일로 그래프 날짜를 제한
-    const periodStart = isFinalMode
-      ? (info.evalStart || "")
-      : (info.pStart || info.evalStart || "");
-    const periodEnd = isFinalMode
-      ? (info.finalEndDate || info.evalEnd || "")
-      : (info.pEnd || info.evalEnd || "");
+    // ★ 보고 기간 연동 — 단일 진실원(props) 사용. evalEnd 대타 제거.
+    const periodStart = reportPeriodStart;
+    const periodEnd = reportPeriodEnd;
     const inPeriod = (d) => {
       if (periodStart && d < periodStart) return false;
       if (periodEnd && d > periodEnd) return false;
@@ -14382,7 +14406,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
       });
     });
     return [...set].sort();
-  }, [goals, effectiveArchiveList, isFinalMode, info.evalStart, info.evalEnd, info.pStart, info.pEnd, info.finalEndDate]);
+  }, [goals, effectiveArchiveList, isFinalMode, reportPeriodStart, reportPeriodEnd]);
 
   const goalsWithStats = useMemo(() => goals.map(g => {
     const tl = getTimeline(g);
@@ -14565,15 +14589,9 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
             {/* 종결모드: evalStart ~ finalEndDate (전체 치료 기간) / 중간모드: pStart ~ pEnd (보고 기간) */}
             {/* ★ pStart 우선순위: 사용자 입력 > 첫 데이터 입력일 > evalStart */}
             {(() => {
-              const firstDataDate = (() => {
-                if (!stosForReport || stosForReport.length === 0) return null;
-                const dates = [];
-                stosForReport.forEach(s => (s.points || []).forEach(p => { if (p.date) dates.push(p.date); }));
-                return dates.length > 0 ? dates.sort()[0] : null;
-              })();
-              const start = isFinalMode
-                ? (info.evalStart || "—")
-                : (info.pStart || firstDataDate || info.evalStart || "—");
+              const start = (isFinalMode
+                ? reportPeriodStart
+                : reportPeriodStart) || "—";
 
               if (isFinalMode) {
                 return (
@@ -14641,7 +14659,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                   </>
                 );
               } else {
-                const end = info.pEnd || new Date().toISOString().slice(0, 10);
+                const end = reportPeriodEnd || new Date().toISOString().slice(0, 10);
                 return <span>{start} ~ {end}</span>;
               }
             })()}
@@ -15565,6 +15583,8 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
         <ReportGeneratorSection
           info={info}
           stos={stosForReport}
+          reportPeriodStart={reportPeriodStart}
+          reportPeriodEnd={reportPeriodEnd}
           domAvgs={currentAvgs}
           reportFields={reportFields}
           reportSelStrats={reportSelStrats}
@@ -15591,8 +15611,8 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
         if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
           cutoffDate = cutoffArchives[0].savedAt.slice(0, 10);
         }
-        const pStart = info.pStart || info.evalStart || "";
-        const pEnd = info.pEnd || info.evalEnd || "";
+        const pStart = reportPeriodStart || "";
+        const pEnd = reportPeriodEnd || "";
         const photos = all.filter(m => {
           const d = m.uploadedAt || "";
           if (!d || m.type !== "image") return false;
@@ -16008,7 +16028,7 @@ function GrowthHistoryChart({ list }) {
 }
 
 function ReportGeneratorSection({
-  info, stos, domAvgs,
+  info, stos, domAvgs, reportPeriodStart, reportPeriodEnd,
   reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule,
   reportBehaviors, reportSections,
   setReportField, setReportPatch, setInfo,
@@ -16132,7 +16152,7 @@ function ReportGeneratorSection({
     <strong>아동:</strong> ${info.name || "—"} &nbsp;&nbsp;
     <strong>생년월일:</strong> ${info.birth || "—"} &nbsp;&nbsp;
     <strong>치료사:</strong> ${info.therapist || "—"}<br/>
-    <strong>보고 기간:</strong> ${info.pStart || "—"} ~ ${info.pEnd || "—"} &nbsp;&nbsp;
+    <strong>보고 기간:</strong> ${reportPeriodStart || info.pStart || "—"} ~ ${reportPeriodEnd || info.pEnd || "—"} &nbsp;&nbsp;
     <strong>치료 강도:</strong> 주 ${info.sWeek || "—"}회 / ${info.sMin || "—"}분<br/>
     <strong>발행일:</strong> ${today} &nbsp;&nbsp;
     <strong>슈퍼바이저:</strong> ${SUPERVISOR_NAME} (${SUPERVISOR_CERT})
@@ -16247,7 +16267,13 @@ function ReportGeneratorSection({
           <div>
             <label style={{ ...LS, fontSize: 10 }}>보고 종료일</label>
             <input type="date" style={{ ...IS, padding: "5px 8px", fontSize: 11.5 }}
-              value={info.pEnd || ""} onChange={e => setInfo(prev => ({ ...prev, pEnd: e.target.value }))} />
+              value={info.pEnd || ""} onChange={e => setInfo(prev => ({ ...prev, pEnd: e.target.value }))}
+              title="비워두면 데이터 마지막 기록일까지로 자동 설정됩니다." />
+            {!info.pEnd && reportPeriodEnd && (
+              <div style={{ fontSize: 9, color: "#888", marginTop: 2 }}>
+                💡 데이터 마지막 기록일 자동 적용 ({reportPeriodEnd})
+              </div>
+            )}
           </div>
           <div>
             <label style={{ ...LS, fontSize: 10 }}>주 N회</label>
