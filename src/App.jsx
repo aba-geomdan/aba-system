@@ -10911,7 +10911,7 @@ cleanedHTML + '\n' +
                 </PrintSection>
               )
             ) : (
-              stosForReport && stosForReport.length > 0 && (
+              goalsForReport && goalsForReport.length > 0 && (
                 <PrintSection num={nextSn()} title="영역별 세부 학습 목표">
                   <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                     ※ 각 목표는 영역별로 그룹화되어 있으며, 진행률과 최근 데이터 추이를 함께 표시합니다.<br />
