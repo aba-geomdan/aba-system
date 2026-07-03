@@ -4284,8 +4284,9 @@ export default function App() {
   const [view, setView] = useState("edit"); // edit | print
   // ★ 미리보기 화면 진입 시 자동으로 인쇄 대화상자를 띄울지 신호 ("" = 안 함 / "print" = 인쇄 / "pdf" = PDF 저장)
   const [autoPrintAction, setAutoPrintAction] = useState("");
-  const [pendingCutoff, setPendingCutoff] = useState("");  // 인쇄 완료 후 적용할 컷오프(다음 차수 시작일)
-  const [pendingArchiveList, setPendingArchiveList] = useState(null);  // 인쇄 완료 후 반영할 보관 목록
+  // 인쇄 중에만, 방금 저장한 아카이브 1개를 컷오프 계산에서 제외한다.
+  // (방금 저장한 보고서가 자기 자신의 데이터를 컷오프하는 것을 막기 위함)
+  const [printingSuppressArchiveId, setPrintingSuppressArchiveId] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -5055,7 +5056,7 @@ export default function App() {
   const [cutoffDisabled, setCutoffDisabled] = useState(false);
   const effectiveArchiveList = (cutoffDisabled || reportMode === "final")
     ? []
-    : archiveList.filter(item => !item.isFinal);
+    : archiveList.filter(item => !item.isFinal && item.id !== printingSuppressArchiveId);
   const effectiveInfo = (() => {
     if (!cutoffDisabled || !archiveList || archiveList.length === 0) return info;
     const cutoffArchives = archiveList.filter(item => !item.isFinal);
@@ -5390,33 +5391,20 @@ export default function App() {
     };
     const result = await saveArchiveItem(snapshot, autoMode);
     const newList = await loadArchiveList(activeChildId);
-    // ★ [핵심 버그수정] 방금 저장한 아카이브를 즉시 목록에 반영하면,
-    //   그 아카이브의 savedAt이 곧바로 컷오프 기준이 되어 "지금 인쇄할 보고서"의
-    //   데이터를 스스로 잘라내 그래프가 사라진다(보관 후 PDF는 되고 PDF만은 안 되던 원인).
-    //   그래서 목록 반영(setArchiveList)과 컷오프(pStart)는 인쇄가 끝난 뒤 applyCutoff에서 처리.
-    if (result && result.id && !result.overwrite && result.savedAt && !finalMode) {
-      const cutoffDate = result.savedAt.slice(0, 10);
-      const cutoffNext = (() => {
-        const d = new Date(cutoffDate);
-        d.setDate(d.getDate() + 1);
-        return d.toISOString().slice(0, 10);
-      })();
-      return { ...result, cutoffNext, pendingArchiveList: newList };
-    }
-    // 종결/덮어쓰기 등은 컷오프가 없으므로 즉시 반영해도 안전
+    // 보관 목록은 즉시 반영한다(상태 불일치 방지).
+    // "방금 저장한 아카이브가 자기 보고서를 컷오프하는" 문제는, 인쇄 중에만
+    //  컷오프 계산에서 이 id를 제외하는 방식(printingSuppressArchiveId)으로 해결한다.
     setArchiveList(newList);
+    if (result && result.id && !result.overwrite && result.savedAt && !finalMode) {
+      return { ...result, justSavedArchiveId: result.id };
+    }
     return result;
   };
 
-  // 인쇄/PDF가 끝난 뒤 호출 — 보관 목록 반영 + 다음 차수로 컷오프.
-  // ★ pStart를 '저장일+1'로 박지 않는다. 대신 pStart/pEnd를 비워서
-  //   다음 보고서가 "남은 데이터의 첫 날 ~ (사용자가 새로 고르는 종료일)"로
-  //   자동으로 잡히게 한다. (이전 데이터 제외는 아카이브 savedAt 컷오프가 처리하므로
-  //    pStart를 비워도 지난 데이터가 다시 들어오지 않는다.)
-  //   기존처럼 pStart=7/4, pEnd=7/3 로 남으면 시작>종료로 역전돼 기간이 깨졌음.
-  const applyCutoff = (cutoffNext, pendingArchiveList) => {
-    if (pendingArchiveList) setArchiveList(pendingArchiveList);
-    if (!cutoffNext) return;
+  // 인쇄/PDF가 끝난 뒤 호출 — 다음 차수로 넘어가도록 보고 기간을 비운다.
+  // pStart/pEnd를 비우면 다음 보고서는 "남은 데이터의 첫 날 ~ (사용자가 고르는 종료일)"로
+  // 자동으로 잡힌다. 이전 데이터 제외는 아카이브 savedAt 컷오프가 처리하므로 안전.
+  const applyCutoff = () => {
     setInfo(prev => ({ ...prev, pStart: "", pEnd: "" }));
   };
 
@@ -5670,8 +5658,8 @@ export default function App() {
       reportSelPrein={reportSelPrein} reportSelSrein={reportSelSrein} reportReinfSchedule={reportReinfSchedule}
       reportBehaviors={reportBehaviors} stosForReport={stosForReport} goalsForReport={goalsForReport}
       archiveList={effectiveArchiveList} dailyMemos={dailyMemos}
-      autoPrint={autoPrintAction} onAutoPrintDone={() => { setAutoPrintAction(""); if (pendingCutoff || pendingArchiveList) { applyCutoff(pendingCutoff, pendingArchiveList); setPendingCutoff(""); setPendingArchiveList(null); } }}
-      mode={reportMode === "final" ? "final" : "report"} onBack={() => { setAutoPrintAction(""); if (pendingCutoff || pendingArchiveList) { applyCutoff(pendingCutoff, pendingArchiveList); setPendingCutoff(""); setPendingArchiveList(null); } setView("edit"); }} />;
+      autoPrint={autoPrintAction} onAutoPrintDone={() => { setAutoPrintAction(""); if (printingSuppressArchiveId) { setPrintingSuppressArchiveId(""); applyCutoff(); } }}
+      mode={reportMode === "final" ? "final" : "report"} onBack={() => { setAutoPrintAction(""); if (printingSuppressArchiveId) { setPrintingSuppressArchiveId(""); applyCutoff(); } setView("edit"); }} />;
   }
 
   if (!loaded) {
@@ -8465,9 +8453,9 @@ export default function App() {
                   } else {
                     const result = await archiveCurrentReport(true);
                     if (result && result.id) {
-                      // ★ 컷오프와 보관목록 반영은 인쇄가 끝난 뒤 (인쇄물은 현재 기간·데이터로 그려져야 함)
-                      if (result.cutoffNext) setPendingCutoff(result.cutoffNext);
-                      if (result.pendingArchiveList) setPendingArchiveList(result.pendingArchiveList);
+                      // 방금 저장한 아카이브는 인쇄가 끝날 때까지 컷오프 계산에서 제외한다.
+                      // (자기 자신을 컷오프해 그래프가 사라지는 것을 방지)
+                      if (result.justSavedArchiveId) setPrintingSuppressArchiveId(result.justSavedArchiveId);
                       if (result.overwrite) {
                       } else {
                         alert("✅ 보고서가 보관함에 저장되었습니다.");
