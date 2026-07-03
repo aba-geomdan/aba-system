@@ -3128,6 +3128,10 @@ const migrateGoal = (g) => {
     generalizationPlan: "",   // 일반화 계획 자유 텍스트
     ...g
   };
+  // ★ 구버전 호환: 검색 추가 버그로 name/section에 저장된 목표를 item/subDomain으로 복구
+  //   (GoalCard는 item/subDomain을 표시하므로, 이 보정이 없으면 이름이 빈칸으로 보임)
+  if (!base.item && g.name) base.item = g.name;
+  if (!base.subDomain && g.section) base.subDomain = g.section;
   if (base.strategy === "DTT/NET") base.strategy = "";
   if (base.masteryCrit === "80% 이상 2회 연속") base.masteryCrit = "";
   if (Array.isArray(base.tasks)) {
@@ -7643,36 +7647,17 @@ export default function App() {
                             </div>
                             <div style={{ padding: "6px 0" }}>
                               {items.map((r, i) => {
-                                const isIncluded = goals.some(g => g.source === r.curriculum && g.domain === r.domain && g.name === r.item && g.includeInIep);
+                                const isIncluded = goals.some(g => g.source === r.curriculum && g.domain === r.domain && g.item === r.item && g.includeInIep);
                                 return (
                                   <div
                                     key={`${curr}-${i}`}
                                     onClick={() => {
                                       setCurriculum(r.curriculum);
                                       setIepSearchQuery("");
-                                      const existingGoal = goals.find(g => g.source === r.curriculum && g.domain === r.domain && g.name === r.item);
-                                      if (existingGoal) {
-                                        setGoals(prev => prev.map(g => g.id === existingGoal.id ? { ...g, includeInIep: !g.includeInIep } : g));
-                                      } else {
-                                        const newGoal = {
-                                          id: "g_" + Date.now(),
-                                          source: r.curriculum,
-                                          domain: r.domain,
-                                          section: r.section,
-                                          name: r.item,
-                                          description: "",
-                                          includeInIep: true,
-                                          tasks: [{
-                                            id: "t_" + Date.now(),
-                                            name: r.item,
-                                            description: "",
-                                            isActive: true,
-                                            showInDaily: true,
-                                            listGroup: "1"
-                                          }]
-                                        };
-                                        setGoals(prev => [...prev, newGoal]);
-                                      }
+                                      // ★ 일반 추가와 동일한 함수 재사용 — 필드명(domain/subDomain/item)과
+                                      //   vbmapp/esdm 매핑, daily/status 구조까지 완전히 일치시킴.
+                                      //   (예전엔 name/section으로 넣어 GoalCard가 goal.item을 못 찾아 빈 이름으로 표시됨)
+                                      toggleCatalogInclude(r.curriculum, r.domain, r.section, r.item);
                                     }}
                                     style={{
                                       padding: "8px 14px",
