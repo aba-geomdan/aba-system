@@ -9982,11 +9982,13 @@ function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSectio
   useEffect(() => {
     if (autoPrint && !autoPrintFiredRef.current) {
       autoPrintFiredRef.current = true;
-      // 보고서 DOM이 그려질 시간을 약간 준 뒤 실행
+      // 보고서 DOM(특히 SVG 그래프)이 완전히 그려질 시간을 준 뒤 실행.
+      // 600ms로는 '보관 없이 바로 PDF' 경로에서 그래프가 덜 그려진 채 캡처되는
+      // 경우가 있어 넉넉히 늘림.
       const t = setTimeout(() => {
         if (typeof runPrintRef.current === "function") runPrintRef.current();
         if (onAutoPrintDone) onAutoPrintDone();
-      }, 600);
+      }, 1200);
       return () => clearTimeout(t);
     }
   }, [autoPrint]);
