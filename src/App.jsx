@@ -4284,6 +4284,7 @@ export default function App() {
   const [view, setView] = useState("edit"); // edit | print
   // ★ 미리보기 화면 진입 시 자동으로 인쇄 대화상자를 띄울지 신호 ("" = 안 함 / "print" = 인쇄 / "pdf" = PDF 저장)
   const [autoPrintAction, setAutoPrintAction] = useState("");
+  const [pendingCutoff, setPendingCutoff] = useState("");  // 인쇄 완료 후 적용할 컷오프(다음 차수 시작일)
 
   useEffect(() => {
     (async () => {
@@ -5171,6 +5172,7 @@ export default function App() {
       return true;
     };
     return includedGoals
+      .filter(g => g.showInDaily)   // ★ 데이터시트에 올린(시트 ON) 목표만 보고서에 포함
       .filter(g => {
         if (cutoffDate && g.status === "mastered") {
           const taskMastered = (g.tasks || []).map(t => t.masteredAt).filter(Boolean).sort();
@@ -5388,6 +5390,10 @@ export default function App() {
     const result = await saveArchiveItem(snapshot, autoMode);
     const newList = await loadArchiveList(activeChildId);
     setArchiveList(newList);
+    // ★ 컷오프(다음 차수 시작일 = 저장일+1)를 즉시 적용하지 않고 반환만 한다.
+    //   인쇄/PDF는 "현재 기간"으로 먼저 그려져야 하므로, 호출부가 인쇄를 끝낸 뒤
+    //   applyCutoff()로 pStart를 갱신한다. (즉시 적용하면 인쇄물이 이미 넘어간
+    //    기간으로 그려져 그래프가 사라지는 문제가 있었음)
     if (result && result.id && !result.overwrite && result.savedAt && !finalMode) {
       const cutoffDate = result.savedAt.slice(0, 10);
       const cutoffNext = (() => {
@@ -5395,15 +5401,15 @@ export default function App() {
         d.setDate(d.getDate() + 1);
         return d.toISOString().slice(0, 10);
       })();
-      setInfo(prev => {
-        if (prev.pStart === cutoffNext) return prev;
-        return {
-          ...prev,
-          pStart: cutoffNext
-        };
-      });
+      return { ...result, cutoffNext };
     }
     return result;
+  };
+
+  // 인쇄/PDF가 끝난 뒤 호출 — 다음 차수 시작일(컷오프)을 적용한다.
+  const applyCutoff = (cutoffNext) => {
+    if (!cutoffNext) return;
+    setInfo(prev => (prev.pStart === cutoffNext ? prev : { ...prev, pStart: cutoffNext }));
   };
 
   const handleDeleteArchive = async (archiveId) => {
@@ -5656,8 +5662,8 @@ export default function App() {
       reportSelPrein={reportSelPrein} reportSelSrein={reportSelSrein} reportReinfSchedule={reportReinfSchedule}
       reportBehaviors={reportBehaviors} stosForReport={stosForReport} goalsForReport={goalsForReport}
       archiveList={effectiveArchiveList} dailyMemos={dailyMemos}
-      autoPrint={autoPrintAction} onAutoPrintDone={() => setAutoPrintAction("")}
-      mode={reportMode === "final" ? "final" : "report"} onBack={() => { setAutoPrintAction(""); setView("edit"); }} />;
+      autoPrint={autoPrintAction} onAutoPrintDone={() => { setAutoPrintAction(""); if (pendingCutoff) { applyCutoff(pendingCutoff); setPendingCutoff(""); } }}
+      mode={reportMode === "final" ? "final" : "report"} onBack={() => { setAutoPrintAction(""); if (pendingCutoff) { applyCutoff(pendingCutoff); setPendingCutoff(""); } setView("edit"); }} />;
   }
 
   if (!loaded) {
@@ -8451,6 +8457,8 @@ export default function App() {
                   } else {
                     const result = await archiveCurrentReport(true);
                     if (result && result.id) {
+                      // ★ 컷오프는 인쇄가 끝난 뒤 적용 (인쇄물은 현재 기간으로 그려져야 함)
+                      if (result.cutoffNext) setPendingCutoff(result.cutoffNext);
                       if (result.overwrite) {
                       } else {
                         alert("✅ 보고서가 보관함에 저장되었습니다.");
