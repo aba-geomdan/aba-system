@@ -2936,6 +2936,15 @@ function fmtArchivePeriod(start, end) {
   return new Date().toISOString().slice(0, 7).replace("-", ".");
 }
 
+// ★ 컷오프 기준 날짜 — "이번에 보고한 마지막 데이터 날짜"(cutoffDataDate)를 우선 사용.
+//   컷오프 후 다음 보고서는 이 날짜 '이후' 새로 찍힌 데이터부터 시작.
+//   옛 아카이브(cutoffDataDate 없음)는 savedAt(저장 시각)으로 폴백(하위호환).
+function cutoffOf(item) {
+  if (!item) return null;
+  if (item.cutoffDataDate) return String(item.cutoffDataDate).slice(0, 10);
+  return item.savedAt ? String(item.savedAt).slice(0, 10) : null;
+}
+
 async function loadArchiveList(childId) {
   if (!childId) return [];
   try {
@@ -2995,7 +3004,7 @@ async function saveArchiveItem(snapshot, autoMode) {
             await window.storage.set(ARCHIVE_ITEM_PREFIX + fullId, JSON.stringify(fullSnap)).catch(() => {});
           }
         } catch (e) {}
-        list = list.map(item => item.id === fullId ? { ...item, savedAt: fullSnap.savedAt } : item);
+        list = list.map(item => item.id === fullId ? { ...item, savedAt: fullSnap.savedAt, cutoffDataDate: fullSnap.cutoffDataDate || item.cutoffDataDate || "" } : item);
         try {
           if (typeof localStorage !== "undefined") localStorage.setItem(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(list));
         } catch (e) {}
@@ -3018,7 +3027,7 @@ async function saveArchiveItem(snapshot, autoMode) {
         await window.storage.set(ARCHIVE_ITEM_PREFIX + id, JSON.stringify(fullSnap)).catch(() => {});
       }
     } catch (e) {}
-    const indexEntry = { id, title: fullSnap.title, period: fullSnap.period, order, savedAt: fullSnap.savedAt, auto: fullSnap.auto, isFinal: fullSnap.isFinal || false, isIep: fullSnap.isIep || false, prevEvalStart: fullSnap.prevEvalStart || "", prevEvalEnd: fullSnap.prevEvalEnd || "" };
+    const indexEntry = { id, title: fullSnap.title, period: fullSnap.period, order, savedAt: fullSnap.savedAt, auto: fullSnap.auto, isFinal: fullSnap.isFinal || false, isIep: fullSnap.isIep || false, prevEvalStart: fullSnap.prevEvalStart || "", prevEvalEnd: fullSnap.prevEvalEnd || "", cutoffDataDate: fullSnap.cutoffDataDate || "" };
     const newList = [...list, indexEntry];
     try {
       if (typeof localStorage !== "undefined") localStorage.setItem(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(newList));
@@ -5081,8 +5090,7 @@ export default function App() {
   //   저장된 아카이브 savedAt 이하 데이터는 이전 차수라 제외.
   const reportCutoffDate = useMemo(() => {
     if (!effectiveArchiveList || effectiveArchiveList.length === 0) return null;
-    const latest = effectiveArchiveList[0];
-    return latest && latest.savedAt ? latest.savedAt.slice(0, 10) : null;
+    return cutoffOf(effectiveArchiveList[0]);
   }, [effectiveArchiveList]);
   // ★ 데이터 첫 날 — 원본 goals에서 계산(보고 기간 필터 전, 단 컷오프는 반영).
   //   pStart가 비었을 때 시작일 대타.
@@ -5127,13 +5135,7 @@ export default function App() {
 
   const stosForReport = useMemo(() => {
     if (!needsReportCalc) return [];
-    let cutoffDate = null;
-    if (effectiveArchiveList && effectiveArchiveList.length > 0) {
-      const latestArchive = effectiveArchiveList[0];
-      if (latestArchive.savedAt) {
-        cutoffDate = latestArchive.savedAt.slice(0, 10);
-      }
-    }
+    const cutoffDate = reportCutoffDate;
     // ★ 보고 기간 연동 — 단일 진실원(reportPeriodStart/End) 사용. evalEnd 대타 제거.
     const periodStart = reportPeriodStart;
     const periodEnd = reportPeriodEnd;
@@ -5190,13 +5192,7 @@ export default function App() {
 
   const goalsForReport = useMemo(() => {
     if (!needsReportCalc) return [];
-    let cutoffDate = null;
-    if (effectiveArchiveList && effectiveArchiveList.length > 0) {
-      const latestArchive = effectiveArchiveList[0];
-      if (latestArchive.savedAt) {
-        cutoffDate = latestArchive.savedAt.slice(0, 10);
-      }
-    }
+    const cutoffDate = reportCutoffDate;
     // ★ 보고 기간 연동 — stosForReport와 동일한 단일 진실원 사용. evalEnd 대타 제거.
     const periodStart = reportPeriodStart;
     const periodEnd = reportPeriodEnd;
@@ -5271,13 +5267,7 @@ export default function App() {
 
   const currentAvgs = useMemo(() => {
     if (!needsReportCalc) return [];
-    let cutoffDate = null;
-    if (effectiveArchiveList && effectiveArchiveList.length > 0) {
-      const latestArchive = effectiveArchiveList[0];
-      if (latestArchive.savedAt) {
-        cutoffDate = latestArchive.savedAt.slice(0, 10);
-      }
-    }
+    const cutoffDate = reportCutoffDate;
     const grouped = {};
     includedGoals.forEach(g => {
       const taskLatests = [];
@@ -5418,6 +5408,8 @@ export default function App() {
       isFinal: finalMode,
       prevEvalStart: resolvedStart,
       prevEvalEnd: resolvedEnd,
+      // ★ 컷오프 기준 = 이번 보고의 마지막 데이터 날짜. 다음 보고서는 이 날짜 이후부터.
+      cutoffDataDate: resolvedEnd || "",
       reportSections: { ...sections },
       reportSelStrats: [...(reportSelStrats || [])],
       reportSelStratsCustom: reportSelStratsCustom || "",
@@ -7391,7 +7383,7 @@ export default function App() {
               if (cutoffArchives.length === 0 || !cutoffArchives[0].savedAt) return null;
               return (
                 <div style={{ marginBottom: 12, padding: "10px 14px", background: "#eff5fc", borderLeft: "3px solid #2a6cb2", borderRadius: 6, fontSize: 11, color: "#1d4d80", lineHeight: 1.65 }}>
-                  📌 <b>{cutoffArchives[0].savedAt.slice(0, 10)} 보고서 발행</b> — 영역별 현행 수준은 보고서 발행 이후 데이터 기준으로 계산됩니다.
+                  📌 <b>{cutoffOf(cutoffArchives[0])} 이후 데이터 기준</b> — 영역별 현행 수준은 직전 보고서의 마지막 데이터 이후 기록으로 계산됩니다.
                 </div>
               );
             })()}
@@ -9566,11 +9558,12 @@ function GoalCard({ goal, active, onToggle, onRemove, onUpdate, onToggleStatus, 
               const completedAt = (taskDates.length > 0 ? taskDates[taskDates.length - 1] : null) || goal.masteredAt;
               const cutoffArchives = (archiveList || []).filter(item => !item.isFinal);
               if (!completedAt || cutoffArchives.length === 0) return null;
-              const sorted = [...cutoffArchives].sort((a, b) => (a.savedAt || "").localeCompare(b.savedAt || ""));
+              const sorted = [...cutoffArchives].sort((a, b) => (cutoffOf(a) || "").localeCompare(cutoffOf(b) || ""));
               let publishedAt = null;
               for (const arch of sorted) {
-                if (arch.savedAt && arch.savedAt.slice(0, 10) >= completedAt) {
-                  publishedAt = arch.savedAt.slice(0, 10);
+                const cd = cutoffOf(arch);
+                if (cd && cd >= completedAt) {
+                  publishedAt = cd;
                   break;
                 }
               }
@@ -9597,11 +9590,12 @@ function GoalCard({ goal, active, onToggle, onRemove, onUpdate, onToggleStatus, 
               const pausedDates = pausedTasks.map(t => t.pausedAt).filter(Boolean).sort();
               if (pausedDates.length === 0) return null;
               const earliestPausedAt = pausedDates[0]; // 가장 빨리 중단된 것
-              const sorted = [...cutoffArchives].sort((a, b) => (a.savedAt || "").localeCompare(b.savedAt || ""));
+              const sorted = [...cutoffArchives].sort((a, b) => (cutoffOf(a) || "").localeCompare(cutoffOf(b) || ""));
               let publishedAt = null;
               for (const arch of sorted) {
-                if (arch.savedAt && arch.savedAt.slice(0, 10) >= earliestPausedAt) {
-                  publishedAt = arch.savedAt.slice(0, 10);
+                const cd = cutoffOf(arch);
+                if (cd && cd >= earliestPausedAt) {
+                  publishedAt = cd;
                   break;
                 }
               }
@@ -9618,9 +9612,8 @@ function GoalCard({ goal, active, onToggle, onRemove, onUpdate, onToggleStatus, 
               if (resumedTasks.length === 0) return null;
               const cutoffArchives = (archiveList || []).filter(item => !item.isFinal);
               if (cutoffArchives.length === 0) return null;
-              const latestArchive = cutoffArchives[0];
-              if (!latestArchive.savedAt) return null;
-              const archiveDate = latestArchive.savedAt.slice(0, 10);
+              const archiveDate = cutoffOf(cutoffArchives[0]);
+              if (!archiveDate) return null;
               const recentResumed = resumedTasks.filter(t => t.resumedAt > archiveDate);
               if (recentResumed.length === 0) return null;
               const earliestResume = recentResumed.map(t => t.resumedAt).sort()[0];
@@ -10885,7 +10878,7 @@ cleanedHTML + '\n' +
               let cutoffDate = null;
               const cutoffArchives = (archiveList || []).filter(item => !item.isFinal);
               if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
-                cutoffDate = cutoffArchives[0].savedAt.slice(0, 10);
+                cutoffDate = cutoffOf(cutoffArchives[0]);
               }
               // ★ 보고 기간 연동 — 단일 진실원(props) 사용. evalEnd 대타 제거.
               const periodStart = reportPeriodStart;
@@ -11291,7 +11284,7 @@ cleanedHTML + '\n' +
           let cutoffDate = null;
           const cutoffArchives = (archiveList || []).filter(item => !item.isFinal);
           if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
-            cutoffDate = cutoffArchives[0].savedAt.slice(0, 10);
+            cutoffDate = cutoffOf(cutoffArchives[0]);
           }
           const periodStart = reportPeriodStart || "";
           const periodEnd = reportPeriodEnd || "";
@@ -12072,7 +12065,7 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
     let cutoffDate = null;
     const cutoffArchives = (archiveList || []).filter(item => !item.isFinal);
     if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
-      cutoffDate = cutoffArchives[0].savedAt.slice(0, 10);
+      cutoffDate = cutoffOf(cutoffArchives[0]);
     }
     let n = 0;
     goals.forEach(g => (g.tasks || []).forEach(t => {
@@ -12088,7 +12081,7 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
     let cutoffDate = null;
     const cutoffArchives = (archiveList || []).filter(item => !item.isFinal);
     if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
-      cutoffDate = cutoffArchives[0].savedAt.slice(0, 10);
+      cutoffDate = cutoffOf(cutoffArchives[0]);
     }
     const findMemos = (dates) => {
       if (!dailyMemos) return [];
@@ -12363,8 +12356,8 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
       {/* ★ [종결보관본 제외] isFinal=true는 cutoff 기준에 사용하지 않음 */}
       {(() => {
         const cutoffArchives = (archiveList || []).filter(item => !item.isFinal);
-        if (cutoffArchives.length === 0 || !cutoffArchives[0].savedAt) return null;
-        const cutoff = cutoffArchives[0].savedAt.slice(0, 10);
+        const cutoff = cutoffArchives.length > 0 ? cutoffOf(cutoffArchives[0]) : null;
+        if (!cutoff) return null;
         const isPast = dailyDate <= cutoff;
         return isPast ? (
           <div style={{ marginBottom: 12, padding: "10px 14px", background: "#f5f0e6", borderLeft: "3px solid #a87108", borderRadius: 6, fontSize: 11, color: "#604515", lineHeight: 1.65 }}>
@@ -12813,7 +12806,7 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
                 let cutoffDate = null;
                 const cutoffArchives = (archiveList || []).filter(item => !item.isFinal);
                 if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
-                  cutoffDate = cutoffArchives[0].savedAt.slice(0, 10);
+                  cutoffDate = cutoffOf(cutoffArchives[0]);
                 }
                 const masteredGoals = sortGoals(items.filter(g => {
                   if (g.status !== "mastered") return false;
@@ -12844,10 +12837,11 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
                             let publishedAt = null;
                             if (completedAt && archiveList && archiveList.length > 0) {
                               const cutoffArchives = archiveList.filter(item => !item.isFinal);
-                              const sorted = [...cutoffArchives].sort((a, b) => (a.savedAt || "").localeCompare(b.savedAt || ""));
+                              const sorted = [...cutoffArchives].sort((a, b) => (cutoffOf(a) || "").localeCompare(cutoffOf(b) || ""));
                               for (const arch of sorted) {
-                                if (arch.savedAt && arch.savedAt.slice(0, 10) >= completedAt) {
-                                  publishedAt = arch.savedAt.slice(0, 10);
+                                const cd = cutoffOf(arch);
+                                if (cd && cd >= completedAt) {
+                                  publishedAt = cd;
                                   break;
                                 }
                               }
@@ -14043,8 +14037,8 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   const cutoffArchives = (archiveList || []).filter(item => !item.isFinal);
   if (cutoffArchives.length >= 2) {
     const prevArchive = cutoffArchives[1];  // 이전 차수 보고서
-    const prevDate = prevArchive.savedAt ? prevArchive.savedAt.slice(0, 10) : null;
-    const currentArchiveDate = cutoffArchives[0].savedAt ? cutoffArchives[0].savedAt.slice(0, 10) : null;
+    const prevDate = cutoffOf(prevArchive);
+    const currentArchiveDate = cutoffOf(cutoffArchives[0]);
     if (prevDate) {
       const prevSnapStos = prevArchive.snapshot?.stosForReport || prevArchive.snapshot?.stos || [];
       const prevDoneCount = prevSnapStos.filter(s => s.status === "완료").length;
@@ -14374,7 +14368,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
   const allDates = useMemo(() => {
     let cutoffDate = null;
     if (effectiveArchiveList && effectiveArchiveList.length > 0 && effectiveArchiveList[0].savedAt) {
-      cutoffDate = effectiveArchiveList[0].savedAt.slice(0, 10);
+      cutoffDate = cutoffOf(effectiveArchiveList[0]);
     }
     // ★ 보고 기간 연동 — 단일 진실원(props) 사용. evalEnd 대타 제거.
     const periodStart = reportPeriodStart;
@@ -14784,7 +14778,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
             {/* ★ 컷오프 알림 — 이전 보고서 보관 후 그래프 새로 그리는 중 */}
             {effectiveArchiveList && effectiveArchiveList.length > 0 && effectiveArchiveList[0].savedAt && (
               <div style={{ fontSize: 11, color: "#1d4d80", lineHeight: 1.6, padding: "8px 12px", background: "#e8f4ff", borderLeft: "3px solid #2a6cb2", borderRadius: 4, marginBottom: 12 }}>
-                💡 <b>그래프 컷오프 적용 중</b> — 가장 최근 보관된 보고서({effectiveArchiveList[0].savedAt.slice(0, 10)}) 이후 데이터만 표시되고 있습니다. 이전 데이터를 다시 보려면 아래 보관함에서 해당 보고서를 삭제하세요.
+                💡 <b>그래프 컷오프 적용 중</b> — 직전 보관 보고서의 마지막 데이터({cutoffOf(effectiveArchiveList[0])}) 이후 데이터만 표시되고 있습니다. 이전 데이터를 다시 보려면 아래 보관함에서 해당 보고서를 삭제하세요.
               </div>
             )}
             <GoalDashboard stos={goalsForReport} />
@@ -15609,7 +15603,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
         let cutoffDate = null;
         const cutoffArchives = (effectiveArchiveList || []).filter(item => !item.isFinal);
         if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
-          cutoffDate = cutoffArchives[0].savedAt.slice(0, 10);
+          cutoffDate = cutoffOf(cutoffArchives[0]);
         }
         const pStart = reportPeriodStart || "";
         const pEnd = reportPeriodEnd || "";
@@ -16829,7 +16823,7 @@ function TaskProgressTable({ goals, calcDayRate, listGroup, title, color, archiv
     let cutoffDate = null;
     const cutoffArchives = (archiveList || []).filter(item => !item.isFinal);
     if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
-      cutoffDate = cutoffArchives[0].savedAt.slice(0, 10);
+      cutoffDate = cutoffOf(cutoffArchives[0]);
     }
     const result = [];
     goals.forEach(g => {
