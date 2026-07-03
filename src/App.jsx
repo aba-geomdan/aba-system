@@ -5093,7 +5093,9 @@ export default function App() {
       return true;
     };
     const result = [];
-    includedGoals.forEach(g => {
+    // ★ 데이터시트(데일리 탭)에 올린 목표만 보고서에 포함 — 시트 OFF 목표는 제외
+    //   (데일리 탭 dailyGoals와 동일 기준: includeInIep && showInDaily)
+    includedGoals.filter(g => g.showInDaily).forEach(g => {
       (g.tasks || []).forEach(t => {
         if (cutoffDate && t.listGroup === "2" && t.masteredAt && t.masteredAt <= cutoffDate) {
           return;
@@ -15570,6 +15572,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
           setInfo={setInfo}
           dailyMemos={dailyMemos}
           archiveList={effectiveArchiveList}
+          reportMode={reportMode}
         />
       )}
 
@@ -16002,7 +16005,7 @@ function ReportGeneratorSection({
   reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule,
   reportBehaviors, reportSections,
   setReportField, setReportPatch, setInfo,
-  dailyMemos, archiveList
+  dailyMemos, archiveList, reportMode
 }) {
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
