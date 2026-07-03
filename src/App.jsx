@@ -5408,11 +5408,16 @@ export default function App() {
     return result;
   };
 
-  // 인쇄/PDF가 끝난 뒤 호출 — 보관 목록 반영 + 다음 차수 시작일(컷오프)을 적용한다.
+  // 인쇄/PDF가 끝난 뒤 호출 — 보관 목록 반영 + 다음 차수로 컷오프.
+  // ★ pStart를 '저장일+1'로 박지 않는다. 대신 pStart/pEnd를 비워서
+  //   다음 보고서가 "남은 데이터의 첫 날 ~ (사용자가 새로 고르는 종료일)"로
+  //   자동으로 잡히게 한다. (이전 데이터 제외는 아카이브 savedAt 컷오프가 처리하므로
+  //    pStart를 비워도 지난 데이터가 다시 들어오지 않는다.)
+  //   기존처럼 pStart=7/4, pEnd=7/3 로 남으면 시작>종료로 역전돼 기간이 깨졌음.
   const applyCutoff = (cutoffNext, pendingArchiveList) => {
     if (pendingArchiveList) setArchiveList(pendingArchiveList);
     if (!cutoffNext) return;
-    setInfo(prev => (prev.pStart === cutoffNext ? prev : { ...prev, pStart: cutoffNext }));
+    setInfo(prev => ({ ...prev, pStart: "", pEnd: "" }));
   };
 
   const handleDeleteArchive = async (archiveId) => {
