@@ -5154,11 +5154,15 @@ export default function App() {
   //   시작일은 저장된 pStart를 아예 무시하고 항상 firstDataDate(컷오프 반영) 사용 → 낡은 pStart 문제 원천 차단.
   //   종료일은 사용자가 직접 넣는 pEnd 우선. 단 pEnd가 시작일·데이터 첫날보다 앞이면 낡은 값 → 데이터 마지막날.
   const _isFinalReport = reportMode === "final";
+  // ★ 컷오프는 했지만 그 이후 새 데이터가 아직 없는 상태 → 날짜/그래프를 '대기중'으로 처리.
+  //   (firstDataDate는 컷오프 이후 첫 데이터인데, 새 데이터가 없으면 null이 된다.)
+  const awaitingNewData = !_isFinalReport && !!reportCutoffDate && !firstDataDate;
   const reportPeriodStart = _isFinalReport
     ? (effectiveInfo.evalStart || "")
-    : (firstDataDate || effectiveInfo.evalStart || "");
+    : (awaitingNewData ? "" : (firstDataDate || effectiveInfo.evalStart || ""));
   const reportPeriodEnd = (() => {
     if (_isFinalReport) return effectiveInfo.finalEndDate || lastDataDate || "";
+    if (awaitingNewData) return "";  // 새 데이터 대기중 → 기간 비움
     const fd = firstDataDate || "";
     const ld = lastDataDate || "";
     const pe = effectiveInfo.pEnd || "";
@@ -8471,6 +8475,7 @@ export default function App() {
             lastDataDate={lastDataDate}
             reportPeriodStart={reportPeriodStart}
             reportPeriodEnd={reportPeriodEnd}
+            awaitingNewData={awaitingNewData}
             askConfirm={askConfirm}
             reportFields={reportFields}
             reportSelStrats={reportSelStrats}
@@ -14381,7 +14386,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   return r;
 }
 
-function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domainLevelOverrides, getTimeline, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, askConfirm, reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportBehaviors, reportSections, dailyMemos, setReportField, setReportPatch, setInfo, archiveList, cutoffDisabled, setCutoffDisabled, reportMode, setReportMode, onArchiveSave, onArchiveDelete, onArchiveView, onPrev, onPreview, onPrint }) {
+function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domainLevelOverrides, getTimeline, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, awaitingNewData, askConfirm, reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportBehaviors, reportSections, dailyMemos, setReportField, setReportPatch, setInfo, archiveList, cutoffDisabled, setCutoffDisabled, reportMode, setReportMode, onArchiveSave, onArchiveDelete, onArchiveView, onPrev, onPreview, onPrint }) {
   const [showReportHelp, setShowReportHelp] = useState(false); // ★ 인쇄 안내 박스 접기 (기본 접힘)
   const visibleArchiveList = useMemo(() => {
     if (!archiveList || archiveList.length === 0) return [];
@@ -14541,6 +14546,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
 
       {/* PDF-2: SUMMARY · 핵심 한 줄 요약 (부모님이 펴자마자 결론 파악) */}
       {(() => {
+        if (awaitingNewData) return null;  // 새 데이터 대기중이면 요약 문구 숨김
         const summary = buildSummary(stosForReport, info);
         if (!summary) return null;
         return (
@@ -14618,6 +14624,14 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
             {/* 종결모드: evalStart ~ finalEndDate (전체 치료 기간) / 중간모드: pStart ~ pEnd (보고 기간) */}
             {/* ★ pStart 우선순위: 사용자 입력 > 첫 데이터 입력일 > evalStart */}
             {(() => {
+              // ★ 컷오프 후 새 데이터가 아직 없으면 날짜 대신 안내 문구.
+              if (awaitingNewData) {
+                return (
+                  <span style={{ fontSize: 15, fontWeight: 600, opacity: 0.95 }}>
+                    ⏳ 새 데이터 입력 대기중
+                  </span>
+                );
+              }
               const start = (isFinalMode
                 ? reportPeriodStart
                 : reportPeriodStart) || "—";
@@ -14697,10 +14711,10 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 0, padding: "14px 0" }}>
           {[
             { label: "총 목표", val: `${goals.length}개`, color: PKD },
-            { label: "기록된 목표", val: `${summary.recorded}/${summary.total}`, color: BLUE },
-            { label: "평균 수행률", val: summary.avg === null ? "—" : `${summary.avg}%`, color: summary.avg === null ? "#ccc" : summary.avg >= 80 ? GREEN : summary.avg >= 50 ? BLUE : ORANGE },
-            { label: "숙달 근접 (80%+)", val: `${summary.mastered}개`, color: GREEN },
-            { label: "세션 수", val: `${summary.sessions}회`, color: "#555" }
+            { label: "기록된 목표", val: awaitingNewData ? "—" : `${summary.recorded}/${summary.total}`, color: BLUE },
+            { label: "평균 수행률", val: awaitingNewData ? "—" : (summary.avg === null ? "—" : `${summary.avg}%`), color: awaitingNewData || summary.avg === null ? "#ccc" : summary.avg >= 80 ? GREEN : summary.avg >= 50 ? BLUE : ORANGE },
+            { label: "숙달 근접 (80%+)", val: awaitingNewData ? "—" : `${summary.mastered}개`, color: GREEN },
+            { label: "세션 수", val: awaitingNewData ? "—" : `${summary.sessions}회`, color: "#555" }
           ].map((s, i) => (
             <div key={i} style={{ textAlign: "center", padding: "6px 10px", borderRight: i < 4 ? "1px solid #f0e0e5" : "none" }}>
               <div style={{ fontSize: 10, color: "#767676", marginBottom: 4, fontWeight: 500 }}>{s.label}</div>
@@ -14711,7 +14725,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
       </div>
 
       {/* 영역별 평균 비교 */}
-      {currentAvgs.length > 0 && (
+      {!awaitingNewData && currentAvgs.length > 0 && (
         <div style={CS}>
           <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 12, color: PKD }}>영역별 수행 현황</h3>
           <div>
@@ -14725,7 +14739,19 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
       )}
 
       {/* 영역별 진전도 추이 (시간축 다중 꺾은선) */}
-      {(() => {
+      {awaitingNewData ? (
+        <div style={CS}>
+          <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 12, color: PKD }}>📈 영역별 진전도 추이</h3>
+          <div style={{ padding: "40px 20px", textAlign: "center", color: "#999", background: "#FAFAFA", borderRadius: 10, border: "1px dashed #ddd" }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>⏳</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#888", marginBottom: 4 }}>새 데이터 입력 대기중</div>
+            <div style={{ fontSize: 11, color: "#aaa", lineHeight: 1.6 }}>
+              직전 보고서를 저장(컷오프)했습니다.<br />
+              다음 회기 데이터를 입력하면 이 기간의 그래프가 새로 그려집니다.
+            </div>
+          </div>
+        </div>
+      ) : (() => {
         const TREND_COLORS = ["#C97B92", "#B5895F", "#8E7BB0", "#7089A0", "#7BA05B", "#5A9AAA", "#C99A5B", "#A87088"];
         // 영역별로 목표를 묶고, 날짜별 평균 정반응률 계산
         const domainMap = {};  // domain -> { date -> [rate들] }
