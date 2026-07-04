@@ -15643,6 +15643,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
           stos={stosForReport}
           reportPeriodStart={reportPeriodStart}
           reportPeriodEnd={reportPeriodEnd}
+          awaitingNewData={awaitingNewData}
           domAvgs={currentAvgs}
           reportFields={reportFields}
           reportSelStrats={reportSelStrats}
@@ -16086,7 +16087,7 @@ function GrowthHistoryChart({ list }) {
 }
 
 function ReportGeneratorSection({
-  info, stos, domAvgs, reportPeriodStart, reportPeriodEnd,
+  info, stos, domAvgs, reportPeriodStart, reportPeriodEnd, awaitingNewData,
   reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule,
   reportBehaviors, reportSections,
   setReportField, setReportPatch, setInfo,
@@ -16310,14 +16311,19 @@ function ReportGeneratorSection({
               return (
                 <>
                   <input type="date" style={{ ...IS, padding: "5px 8px", fontSize: 11.5 }}
-                    value={info.pStart || firstDataDate || info.evalStart || ""}
+                    value={awaitingNewData ? "" : (info.pStart || firstDataDate || info.evalStart || "")}
                     onChange={e => setInfo(prev => ({ ...prev, pStart: e.target.value }))}
-                    title="보고 시작일은 IEP 평가 시작일과 별도입니다. 비워두면 첫 데이터 입력일로 자동 설정되며, 보관 후에는 다음 차수 시작일(보관일+1)로 자동 갱신됩니다." />
-                  {!info.pStart && firstDataDate && (
+                    disabled={awaitingNewData}
+                    title="보고 시작일은 IEP 평가 시작일과 별도입니다. 비워두면 첫 데이터 입력일로 자동 설정되며, 보관 후에는 다음 차수 데이터 첫날로 자동 갱신됩니다." />
+                  {awaitingNewData ? (
+                    <div style={{ fontSize: 9, color: "#c78", marginTop: 2 }}>
+                      ⏳ 새 데이터 입력 시 자동 설정
+                    </div>
+                  ) : (!info.pStart && firstDataDate && (
                     <div style={{ fontSize: 9, color: "#888", marginTop: 2 }}>
                       💡 첫 데이터 입력일 자동 적용 ({firstDataDate})
                     </div>
-                  )}
+                  ))}
                 </>
               );
             })()}
