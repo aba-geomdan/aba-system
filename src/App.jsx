@@ -790,8 +790,8 @@ function buildSummary(stosForReport, info) {
     if (pts.length > 0) {
       const lastV = pts[pts.length - 1].value;
       const firstV = pts[0].value;
-      if (typeof lastV === "number" && lastV > 0) { lastSum += lastV; lastCnt++; }
-      if (typeof firstV === "number" && firstV > 0) { firstSum += firstV; firstCnt++; }
+      if (typeof lastV === "number") { lastSum += lastV; lastCnt++; }
+      if (typeof firstV === "number") { firstSum += firstV; firstCnt++; }
     }
   });
   const lastAvg = lastCnt > 0 ? Math.round(lastSum / lastCnt) : 0;
@@ -1280,18 +1280,18 @@ function buildInterimStrengths(domAvgs, stos, info) {
 
   const strengths = [];
 
-  const highDomains = domAvgs.filter(d => d.value >= 80);
+  const highDomains = domAvgs.filter(d => d.avg >= 80);
   if (highDomains.length >= 2) {
-    const names = highDomains.slice(0, 3).map(d => d.name).join("·");
+    const names = highDomains.slice(0, 3).map(d => cleanDomainKey(d.domain)).join("·");
     strengths.push({
       title: "여러 영역의 안정적 수행",
       desc: `${names} 영역에서 일관되게 높은 수행이 나오고 있어, ${fn}${이가(fn)} 학습한 내용을 안정적으로 활용할 수 있는 기반이 있습니다.`
     });
   } else if (highDomains.length === 1) {
-    const d = highDomains[0];
+    const dName = cleanDomainKey(highDomains[0].domain);
     strengths.push({
-      title: `${d.name} 영역의 안정적 수행`,
-      desc: `${d.name} 영역에서 안정적인 수행이 나오고 있어, ${fn}의 강점 영역으로 확인됩니다.`
+      title: `${dName} 영역의 안정적 수행`,
+      desc: `${dName} 영역에서 안정적인 수행이 나오고 있어, ${fn}의 강점 영역으로 확인됩니다.`
     });
   }
 
@@ -1332,9 +1332,9 @@ function buildInterimStrengths(domAvgs, stos, info) {
   }
 
   if (domAvgs.length >= 4) {
-    const avgValue = domAvgs.reduce((s, d) => s + d.value, 0) / domAvgs.length;
+    const avgValue = domAvgs.reduce((s, d) => s + d.avg, 0) / domAvgs.length;
     const stdDev = Math.sqrt(
-      domAvgs.reduce((s, d) => s + Math.pow(d.value - avgValue, 2), 0) / domAvgs.length
+      domAvgs.reduce((s, d) => s + Math.pow(d.avg - avgValue, 2), 0) / domAvgs.length
     );
     if (stdDev < 15 && avgValue >= 50) {
       strengths.push({
@@ -5309,30 +5309,10 @@ export default function App() {
     const cutoffDate = reportCutoffDate;
     const grouped = {};
     includedGoals.forEach(g => {
-      const taskLatests = [];
-      (g.tasks || []).forEach(t => {
-        const daily = t.daily || {};
-        const dates = Object.keys(daily)
-          .filter(d => !cutoffDate || d >= cutoffDate)
-          .sort();
-        for (let i = dates.length - 1; i >= 0; i--) {
-          const r = calcDayRate(daily[dates[i]], t.plannedTrials);
-          if (r !== null) { taskLatests.push(r); break; }
-        }
-      });
-      let goalValue = null;
-      if (taskLatests.length > 0) {
-        goalValue = Math.round(taskLatests.reduce((a, b) => a + b, 0) / taskLatests.length);
-      } else {
-        const oldDaily = g.daily || {};
-        const oldDates = Object.keys(oldDaily)
-          .filter(d => !cutoffDate || d >= cutoffDate)
-          .sort();
-        for (let i = oldDates.length - 1; i >= 0; i--) {
-          const r = calcDayRate(oldDaily[oldDates[i]]);
-          if (r !== null) { goalValue = r; break; }
-        }
-      }
+      // ★ 요약카드(summary.avg)와 동일 기준으로 통일 — goal 통합 시계열의 최근 값 사용.
+      //   (기존: task별 독립 최신값 평균 → goal 최근 세션 통합값. 요약카드와 계산 일치)
+      const tl = getTimeline(g);
+      const goalValue = tl.length > 0 ? tl[tl.length - 1].rate : null;
       if (goalValue === null) return;
       if (!grouped[g.domain]) grouped[g.domain] = { sum: 0, n: 0 };
       grouped[g.domain].sum += goalValue;
@@ -9915,7 +9895,7 @@ function BarChart({ data }) {
       {data.map((d, i) => {
         const y = 10 + i * (rowH + gap);
         const w = (d.avg / 100) * barAreaW;
-        const c = d.avg >= 80 ? "#7BA05B" : d.avg >= 60 ? "#6E97B8" : "#D6A45C";
+        const c = d.avg >= 80 ? GREEN : d.avg >= 50 ? BLUE : ORANGE;
         return (
           <g key={i}>
             {/* 영역명 라벨 (왼쪽 280px) - 28글자까지 풀 표시 */}
@@ -17196,12 +17176,16 @@ function GrowthLineChart({ goals, dates, getTimeline }) {
           const r = calcDayRate(t.daily?.[date], t.plannedTrials);
           if (r !== null) taskRates.push(r);
         });
+        const oldRate = calcDayRate(g.daily?.[date]);
+        // ★ 요약카드/막대(getCombinedDailySeries)와 동일 규칙 — task+구형 daily 둘 다 있으면 절반씩 평균
         let goalValue = null;
-        if (taskRates.length > 0) {
+        if (taskRates.length > 0 && oldRate !== null) {
+          const taskAvg = Math.round(taskRates.reduce((a, b) => a + b, 0) / taskRates.length);
+          goalValue = Math.round((taskAvg + oldRate) / 2);
+        } else if (taskRates.length > 0) {
           goalValue = Math.round(taskRates.reduce((a, b) => a + b, 0) / taskRates.length);
         } else {
-          const r = calcDayRate(g.daily?.[date]);
-          if (r !== null) goalValue = r;
+          goalValue = oldRate;
         }
         if (goalValue === null) return;
         sum += goalValue;
