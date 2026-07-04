@@ -5150,15 +5150,23 @@ export default function App() {
     return last || null;
   }, [includedGoals, needsReportCalc, reportCutoffDate]);
   // ★★ 보고 기간 단일 진실원(single source) — 모든 계산이 이 두 값을 쓴다.
-  //   evalEnd 대타 완전 제거: pEnd 비면 데이터 마지막날, pStart 비면 데이터 첫날.
+  //   [원래 규칙] 시작일 = 데이터 입력 첫 날(자동), 종료일 = 사용자가 선택.
+  //   시작일은 저장된 pStart를 아예 무시하고 항상 firstDataDate(컷오프 반영) 사용 → 낡은 pStart 문제 원천 차단.
+  //   종료일은 사용자가 직접 넣는 pEnd 우선. 단 pEnd가 시작일·데이터 첫날보다 앞이면 낡은 값 → 데이터 마지막날.
   const _isFinalReport = reportMode === "final";
   const reportPeriodStart = _isFinalReport
     ? (effectiveInfo.evalStart || "")
-    : (effectiveInfo.pStart || firstDataDate || effectiveInfo.evalStart || "");
-  const reportPeriodEnd = _isFinalReport
-    ? (effectiveInfo.finalEndDate || lastDataDate || "")
-    : (effectiveInfo.pEnd || lastDataDate || "");
-  const effectivePStart = effectiveInfo.pStart || firstDataDate || effectiveInfo.evalStart || "";
+    : (firstDataDate || effectiveInfo.evalStart || "");
+  const reportPeriodEnd = (() => {
+    if (_isFinalReport) return effectiveInfo.finalEndDate || lastDataDate || "";
+    const fd = firstDataDate || "";
+    const ld = lastDataDate || "";
+    const pe = effectiveInfo.pEnd || "";
+    if (pe && fd && pe < fd) return ld || "";                          // pEnd가 데이터 첫날보다 앞(낡은 값)
+    if (pe && reportPeriodStart && pe < reportPeriodStart) return ld || "";  // 뒤집힘
+    return pe || ld || "";
+  })();
+  const effectivePStart = reportPeriodStart;
 
   const stosForReport = useMemo(() => {
     if (!needsReportCalc) return [];
