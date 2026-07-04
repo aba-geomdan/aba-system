@@ -2938,10 +2938,37 @@ function fmtArchivePeriod(start, end) {
 
 // ★ 컷오프 기준 날짜 — "이번에 보고한 마지막 데이터 날짜"(cutoffDataDate)를 우선 사용.
 //   컷오프 후 다음 보고서는 이 날짜 '이후' 새로 찍힌 데이터부터 시작.
-//   옛 아카이브(cutoffDataDate 없음)는 savedAt(저장 시각)으로 폴백(하위호환).
+//   옛 아카이브(cutoffDataDate 없음)는 보고 기간 정보로 역산 — savedAt(저장 시각)은 최후 수단.
+function isValidYmd(s) {
+  return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+// "2026.07" 또는 "2026.03~2026.07" → 종료월의 말일 "2026-07-31"
+function periodEndToDate(period) {
+  if (!period || typeof period !== "string") return null;
+  const parts = period.split("~");
+  const last = (parts[parts.length - 1] || "").trim();       // "2026.07"
+  const m = last.match(/^(\d{4})\.(\d{2})$/);
+  if (!m) return null;
+  const year = parseInt(m[1], 10);
+  const month = parseInt(m[2], 10);
+  if (!year || !month || month < 1 || month > 12) return null;
+  const lastDay = new Date(year, month, 0).getDate();        // 그 달 말일
+  return `${m[1]}-${m[2]}-${String(lastDay).padStart(2, "0")}`;
+}
 function cutoffOf(item) {
   if (!item) return null;
-  if (item.cutoffDataDate) return String(item.cutoffDataDate).slice(0, 10);
+  // 1) 신규: 이번 보고 마지막 데이터 날짜
+  if (isValidYmd(String(item.cutoffDataDate || "").slice(0, 10))) {
+    return String(item.cutoffDataDate).slice(0, 10);
+  }
+  // 2) 옛 아카이브: 저장된 보고 종료일(prevEvalEnd)이 유효한 날짜면 사용
+  if (isValidYmd(String(item.prevEvalEnd || "").slice(0, 10))) {
+    return String(item.prevEvalEnd).slice(0, 10);
+  }
+  // 3) 그다음: 보고 기간 문자열의 종료월 말일로 역산
+  const pe = periodEndToDate(item.period);
+  if (pe) return pe;
+  // 4) 최후: 저장 시각
   return item.savedAt ? String(item.savedAt).slice(0, 10) : null;
 }
 
@@ -14694,11 +14721,14 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
         const TREND_COLORS = ["#C97B92", "#B5895F", "#8E7BB0", "#7089A0", "#7BA05B", "#5A9AAA", "#C99A5B", "#A87088"];
         // 영역별로 목표를 묶고, 날짜별 평균 정반응률 계산
         const domainMap = {};  // domain -> { date -> [rate들] }
+        // ★ 컷오프·보고 기간과 동일한 날짜 집합(allDates)으로 제한 — 이전 차수 데이터 제거.
+        const allowedDates = new Set(allDates);
         (goals || []).filter(g => g.includeInIep).forEach(g => {
           const dom = g.domain || "(영역 없음)";
           const series = (typeof getTimeline === "function") ? getTimeline(g) : [];
           series.forEach(pt => {
             if (pt.rate == null || isNaN(pt.rate)) return;
+            if (allowedDates.size > 0 && !allowedDates.has(pt.date)) return;  // ★ 컷오프/기간 밖 제외
             if (!domainMap[dom]) domainMap[dom] = {};
             if (!domainMap[dom][pt.date]) domainMap[dom][pt.date] = [];
             domainMap[dom][pt.date].push(Number(pt.rate));
