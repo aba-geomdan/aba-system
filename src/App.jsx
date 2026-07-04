@@ -14702,8 +14702,50 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                   </>
                 );
               } else {
-                const end = reportPeriodEnd || new Date().toISOString().slice(0, 10);
-                return <span>{start} ~ {end}</span>;
+                // ★ 화면 표시 종료일 = 사용자가 직접 고른 pEnd만. 안 골랐으면 빈칸 + 날짜 선택 UI.
+                //   (그래프/계산은 reportPeriodEnd = pEnd||데이터 마지막날을 그대로 사용하므로 그래프는 안 빔)
+                return (
+                  <>
+                    <span>{start}</span>
+                    <span style={{ opacity: 0.7 }}>~</span>
+                    <input
+                      type="date"
+                      value={info.pEnd || ""}
+                      onChange={e => setInfo(prev => ({ ...prev, pEnd: e.target.value }))}
+                      style={{
+                        fontSize: 17, fontWeight: 700,
+                        background: "rgba(255,255,255,0.2)",
+                        color: "#fff",
+                        border: "1px solid rgba(255,255,255,0.4)",
+                        borderRadius: 6,
+                        padding: "3px 8px",
+                        fontFamily: "inherit",
+                        colorScheme: "dark",
+                        cursor: "pointer"
+                      }}
+                      title="보고 종료일 (클릭해서 선택). 비워두면 그래프는 데이터 마지막날까지 표시됩니다." />
+                    {!info.pEnd && (
+                      <span style={{ fontSize: 11, opacity: 0.85, fontWeight: 400, fontStyle: "italic" }}>← 종료일 선택 (미선택 시 데이터 마지막날까지)</span>
+                    )}
+                    {info.pEnd && (
+                      <button
+                        onClick={() => setInfo(prev => ({ ...prev, pEnd: "" }))}
+                        style={{
+                          fontSize: 10.5, fontWeight: 600,
+                          background: "rgba(255,255,255,0.25)",
+                          color: "#fff",
+                          border: "1px solid rgba(255,255,255,0.5)",
+                          borderRadius: 6,
+                          padding: "3px 10px",
+                          cursor: "pointer",
+                          fontFamily: "inherit"
+                        }}
+                        title="종료일 지우기 (데이터 마지막날까지로 되돌림)">
+                        ✕ 종료일 지우기
+                      </button>
+                    )}
+                  </>
+                );
               }
             })()}
           </div>
