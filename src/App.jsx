@@ -5251,43 +5251,33 @@ export default function App() {
         return true;
       })
       .map(g => {
-      const tasks = g.tasks || [];
-      const startNum = g.startListNum || 1;
-      // 1) 모든 task의 point를 taskIdx 정보와 함께 수집
       const allPoints = [];
+      const listBoundaries = [];  // 각 task의 첫 point가 시작하는 인덱스 + 라벨
+      const tasks = g.tasks || [];
       tasks.forEach((t, taskIdx) => {
-        Object.entries(t.daily || {}).forEach(([date, day]) => {
+        const taskPoints = Object.entries(t.daily || {}).map(([date, day]) => {
           const v = calcDayRateGlobal(day, t.plannedTrials);
-          if (v === null) return;
-          if (cutoffDate && date <= cutoffDate) return;
-          if (!inPeriod(date)) return;
-          allPoints.push({
-            date,
-            value: v,
-            taskIdx,
+          if (v === null) return null;
+          if (cutoffDate && date <= cutoffDate) return null;
+          if (!inPeriod(date)) return null;
+          return { date, value: v };
+        }).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date));
+        if (taskPoints.length > 0) {
+          const startNum = g.startListNum || 1;
+          listBoundaries.push({
+            atIndex: allPoints.length,
+            listLabel: `L${taskIdx + startNum}`,
             taskName: t.name,
-            taskListNum: taskIdx + startNum,
             taskListGroup: t.listGroup || "1"
           });
-        });
-      });
-      // 2) task 순서가 아니라 실제 날짜순으로 정렬 (소급 입력 등으로 순서가 꼬여도 정확)
-      //    같은 날짜면 단계(taskIdx) 순으로 2차 정렬
-      allPoints.sort((a, b) =>
-        a.date.localeCompare(b.date) || (a.taskIdx - b.taskIdx)
-      );
-      // 3) 정렬된 순서 기준으로 L1/L2/L3 경계선 재계산 (taskIdx가 바뀌는 지점마다 경계)
-      const listBoundaries = [];  // 각 단계가 시작하는 인덱스 + 라벨
-      let prevTaskIdx = null;
-      allPoints.forEach((p, i) => {
-        if (p.taskIdx !== prevTaskIdx) {
-          listBoundaries.push({
-            atIndex: i,
-            listLabel: `L${p.taskListNum}`,
-            taskName: p.taskName,
-            taskListGroup: p.taskListGroup
+          taskPoints.forEach(p => {
+            allPoints.push({
+              ...p,
+              taskIdx,
+              taskName: t.name,
+              taskListNum: taskIdx + startNum
+            });
           });
-          prevTaskIdx = p.taskIdx;
         }
       });
       const status = g.status === "mastered" ? "완료" : "진행중";
