@@ -5251,32 +5251,43 @@ export default function App() {
         return true;
       })
       .map(g => {
-      const allPoints = [];
-      const listBoundaries = [];  // 각 task의 첫 point가 시작하는 인덱스 + 라벨
       const tasks = g.tasks || [];
+      const startNum = g.startListNum || 1;
+      // 1) 모든 task의 point를 taskIdx와 함께 수집
+      const allPoints = [];
       tasks.forEach((t, taskIdx) => {
-        const taskPoints = Object.entries(t.daily || {}).map(([date, day]) => {
+        Object.entries(t.daily || {}).forEach(([date, day]) => {
           const v = calcDayRateGlobal(day, t.plannedTrials);
-          if (v === null) return null;
-          if (cutoffDate && date <= cutoffDate) return null;
-          if (!inPeriod(date)) return null;
-          return { date, value: v };
-        }).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date));
-        if (taskPoints.length > 0) {
-          const startNum = g.startListNum || 1;
-          listBoundaries.push({
-            atIndex: allPoints.length,
-            listLabel: `L${taskIdx + startNum}`,
+          if (v === null) return;
+          if (cutoffDate && date <= cutoffDate) return;
+          if (!inPeriod(date)) return;
+          allPoints.push({
+            date,
+            value: v,
+            taskIdx,
             taskName: t.name,
+            taskListNum: taskIdx + startNum,
             taskListGroup: t.listGroup || "1"
           });
-          taskPoints.forEach(p => {
-            allPoints.push({
-              ...p,
-              taskIdx,
-              taskName: t.name,
-              taskListNum: taskIdx + startNum
-            });
+        });
+      });
+      // 2) task 순서가 아니라 실제 날짜순으로 정렬 (소급 입력/병행으로 순서가 꼬여도 정확)
+      //    같은 날짜면 단계(taskIdx) 순으로 2차 정렬
+      allPoints.sort((a, b) =>
+        a.date.localeCompare(b.date) || (a.taskIdx - b.taskIdx)
+      );
+      // 3) 경계선: 각 task(taskIdx)가 정렬 후 처음 나타나는 위치에만 1개씩
+      //    (taskListNum이 아니라 taskIdx로 묶어야 task 개수만큼만 생겨 폭발하지 않음)
+      const listBoundaries = [];
+      const seenTaskIdx = new Set();
+      allPoints.forEach((p, i) => {
+        if (!seenTaskIdx.has(p.taskIdx)) {
+          seenTaskIdx.add(p.taskIdx);
+          listBoundaries.push({
+            atIndex: i,
+            listLabel: `L${p.taskListNum}`,
+            taskName: p.taskName,
+            taskListGroup: p.taskListGroup
           });
         }
       });
@@ -12828,11 +12839,7 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
                 if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
                   cutoffDate = cutoffOf(cutoffArchives[0]);
                 }
-                const masteredGoals = sortGoals(items.filter(g => {
-                  if (g.status !== "mastered") return false;
-                  if (cutoffDate && g.masteredAt && g.masteredAt <= cutoffDate) return false;
-                  return true;
-                }));
+                const masteredGoals = sortGoals(items.filter(g => g.status === "mastered"));
                 if (masteredGoals.length === 0) return null;
                 const masteredByDomain = {};
                 masteredGoals.forEach(g => {
@@ -12844,7 +12851,6 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
                   <div style={{ marginBottom: 12, padding: 10, background: "#f9fcf5", border: `1.5px solid #c5d99c`, borderRadius: 6 }}>
                     <div style={{ fontSize: 11.5, fontWeight: 700, color: "#4a7316", marginBottom: 8, paddingBottom: 4, borderBottom: "1px dashed #c5d99c" }}>
                       ✅ 습득 완료된 영역목표 ({masteredGoals.length}개)
-                      {cutoffDate && <span style={{ fontSize: 9.5, color: "#7a9968", fontWeight: 500, marginLeft: 6 }}>· {cutoffDate} 보고서 발행 이후</span>}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {Object.entries(masteredByDomain).map(([domain, mGoals]) => (
