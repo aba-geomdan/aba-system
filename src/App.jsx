@@ -13698,9 +13698,9 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
         const isPaused = task.listGroup === "paused";
         const isMast = task.listGroup === "2";
         const isReached = !isMast && !isPaused && task.reachedCriteria;
-        const labelColor = isMast ? GREEN : isPaused ? "#a87108" : isReached ? "#2f8f4e" : PKD;
-        const labelBg = isMast ? "#f4f9ed" : isPaused ? "#fcf9ee" : isReached ? "#eefaf0" : "#fff";
-        const labelBorder = isMast ? GREEN : isPaused ? "#f5b942" : isReached ? "#5cc47f" : PK;
+        const labelColor = isMast ? GREEN : isPaused ? "#a87108" : isReached ? "#5f5e5a" : PKD;
+        const labelBg = isMast ? "#f4f9ed" : isPaused ? "#fcf9ee" : isReached ? "#f1efe8" : "#fff";
+        const labelBorder = isMast ? GREEN : isPaused ? "#f5b942" : isReached ? "#d3d1c7" : PK;
         const labelText = isMast
           ? "✓ 완료"
           : isPaused
@@ -13755,9 +13755,9 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
               onClick={() => setTaskListGroup(goal.id, task.id, "2")}
               title="습득 기준(2회 연속 80%)에 도달했습니다. 데이터를 확인한 뒤 완료 처리하세요."
               style={{
-                padding: "3px 10px",
-                background: "#eefaf0", color: "#2f8f4e",
-                border: `1px solid #5cc47f`, borderRadius: 6,
+                padding: "4px 11px",
+                background: GREEN, color: "#fff",
+                border: `1px solid ${GREEN}`, borderRadius: 6,
                 fontSize: 10, fontWeight: 700,
                 cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap"
               }}>
