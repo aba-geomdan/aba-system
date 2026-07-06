@@ -3323,10 +3323,11 @@ function ManualModal({ onClose }) {
           "쉽게: IEP 추가 = 목표 바구니에 담기 / 시트 ON = 그중 오늘부터 실제로 기록할 것만 꺼내 켜기",
           "IEP에서 빼면 시트도 같이 꺼집니다."
         ])}
-        {sec("5. 진행 / 습득 상태는 자동으로 바뀝니다", [
-          "목표마다 진행 ⟷ 습득 스위치가 있습니다.",
-          "2일 연속 정반응 80% 이상이면 자동으로 습득(완료)으로 바뀝니다.",
-          "직접 눌러서 바꾸면 🔒이 걸려 자동 전환이 멈춥니다(수동 고정). 다시 누르면 풀립니다.",
+        {sec("5. 진행 / 기준도달 / 습득 완료", [
+          "2일 연속 정반응 80% 이상이면 \"🎯 기준도달\" 표시가 뜹니다. 이때 바로 완료되지 않고, 진행 중 상태가 유지됩니다.",
+          "데이터를 확인한 뒤(예: 전체 +로 채운 다음 오반응을 −로 수정), \"✓ 완료 처리\" 버튼을 직접 눌러야 습득 완료로 넘어갑니다.",
+          "완료 처리하면 다음 차수(L2, L3…)를 이어서 만들지 안내가 뜹니다.",
+          "완료한 과제는 \"습득 완료\" 목록에 접혀 보관되며, \"↩ 되돌리기\"로 다시 진행 중으로 되돌릴 수 있습니다.",
           "중단은 잠시 보류하는 목표로, 보고서에는 \"임상적 판단에 따른 조정\"으로 표기됩니다."
         ])}
         {sec("6. 보고서 자동 생성", [
@@ -4449,16 +4450,48 @@ export default function App() {
   useEffect(() => {
     if (!loaded) return;
     let needsFix = false;
-    const fixed = children.map(c => ({
-      ...c,
-      goals: (c.goals || []).map(g => ({
-        ...g,
-        tasks: (g.tasks || []).map(t => {
-          if (t.measureMode === "pct") { needsFix = true; return { ...t, measureMode: "raw" }; }
-          return t;
+    const ROMAN_CHARS = "ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ";
+    const domCore = (dom) => {
+      if (!dom) return dom;
+      // 앞의 로마숫자/아라비아숫자 + 뒤따르는 공백·점·가운뎃점 제거
+      let s = dom;
+      let i = 0;
+      while (i < s.length && (ROMAN_CHARS.indexOf(s[i]) >= 0 || (s[i] >= "0" && s[i] <= "9"))) i++;
+      while (i < s.length && (s[i] === " " || s[i] === "." || s[i] === "·")) i++;
+      return s.slice(i).trim();
+    };
+    const hasRoman = (dom) => !!dom && ROMAN_CHARS.indexOf(dom[0]) >= 0;
+    const fixed = children.map(c => {
+      // 이 아동에서 로마숫자 있는 정식 표기 매핑 (core 이름 → 정식 domain)
+      const canon = {};
+      (c.goals || []).forEach(g => {
+        const dom = g.domain || "";
+        if (hasRoman(dom)) canon[domCore(dom)] = dom;
+      });
+      return {
+        ...c,
+        goals: (c.goals || []).map(g => {
+          let ng = g;
+          // domain 정규화: 로마숫자 없는데 같은 이름의 정식표기가 있으면 통일
+          const dom = g.domain || "";
+          if (dom && !hasRoman(dom)) {
+            const cr = domCore(dom);
+            if (canon[cr] && canon[cr] !== dom) {
+              needsFix = true;
+              ng = { ...ng, domain: canon[cr] };
+            }
+          }
+          // 기존 pct→raw 보정
+          let taskFixed = false;
+          const nt = (ng.tasks || []).map(t => {
+            if (t.measureMode === "pct") { needsFix = true; taskFixed = true; return { ...t, measureMode: "raw" }; }
+            return t;
+          });
+          if (taskFixed) ng = { ...ng, tasks: nt };
+          return ng;
         })
-      }))
-    }));
+      };
+    });
     if (needsFix) setChildren(fixed);
   }, [loaded]);
 
@@ -9486,7 +9519,7 @@ function StatusToggle({ status, locked, onToggle }) {
       aria-checked={isMastered}
       onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); } }}
       onClick={onToggle}
-      title={locked ? "수동 설정됨 — 자동 전환되지 않음" : "자동 판정 모드 — '2일 연속 80% 이상' 시 자동 전환"}
+      title={locked ? "수동 설정됨" : "진행 ⟷ 습득 상태를 직접 전환합니다. (기준 도달 시 데일리 탭의 '완료 처리' 버튼으로도 완료할 수 있습니다)"}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -10140,8 +10173,8 @@ function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSectio
                   return;
                 }
                 if (svg.classList.contains("dashboard-bigchart")) {
-                  svg.style.setProperty("width", "290px", "important");
-                  svg.style.setProperty("height", "80px", "important");
+                  svg.style.setProperty("width", "360px", "important");
+                  svg.style.setProperty("height", "105px", "important");
                   svg.style.setProperty("max-width", "100%", "important");
                   svg.style.setProperty("display", "block", "important");
                   svg.style.setProperty("margin", "0 auto", "important");
@@ -10293,7 +10326,7 @@ function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSectio
 '/* 미니 스파크라인 */\n' +
 'svg.dashboard-sparkline{width:72px!important;height:22px!important;max-width:72px!important;min-width:72px!important;max-height:22px!important;display:inline-block!important;flex-shrink:0!important;margin:0!important}\n' +
 '/* 미니 라인 차트 - 290x80 고정 (영역별 세부 학습 목표) */\n' +
-'svg.dashboard-bigchart{width:290px!important;height:80px!important;max-width:100%!important;display:block!important;margin:0 auto!important}\n' +
+'svg.dashboard-bigchart{width:360px!important;height:105px!important;max-width:100%!important;display:block!important;margin:0 auto!important}\n' +
 '/* Info 표 */\n' +
 '.info-table-main{font-size:12pt!important;margin-bottom:12pt!important;border:1px solid ' + PKL + '!important}\n' +
 '.info-table-main td{padding:9pt 12pt!important;line-height:1.6!important;font-size:11pt!important;border:1px solid ' + PKL + '!important;vertical-align:middle!important}\n' +
@@ -11610,7 +11643,7 @@ cleanedHTML + '\n' +
           /* 미니 스파크라인 - USER_APP 4190줄 (flex-shrink 보강) */
           svg.dashboard-sparkline { width: 72px !important; height: 22px !important; max-width: 72px !important; min-width: 72px !important; max-height: 22px !important; display: inline-block !important; flex-shrink: 0 !important; }
           /* 미니 라인 차트 - 290x80 고정 (영역별 세부 학습 목표) */
-          svg.dashboard-bigchart { width: 290px !important; height: 80px !important; max-width: 100% !important; display: block !important; margin: 0 auto !important; }
+          svg.dashboard-bigchart { width: 360px !important; height: 105px !important; max-width: 100% !important; display: block !important; margin: 0 auto !important; }
           /* dashboard-card 새 페이지 - USER_APP 4199줄 */
           .dashboard-card.pdf-card-break { page-break-before: always !important; break-before: page !important; }
           .dashboard-curriculum.pdf-curr-break { page-break-before: always !important; break-before: page !important; }
@@ -12292,7 +12325,7 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
                   · 되돌리기: 키보드 <b>0</b>(그 칸부터 뒤로 지움) · <b>초기화</b> 버튼(과제 전체 지움)
                 </div>
                 <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #f0e0e6", color: "#777" }}>
-                  💡 <b style={{ color: GREEN }}>2일 연속 80%↑</b> → 자동 <b>'습득'</b> 전환. 진행⟷습득 스위치를 직접 누르면 <b>🔒 고정</b>(자동전환 멈춤).
+                  💡 <b style={{ color: GREEN }}>2일 연속 80%↑</b> → <b>🎯 기준도달</b> 표시(자동 완료 안 됨). 데이터 확인 후 <b style={{ color: GREEN }}>✓ 완료 처리</b> 버튼을 눌러야 습득 완료됩니다. 완료한 과제는 <b>↩ 되돌리기</b>로 되돌릴 수 있습니다.
                 </div>
               </div>
             )}
@@ -17027,7 +17060,7 @@ function TaskProgressTable({ goals, calcDayRate, listGroup, title, color, archiv
         </div>
         <div style={{ textAlign: "center", padding: "26px 20px", fontSize: 11.5, color: "#bbb", border: "1px dashed #eee", borderRadius: 8 }}>
           {isMastered
-            ? "아직 습득 완료된 과제가 없습니다. 연속 2일 80% 이상 달성 시 자동으로 이동되며, [③ 데일리] 탭의 수동 L2 버튼으로도 전환할 수 있습니다."
+            ? "아직 습득 완료된 과제가 없습니다. 연속 2일 80% 이상이면 [③ 데일리] 탭에 '🎯 기준도달'이 표시되고, '✓ 완료 처리' 버튼을 누르면 이곳으로 이동합니다."
             : "진행 중 과제가 없습니다. [③ 데일리 데이터] 탭에서 각 영역목표에 세부 과제를 추가하세요."}
         </div>
       </div>
@@ -17051,7 +17084,7 @@ function TaskProgressTable({ goals, calcDayRate, listGroup, title, color, archiv
       </div>
       {isMastered && (
         <div style={{ padding: "8px 12px", background: "#f4f9ed", borderRadius: 8, border: "1px solid #d4e5ba", marginBottom: 10, fontSize: 11, color: "#4a7316", lineHeight: 1.6 }}>
-          💡 아래 과제들은 연속 2일 80% 이상 달성하여 자동으로 습득 완료 처리되었거나 선생님이 수동 전환한 과제입니다. 데이터 시트의 진행 중 섹션에서 자동 제외되었습니다.
+          💡 아래 과제들은 습득 기준(연속 2일 80% 이상)에 도달한 뒤 '완료 처리'된 과제입니다. 데이터 시트의 진행 중 섹션에서는 제외됩니다.
         </div>
       )}
       <div style={{ overflowX: "auto" }}>
@@ -17116,7 +17149,7 @@ function MasteredTable({ goals }) {
         </div>
         <div style={{ textAlign: "center", padding: "26px 20px", fontSize: 11.5, color: "#bbb", border: "1px dashed #d4e5ba", borderRadius: 8, background: "#fafcf5" }}>
           아직 습득 완료된 목표가 없습니다.<br/>
-          <span style={{ fontSize: 10.5, color: "#aaa" }}>연속 2일 80% 이상 달성 시 자동으로 이동되며, [③ 데일리] 탭의 수동 스위치로도 전환할 수 있습니다.</span>
+          <span style={{ fontSize: 10.5, color: "#aaa" }}>연속 2일 80% 이상이면 '🎯 기준도달'이 뜨고, '✓ 완료 처리' 버튼을 누르면 이곳으로 이동합니다.</span>
         </div>
       </div>
     );
@@ -17131,7 +17164,7 @@ function MasteredTable({ goals }) {
         </h3>
       </div>
       <div style={{ padding: "8px 12px", background: "#f4f9ed", borderRadius: 8, border: "1px solid #d4e5ba", marginBottom: 10, fontSize: 11, color: "#4a7316", lineHeight: 1.6 }}>
-        💡 아래 목표들은 연속 2일 80% 이상 달성하여 자동으로 습득 완료 처리되었거나 선생님이 수동으로 전환한 프로그램입니다. 데이터 시트에서는 자동 제외되었습니다.
+        💡 아래 목표들은 습득 기준(연속 2일 80% 이상)에 도달한 뒤 '완료 처리'된 프로그램입니다. 데이터 시트에서는 제외됩니다.
       </div>
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
