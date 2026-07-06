@@ -5310,6 +5310,7 @@ export default function App() {
           listBoundaries.push({
             atIndex: i,
             listLabel: `L${p.taskListNum}`,
+            taskListNum: p.taskListNum,
             taskName: p.taskName,
             taskListGroup: p.taskListGroup
           });
@@ -17294,6 +17295,8 @@ function GoalDashboard({ stos }) {
 
   const BigChart = ({ points, color, listBoundaries }) => {
     if (!points || points.length < 1) return null;
+    const STAGE_COLORS = ["#e34948", "#eb6834", "#eda100", "#1baf7a", "#2a78d6", "#3f51b5", "#8e44ad"];
+    const stageColorOf = (n) => STAGE_COLORS[((Number(n) || 1) - 1) % STAGE_COLORS.length];
     const safeColor = (typeof color === "string" && color) ? color : "#D4728A";
     const W = 320, H = 150, padL = 34, padR = 14, padTop = 22, padBottom = 30;
     const innerW = W - padL - padR;
@@ -17338,34 +17341,44 @@ function GoalDashboard({ stos }) {
       );
     }
     const stepX = innerW / (points.length - 1);
-    const coords = points.map((p, i) => ({ x: padL + i * stepX, y: yOf(p.value), value: p.value, date: p.date }));
-    const pathD = coords.map((c, i) => `${i === 0 ? "M" : "L"}${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(" ");
-    const fillD = pathD + ` L${coords[coords.length - 1].x.toFixed(1)},${(H - padBottom).toFixed(1)} L${coords[0].x.toFixed(1)},${(H - padBottom).toFixed(1)} Z`;
-    const gradId = `grad-${safeColor.replace("#", "")}-${Math.random().toString(36).substr(2, 5)}`;
+    const coords = points.map((p, i) => ({ x: padL + i * stepX, y: yOf(p.value), value: p.value, date: p.date, taskIdx: p.taskIdx, taskListNum: p.taskListNum }));
+    // 각 점의 색: 단계(taskListNum)가 있으면 단계색, 없으면 기존 기본색
+    const hasStages = coords.some(c => c.taskListNum != null);
+    const colorAt = (c) => (c.taskListNum != null ? stageColorOf(c.taskListNum) : safeColor);
+    // 선을 단계(taskIdx)별로 모아 각각 선으로 그림 (단계 없으면 전체 한 선)
+    const stageGroups = {};
+    coords.forEach((c, i) => {
+      const key = (c.taskIdx != null ? c.taskIdx : "_all");
+      if (!stageGroups[key]) stageGroups[key] = { taskListNum: c.taskListNum, pts: [] };
+      stageGroups[key].pts.push({ ...c, _i: i });
+    });
     const every = labelEvery(coords.length);
     return (
       <svg className="dashboard-bigchart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "0 auto", width: `${W}px`, height: `${H}px`, maxWidth: "100%" }}>
-        <defs>
-          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={safeColor} stopOpacity="0.25" />
-            <stop offset="100%" stopColor={safeColor} stopOpacity="0" />
-          </linearGradient>
-        </defs>
         {grid}
         <line x1={padL} y1={y80} x2={W - padR} y2={y80} stroke="#3D7A0F" strokeWidth="1.2" strokeDasharray="4,3" opacity="0.85" />
         <text x={W - padR - 2} y={y80 - 3} fontSize="8.5" fill="#3D7A0F" textAnchor="end" fontWeight="800">숙달 80%</text>
-        <path d={fillD} fill={`url(#${gradId})`} />
-        <path d={pathD} fill="none" stroke={safeColor} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+        {/* 단계별 선 */}
+        {Object.entries(stageGroups).map(([key, grp]) => {
+          if (grp.pts.length === 0) return null;
+          const col = grp.taskListNum != null ? stageColorOf(grp.taskListNum) : safeColor;
+          const dPath = grp.pts.map((c, k) => `${k === 0 ? "M" : "L"}${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(" ");
+          if (grp.pts.length === 1) {
+            return <circle key={"seg" + key} cx={grp.pts[0].x} cy={grp.pts[0].y} r="2.6" fill={col} />;
+          }
+          return <path key={"seg" + key} d={dPath} fill="none" stroke={col} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />;
+        })}
         {/* 점 + 값 + 날짜 */}
         {(() => {
           const boundaryIdx = new Set((listBoundaries || []).map(b => b.atIndex));
           return coords.map((c, i) => {
           const isLast = i === coords.length - 1;
           const showDate = (i % every === 0) || isLast || boundaryIdx.has(i);
+          const col = colorAt(c);
           return (
             <g key={"pt" + i}>
-              <circle cx={c.x} cy={c.y} r={isLast ? 3.8 : 2.6} fill={safeColor} stroke={isLast ? "#fff" : "none"} strokeWidth={isLast ? 1.5 : 0} />
-              <text x={c.x} y={c.y - 7} fontSize="8" fill={safeColor} textAnchor="middle" fontWeight="700">{c.value}%</text>
+              <circle cx={c.x} cy={c.y} r={isLast ? 3.8 : 2.6} fill={col} stroke={isLast ? "#fff" : "none"} strokeWidth={isLast ? 1.5 : 0} />
+              <text x={c.x} y={c.y - 7} fontSize="8" fill={col} textAnchor="middle" fontWeight="700">{c.value}%</text>
               {showDate && <text x={c.x} y={H - padBottom + 14} fontSize="7.5" fill="#888" textAnchor="middle">{shortDate(c.date)}</text>}
             </g>
           );
@@ -17519,18 +17532,23 @@ function GoalDashboard({ stos }) {
                           <div style={{ fontSize: 10, fontWeight: 700, color: "#666", marginBottom: 6, letterSpacing: "0.3px" }}>
                             학습 내용
                           </div>
-                          {s.listBoundaries.map((b, bi) => (
+                          {(() => {
+                            const STAGE_COLORS = ["#e34948", "#eb6834", "#eda100", "#1baf7a", "#2a78d6", "#3f51b5", "#8e44ad"];
+                            const stageColorOf = (n) => STAGE_COLORS[((Number(n) || 1) - 1) % STAGE_COLORS.length];
+                            return s.listBoundaries.map((b, bi) => {
+                            const sc = stageColorOf(b.taskListNum != null ? b.taskListNum : bi + 1);
+                            return (
                             <div key={bi} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: bi < s.listBoundaries.length - 1 ? 5 : 0 }}>
                               <span style={{
                                 display: "inline-block",
                                 flexShrink: 0,
                                 padding: "2px 8px",
-                                background: "#fff",
-                                border: `1px solid ${meta.accent}40`,
+                                background: `${sc}1A`,
+                                border: `1px solid ${sc}`,
                                 borderRadius: 8,
                                 fontSize: 9,
                                 fontWeight: 700,
-                                color: meta.chartLine,
+                                color: sc,
                                 lineHeight: 1.4,
                                 minWidth: 26,
                                 textAlign: "center"
@@ -17545,7 +17563,9 @@ function GoalDashboard({ stos }) {
                                 overflowWrap: "break-word"
                               }}>{b.taskName}</span>
                             </div>
-                          ))}
+                            );
+                            });
+                          })()}
                         </div>
                       )}
                     </div>
