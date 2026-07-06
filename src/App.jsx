@@ -17414,7 +17414,7 @@ function GoalDashboard({ stos }) {
       const p = points[0];
       const cx = padL + innerW / 2, cy = yOf(p.value);
       return (
-        <svg className="dashboard-bigchart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "0 auto", width: `${W}px`, height: `${H}px`, maxWidth: "100%" }}>
+        <svg className="dashboard-bigchart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "0 auto", maxWidth: "100%" }}>
           {grid}
           <line x1={padL} y1={y80} x2={W - padR} y2={y80} stroke="#3D7A0F" strokeWidth="1.2" strokeDasharray="4,3" opacity="0.85" />
           <text x={W - padR - 2} y={y80 - 3} fontSize="8.5" fill="#3D7A0F" textAnchor="end" fontWeight="800">숙달 80%</text>
@@ -17441,7 +17441,7 @@ function GoalDashboard({ stos }) {
     });
     const every = labelEvery(coords.length);
     return (
-      <svg className="dashboard-bigchart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "0 auto", width: `${W}px`, height: `${H}px`, maxWidth: "100%" }}>
+      <svg className="dashboard-bigchart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "0 auto", maxWidth: "100%" }}>
         {grid}
         <line x1={padL} y1={y80} x2={W - padR} y2={y80} stroke="#3D7A0F" strokeWidth="1.2" strokeDasharray="4,3" opacity="0.85" />
         <text x={W - padR - 2} y={y80 - 3} fontSize="8.5" fill="#3D7A0F" textAnchor="end" fontWeight="800">숙달 80%</text>
