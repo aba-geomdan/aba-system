@@ -17380,12 +17380,12 @@ function GoalDashboard({ stos }) {
     currGroups[curr][dom].push(s);
   });
 
-  const BigChart = ({ points, color, listBoundaries }) => {
+  const BigChart = ({ points, color, listBoundaries, pdf }) => {
     if (!points || points.length < 1) return null;
     const STAGE_COLORS = ["#e34948", "#eb6834", "#eda100", "#1baf7a", "#2a78d6", "#3f51b5", "#8e44ad"];
     const stageColorOf = (n) => STAGE_COLORS[((Number(n) || 1) - 1) % STAGE_COLORS.length];
     const safeColor = (typeof color === "string" && color) ? color : "#D4728A";
-    const W = 320, H = 150, padL = 34, padR = 14, padTop = 22, padBottom = 30;
+    const W = pdf ? 560 : 320, H = 150, padL = 34, padR = 14, padTop = 22, padBottom = 30;
     const innerW = W - padL - padR;
     const innerH = H - padTop - padBottom;
     const yOf = v => padTop + (1 - v / 100) * innerH;
@@ -17414,7 +17414,7 @@ function GoalDashboard({ stos }) {
       const p = points[0];
       const cx = padL + innerW / 2, cy = yOf(p.value);
       return (
-        <svg className="dashboard-bigchart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "0 auto", maxWidth: "100%" }}>
+        <svg className="dashboard-bigchart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "0 auto", width: `${W}px`, height: `${H}px`, maxWidth: "100%" }}>
           {grid}
           <line x1={padL} y1={y80} x2={W - padR} y2={y80} stroke="#3D7A0F" strokeWidth="1.2" strokeDasharray="4,3" opacity="0.85" />
           <text x={W - padR - 2} y={y80 - 3} fontSize="8.5" fill="#3D7A0F" textAnchor="end" fontWeight="800">숙달 80%</text>
@@ -17441,7 +17441,7 @@ function GoalDashboard({ stos }) {
     });
     const every = labelEvery(coords.length);
     return (
-      <svg className="dashboard-bigchart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "0 auto", maxWidth: "100%" }}>
+      <svg className="dashboard-bigchart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "0 auto", width: `${W}px`, height: `${H}px`, maxWidth: "100%" }}>
         {grid}
         <line x1={padL} y1={y80} x2={W - padR} y2={y80} stroke="#3D7A0F" strokeWidth="1.2" strokeDasharray="4,3" opacity="0.85" />
         <text x={W - padR - 2} y={y80 - 3} fontSize="8.5" fill="#3D7A0F" textAnchor="end" fontWeight="800">숙달 80%</text>
@@ -17603,7 +17603,7 @@ function GoalDashboard({ stos }) {
                       <div style={{ fontSize: 10, color: "#888", marginBottom: 12 }}>{cleanDomainKey(dom)}</div>
                       {growthInfo && (
                         <div style={{ background: "#FAFAFA", borderRadius: 10, padding: "10px 8px 6px", marginBottom: 10 }}>
-                          <BigChart points={points} color={meta.chartLine} listBoundaries={s.listBoundaries} />
+                          <BigChart points={points} color={meta.chartLine} listBoundaries={s.listBoundaries} pdf={true} />
                         </div>
                       )}
                       {/* ★ [제거] 시작/현재 % 박스 — 차트에 % 축·날짜가 들어가 중복이므로 삭제 */}
