@@ -8,7 +8,7 @@ import { createClient } from "@supabase/supabase-js";
    Supabase 테이블(shared_store / teacher_store)로 흘려보낸다.
    - 두 번째 인자 shared=true  → shared_store (모두 공유)
    - 두 번째 인자 없음/false   → teacher_store (현재 로그인 선생님 소유)
-   반환 형태는 기존과 동일: get() → { value } | null
+   반환 형태는 기존과 동일: get() → { value } | nulla
    ═══════════════════════════════════════════════════════════════ */
 const SUPABASE_URL = "https://vdubgrxwijydwfabwpnk.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZkdWJncnh3aWp5ZHdmYWJ3cG5rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MDk1ODgsImV4cCI6MjA5NzE4NTU4OH0.nqNO3vany3M6fzmG5BG6QVdvi8BW2UbhTDhxNnwvA88";
@@ -17373,7 +17373,8 @@ function GoalDashboard({ stos }) {
           const boundaryIdx = new Set((listBoundaries || []).map(b => b.atIndex));
           return coords.map((c, i) => {
           const isLast = i === coords.length - 1;
-          const showDate = (i % every === 0) || isLast || boundaryIdx.has(i);
+          const sameAsPrev = i > 0 && coords[i - 1].date === c.date;
+          const showDate = ((i % every === 0) || isLast || boundaryIdx.has(i)) && !sameAsPrev;
           const col = colorAt(c);
           return (
             <g key={"pt" + i}>
