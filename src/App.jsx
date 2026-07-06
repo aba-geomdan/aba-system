@@ -10174,7 +10174,7 @@ function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSectio
                 }
                 if (svg.classList.contains("dashboard-bigchart")) {
                   svg.style.setProperty("width", "560px", "important");
-                  svg.style.setProperty("height", "105px", "important");
+                  svg.style.setProperty("height", "180px", "important");
                   svg.style.setProperty("max-width", "560px", "important");
                   svg.style.setProperty("min-width", "560px", "important");
                   svg.style.setProperty("display", "block", "important");
@@ -10327,7 +10327,7 @@ function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSectio
 '/* 미니 스파크라인 */\n' +
 'svg.dashboard-sparkline{width:72px!important;height:22px!important;max-width:72px!important;min-width:72px!important;max-height:22px!important;display:inline-block!important;flex-shrink:0!important;margin:0!important}\n' +
 '/* 미니 라인 차트 - 290x80 고정 (영역별 세부 학습 목표) */\n' +
-'svg.dashboard-bigchart{width:560px!important;height:105px!important;max-width:560px!important;min-width:560px!important;display:block!important;margin:0 auto!important}\n' +
+'svg.dashboard-bigchart{width:560px!important;height:180px!important;max-width:560px!important;min-width:560px!important;display:block!important;margin:0 auto!important}\n' +
 '/* Info 표 */\n' +
 '.info-table-main{font-size:12pt!important;margin-bottom:12pt!important;border:1px solid ' + PKL + '!important}\n' +
 '.info-table-main td{padding:9pt 12pt!important;line-height:1.6!important;font-size:11pt!important;border:1px solid ' + PKL + '!important;vertical-align:middle!important}\n' +
@@ -11644,7 +11644,7 @@ cleanedHTML + '\n' +
           /* 미니 스파크라인 - USER_APP 4190줄 (flex-shrink 보강) */
           svg.dashboard-sparkline { width: 72px !important; height: 22px !important; max-width: 72px !important; min-width: 72px !important; max-height: 22px !important; display: inline-block !important; flex-shrink: 0 !important; }
           /* 미니 라인 차트 - 290x80 고정 (영역별 세부 학습 목표) */
-          svg.dashboard-bigchart { width: 560px !important; height: 105px !important; max-width: 560px !important; min-width: 560px !important; display: block !important; margin: 0 auto !important; }
+          svg.dashboard-bigchart { width: 560px !important; height: 180px !important; max-width: 560px !important; min-width: 560px !important; display: block !important; margin: 0 auto !important; }
           /* dashboard-card 새 페이지 - USER_APP 4199줄 */
           .dashboard-card.pdf-card-break { page-break-before: always !important; break-before: page !important; }
           .dashboard-curriculum.pdf-curr-break { page-break-before: always !important; break-before: page !important; }
@@ -17385,7 +17385,7 @@ function GoalDashboard({ stos }) {
     const STAGE_COLORS = ["#e34948", "#eb6834", "#eda100", "#1baf7a", "#2a78d6", "#3f51b5", "#8e44ad"];
     const stageColorOf = (n) => STAGE_COLORS[((Number(n) || 1) - 1) % STAGE_COLORS.length];
     const safeColor = (typeof color === "string" && color) ? color : "#D4728A";
-    const W = pdf ? 560 : 320, H = 150, padL = 34, padR = 14, padTop = 22, padBottom = 30;
+    const W = pdf ? 560 : 320, H = 180, padL = 34, padR = 14, padTop = 22, padBottom = 30;
     const innerW = W - padL - padR;
     const innerH = H - padTop - padBottom;
     const yOf = v => padTop + (1 - v / 100) * innerH;
