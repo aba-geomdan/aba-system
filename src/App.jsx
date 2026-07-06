@@ -4738,8 +4738,19 @@ export default function App() {
       listItems: "",
       tasks: []
     };
-    setGoals(prev => [...prev, newGoal]);
-    setActiveGoalId(newGoal.id);
+    const nd = domain.trim();
+    const nsd = (subDomain || "").trim() || "-";
+    const ni = item.trim();
+    setGoals(prev => {
+      // 이미 같은 목표가 있으면 새로 만들지 않고 기존 것을 IEP 포함으로 (중복 방지)
+      const existing = prev.find(g => g.domain === nd && g.subDomain === nsd && g.item === ni);
+      if (existing) {
+        setActiveGoalId(existing.id);
+        return prev.map(g => g.id === existing.id ? { ...g, includeInIep: true } : g);
+      }
+      setActiveGoalId(newGoal.id);
+      return [...prev, newGoal];
+    });
   };
 
   const removeGoal = (id) => {
@@ -4868,7 +4879,7 @@ export default function App() {
           const daily = { ...(t.daily || {}) };
           const day = daily[date] || { c: 0, ic: 0 };
           const nextVal = Math.max(0, (day[type] || 0) + delta);
-          daily[date] = { ...day, [type]: nextVal };
+          daily[date] = { ...day, [type]: nextVal, enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10) };
           return { ...t, daily };
         })
       };
@@ -4899,7 +4910,7 @@ export default function App() {
           } else {
             trials[index] = value;
           }
-          daily[date] = { trials };
+          daily[date] = { trials, enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10) };
           return { ...t, daily };
         })
       };
@@ -4940,7 +4951,7 @@ export default function App() {
               trials[i] = value;
             }
           }
-          daily[date] = { trials };
+          daily[date] = { trials, enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10) };
           return { ...t, daily };
         })
       };
@@ -5038,17 +5049,30 @@ export default function App() {
         }
         return t;
       });
+      // 목표 status 보정: 수동설정(statusLocked)이 아니고, 완료(mastered)로 돼있는데
+      // 실제로는 진행중(lg=1) task가 남아있으면 → active로 되돌림.
+      // (반대 방향 active→mastered는 자동으로 하지 않음: 다음 단계 진행 여지를 남김)
+      const effTasks = taskChanged ? nextTasks : g.tasks;
+      let statusPatch = {};
+      if (!g.statusLocked && g.status === "mastered" && effTasks && effTasks.length > 0) {
+        const anyActive = effTasks.some(t => (t.listGroup || "1") === "1");
+        if (anyActive) {
+          statusPatch = { status: "active", masteredAt: null };
+        }
+      }
+      const hasStatusChange = Object.keys(statusPatch).length > 0;
+      if (taskChanged || hasStatusChange) changed = true;
       if (taskChanged) {
-        changed = true;
         const justMastered = nextTasks.some((t, i) =>
           (t.listGroup === "2") && ((g.tasks[i].listGroup || "1") === "1")
         );
         const remainingL1 = nextTasks.filter(t => (t.listGroup || "1") === "1").length;
         if (justMastered && remainingL1 === 0) {
-          return { ...g, tasks: nextTasks, pendingNext: true };
+          return { ...g, tasks: nextTasks, pendingNext: true, ...statusPatch };
         }
-        return { ...g, tasks: nextTasks };
+        return { ...g, tasks: nextTasks, ...statusPatch };
       }
+      if (hasStatusChange) return { ...g, ...statusPatch };
       return g;
     });
     if (changed) setGoals(next);
@@ -17333,9 +17357,11 @@ function GoalDashboard({ stos }) {
         <path d={fillD} fill={`url(#${gradId})`} />
         <path d={pathD} fill="none" stroke={safeColor} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
         {/* 점 + 값 + 날짜 */}
-        {coords.map((c, i) => {
+        {(() => {
+          const boundaryIdx = new Set((listBoundaries || []).map(b => b.atIndex));
+          return coords.map((c, i) => {
           const isLast = i === coords.length - 1;
-          const showDate = (i % every === 0) || isLast;
+          const showDate = (i % every === 0) || isLast || boundaryIdx.has(i);
           return (
             <g key={"pt" + i}>
               <circle cx={c.x} cy={c.y} r={isLast ? 3.8 : 2.6} fill={safeColor} stroke={isLast ? "#fff" : "none"} strokeWidth={isLast ? 1.5 : 0} />
@@ -17343,7 +17369,8 @@ function GoalDashboard({ stos }) {
               {showDate && <text x={c.x} y={H - padBottom + 14} fontSize="7.5" fill="#888" textAnchor="middle">{shortDate(c.date)}</text>}
             </g>
           );
-        })}
+          });
+        })()}
         {/* list 경계선 + L1/L2/L3 라벨 */}
         {listBoundaries && listBoundaries.map((b, i) => {
           const x = coords[b.atIndex] ? coords[b.atIndex].x : padL;
