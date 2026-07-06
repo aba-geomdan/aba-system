@@ -4969,9 +4969,13 @@ export default function App() {
           const next = {
             ...t,
             listGroup: newGroup,
-            listGroupLocked: true,
+            listGroupLocked: newGroup === "1" ? false : true,
             masteredAt: newGroup === "2" ? (t.masteredAt || new Date().toISOString().slice(0, 10)) : null
           };
+          if (newGroup === "1") {
+            next.reachedCriteria = false;      // 되돌리면 기준도달 표시도 초기화
+            next.reachedCriteriaDate = null;
+          }
           if (newGroup === "2") {
             next.reachedCriteria = false;      // 완료됐으니 기준도달 표시 해제
             next.reachedCriteriaDate = null;
@@ -12934,8 +12938,14 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
                                     </span>
                                   )}
                                   <button
-                                    onClick={() => updateGoal && updateGoal(g.id, { status: "active", masteredAt: null })}
-                                    title="다시 진행 중으로 되돌리기"
+                                    onClick={() => {
+                                      const tasks = g.tasks || [];
+                                      let lastId = null;
+                                      tasks.forEach(t => { if ((t.listGroup || "1") === "2") lastId = t.id; });
+                                      if (lastId && setTaskListGroup) setTaskListGroup(g.id, lastId, "1");
+                                      updateGoal && updateGoal(g.id, { status: "active", masteredAt: null, statusLocked: false, pendingNext: false });
+                                    }}
+                                    title="다시 진행 중으로 되돌리기 (마지막 완료 과제를 진행중으로)"
                                     style={{
                                       marginLeft: "auto", padding: "2px 7px",
                                       background: "#fff", color: "#666",
