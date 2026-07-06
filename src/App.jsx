@@ -17378,7 +17378,6 @@ function GoalDashboard({ stos }) {
           return (
             <g key={"pt" + i}>
               <circle cx={c.x} cy={c.y} r={isLast ? 3.8 : 2.6} fill={col} stroke={isLast ? "#fff" : "none"} strokeWidth={isLast ? 1.5 : 0} />
-              <text x={c.x} y={c.y - 7} fontSize="8" fill={col} textAnchor="middle" fontWeight="700">{c.value}%</text>
               {showDate && <text x={c.x} y={H - padBottom + 14} fontSize="7.5" fill="#888" textAnchor="middle">{shortDate(c.date)}</text>}
             </g>
           );
