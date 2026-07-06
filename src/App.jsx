@@ -8,7 +8,7 @@ import { createClient } from "@supabase/supabase-js";
    Supabase 테이블(shared_store / teacher_store)로 흘려보낸다.
    - 두 번째 인자 shared=true  → shared_store (모두 공유)
    - 두 번째 인자 없음/false   → teacher_store (현재 로그인 선생님 소유)
-   반환 형태는 기존과 동일: get() → { value } | nulla
+   반환 형태는 기존과 동일: get() → { value } | null
    ═══════════════════════════════════════════════════════════════ */
 const SUPABASE_URL = "https://vdubgrxwijydwfabwpnk.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZkdWJncnh3aWp5ZHdmYWJ3cG5rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MDk1ODgsImV4cCI6MjA5NzE4NTU4OH0.nqNO3vany3M6fzmG5BG6QVdvi8BW2UbhTDhxNnwvA88";
@@ -4963,9 +4963,8 @@ export default function App() {
     if (newGroup === "paused" && (!pauseReason || !pauseReason.trim())) return;  // 사유 필수
     setGoals(prev => prev.map(g => {
       if (g.id !== goalId) return g;
-      return {
-        ...g,
-        tasks: (g.tasks || []).map(t => {
+      let anyMasteredNow = false;
+      const nextTasks = (g.tasks || []).map(t => {
           if (t.id !== taskId) return t;
           const next = {
             ...t,
@@ -4973,6 +4972,11 @@ export default function App() {
             listGroupLocked: true,
             masteredAt: newGroup === "2" ? (t.masteredAt || new Date().toISOString().slice(0, 10)) : null
           };
+          if (newGroup === "2") {
+            next.reachedCriteria = false;      // 완료됐으니 기준도달 표시 해제
+            next.reachedCriteriaDate = null;
+            anyMasteredNow = true;
+          }
           if (newGroup === "paused") {
             next.pauseReason = pauseReason.trim();
             next.pausedAt = new Date().toISOString().slice(0, 10);
@@ -4986,8 +4990,12 @@ export default function App() {
             next.pausedAt = null;
           }
           return next;
-        })
-      };
+      });
+      // 완료 처리했고 진행중(1) task가 하나도 안 남으면 → 다음 단계 안내
+      const remainingActive = nextTasks.filter(t => (t.listGroup || "1") === "1").length;
+      const patch = { tasks: nextTasks };
+      if (anyMasteredNow && remainingActive === 0) patch.pendingNext = true;
+      return { ...g, ...patch };
     }));
   };
 
@@ -5038,13 +5046,27 @@ export default function App() {
             consecutiveHigh = 0;
           }
         }
-        const desiredGroup = achieved ? "2" : "1";
-        if ((t.listGroup || "1") !== desiredGroup) {
+        const curLg = t.listGroup || "1";
+        let newLg = curLg;
+        let newMasteredAt = t.masteredAt || null;
+        if (curLg === "2" && !achieved) {
+          // 이미 완료였는데 수정으로 연속이 깨짐 → 진행중으로 되돌림
+          newLg = "1";
+          newMasteredAt = null;
+        }
+        // (curLg === "1" && achieved) 인 경우: 자동 완료하지 않음. reachedCriteria만 표시.
+        const reached = achieved;
+        const lgChanged = newLg !== curLg;
+        const reachedChanged = !!t.reachedCriteria !== reached;
+        const achievedDateChanged = reached && t.reachedCriteriaDate !== achievedDate;
+        if (lgChanged || reachedChanged || achievedDateChanged) {
           taskChanged = true;
           return {
             ...t,
-            listGroup: desiredGroup,
-            masteredAt: desiredGroup === "2" ? (achievedDate || new Date().toISOString().slice(0, 10)) : null
+            listGroup: newLg,
+            masteredAt: newMasteredAt,
+            reachedCriteria: reached,
+            reachedCriteriaDate: reached ? achievedDate : null
           };
         }
         return t;
@@ -13665,13 +13687,16 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
       {(() => {
         const isPaused = task.listGroup === "paused";
         const isMast = task.listGroup === "2";
-        const labelColor = isMast ? GREEN : isPaused ? "#a87108" : PKD;
-        const labelBg = isMast ? "#f4f9ed" : isPaused ? "#fcf9ee" : "#fff";
-        const labelBorder = isMast ? GREEN : isPaused ? "#f5b942" : PK;
+        const isReached = !isMast && !isPaused && task.reachedCriteria;
+        const labelColor = isMast ? GREEN : isPaused ? "#a87108" : isReached ? "#2f8f4e" : PKD;
+        const labelBg = isMast ? "#f4f9ed" : isPaused ? "#fcf9ee" : isReached ? "#eefaf0" : "#fff";
+        const labelBorder = isMast ? GREEN : isPaused ? "#f5b942" : isReached ? "#5cc47f" : PK;
         const labelText = isMast
           ? "✓ 완료"
           : isPaused
           ? "⏸ 중단"
+          : isReached
+          ? `🎯 기준도달`
           : taskIndex
           ? `L${taskIndex}`
           : "L1";
@@ -13711,6 +13736,22 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                 cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap"
               }}>
               ↩ 재개
+            </button>
+          );
+        }
+        if (task.reachedCriteria) {
+          return (
+            <button
+              onClick={() => setTaskListGroup(goal.id, task.id, "2")}
+              title="습득 기준(2회 연속 80%)에 도달했습니다. 데이터를 확인한 뒤 완료 처리하세요."
+              style={{
+                padding: "3px 10px",
+                background: "#eefaf0", color: "#2f8f4e",
+                border: `1px solid #5cc47f`, borderRadius: 6,
+                fontSize: 10, fontWeight: 700,
+                cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap"
+              }}>
+              ✓ 완료 처리
             </button>
           );
         }
