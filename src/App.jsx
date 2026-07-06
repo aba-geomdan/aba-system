@@ -10173,7 +10173,7 @@ function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSectio
                   return;
                 }
                 if (svg.classList.contains("dashboard-bigchart")) {
-                  svg.style.setProperty("width", "360px", "important");
+                  svg.style.setProperty("width", "560px", "important");
                   svg.style.setProperty("height", "105px", "important");
                   svg.style.setProperty("max-width", "100%", "important");
                   svg.style.setProperty("display", "block", "important");
@@ -10326,7 +10326,7 @@ function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSectio
 '/* 미니 스파크라인 */\n' +
 'svg.dashboard-sparkline{width:72px!important;height:22px!important;max-width:72px!important;min-width:72px!important;max-height:22px!important;display:inline-block!important;flex-shrink:0!important;margin:0!important}\n' +
 '/* 미니 라인 차트 - 290x80 고정 (영역별 세부 학습 목표) */\n' +
-'svg.dashboard-bigchart{width:360px!important;height:105px!important;max-width:100%!important;display:block!important;margin:0 auto!important}\n' +
+'svg.dashboard-bigchart{width:560px!important;height:105px!important;max-width:100%!important;display:block!important;margin:0 auto!important}\n' +
 '/* Info 표 */\n' +
 '.info-table-main{font-size:12pt!important;margin-bottom:12pt!important;border:1px solid ' + PKL + '!important}\n' +
 '.info-table-main td{padding:9pt 12pt!important;line-height:1.6!important;font-size:11pt!important;border:1px solid ' + PKL + '!important;vertical-align:middle!important}\n' +
@@ -11643,7 +11643,7 @@ cleanedHTML + '\n' +
           /* 미니 스파크라인 - USER_APP 4190줄 (flex-shrink 보강) */
           svg.dashboard-sparkline { width: 72px !important; height: 22px !important; max-width: 72px !important; min-width: 72px !important; max-height: 22px !important; display: inline-block !important; flex-shrink: 0 !important; }
           /* 미니 라인 차트 - 290x80 고정 (영역별 세부 학습 목표) */
-          svg.dashboard-bigchart { width: 360px !important; height: 105px !important; max-width: 100% !important; display: block !important; margin: 0 auto !important; }
+          svg.dashboard-bigchart { width: 560px !important; height: 105px !important; max-width: 100% !important; display: block !important; margin: 0 auto !important; }
           /* dashboard-card 새 페이지 - USER_APP 4199줄 */
           .dashboard-card.pdf-card-break { page-break-before: always !important; break-before: page !important; }
           .dashboard-curriculum.pdf-curr-break { page-break-before: always !important; break-before: page !important; }
