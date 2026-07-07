@@ -10326,7 +10326,7 @@ function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSectio
 '.dashboard-curriculum.pdf-curr-break{page-break-before:always!important;break-before:page!important}\n' +
 '/* 미니 스파크라인 */\n' +
 'svg.dashboard-sparkline{width:72px!important;height:22px!important;max-width:72px!important;min-width:72px!important;max-height:22px!important;display:inline-block!important;flex-shrink:0!important;margin:0!important}\n' +
-'/* 미니 라인 차트 - 290x80 고정 (영역별 세부 학습 목표) */\n' +
+'/* 세부 학습 목표 라인 차트 - 560x180 고정 (영역별 세부 학습 목표) */\n' +
 'svg.dashboard-bigchart{width:560px!important;height:180px!important;max-width:560px!important;min-width:560px!important;display:block!important;margin:0 auto!important}\n' +
 '/* Info 표 */\n' +
 '.info-table-main{font-size:12pt!important;margin-bottom:12pt!important;border:1px solid ' + PKL + '!important}\n' +
@@ -11643,7 +11643,7 @@ cleanedHTML + '\n' +
           #printable-report > div:last-of-type table td, #printable-report > div:last-of-type table th { font-size: 9pt !important; padding: 3pt 6pt !important; }
           /* 미니 스파크라인 - USER_APP 4190줄 (flex-shrink 보강) */
           svg.dashboard-sparkline { width: 72px !important; height: 22px !important; max-width: 72px !important; min-width: 72px !important; max-height: 22px !important; display: inline-block !important; flex-shrink: 0 !important; }
-          /* 미니 라인 차트 - 290x80 고정 (영역별 세부 학습 목표) */
+          /* 세부 학습 목표 라인 차트 - 560x180 고정 (영역별 세부 학습 목표) */
           svg.dashboard-bigchart { width: 560px !important; height: 180px !important; max-width: 560px !important; min-width: 560px !important; display: block !important; margin: 0 auto !important; }
           /* dashboard-card 새 페이지 - USER_APP 4199줄 */
           .dashboard-card.pdf-card-break { page-break-before: always !important; break-before: page !important; }
@@ -16084,7 +16084,11 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
           <div style={{ marginTop: 8, padding: "8px 12px", background: "#fafafa", borderRadius: 6, fontSize: 10, color: "#888", lineHeight: 1.6 }}>
             💡 [👁 미리보기]는 인쇄 양식만 확인하며 <b>보관되지 않습니다</b> (데이터에 영향 없음).<br />
             💡 [📄 중간보고서 양식으로 인쇄하기] 버튼을 누르면 <b>자동으로 보관됩니다</b> (같은 기간의 자동 보관본은 24시간 이내에 한 번만 저장).<br />
-            💡 [💾 현재 보고서 보관] 버튼은 명시적으로 새 차수로 저장합니다.
+            💡 [💾 현재 보고서 보관] 버튼은 명시적으로 새 차수로 저장합니다.<br />
+            <br />
+            🔹 [👁 보기] 이 시점에 저장된 보고서를 그대로 열어봅니다 (열람용 · 데이터·그래프에 영향 없음).<br />
+            🔹 [🔒 컷오프 적용 / ↩ 그래프 복원] 보관본은 <b>그대로 두고</b>, 그래프에서 이전 데이터를 숨기거나(컷오프) 다시 표시합니다(복원). 되돌릴 수 있습니다.<br />
+            🔹 [🗑 삭제] 보관본을 <b>영구 삭제</b>합니다. 최신 보관본을 삭제하면 컷오프가 풀려 이전 데이터가 그래프에 다시 나타납니다.
           </div>
         </>
       )}
