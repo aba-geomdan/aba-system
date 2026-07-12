@@ -31,15 +31,15 @@ const AUTH_SESSION_KEY = "sb-aba-auth-session";
 
 function _getStoredSession() {
   try {
-    const raw = localStorage.getItem(AUTH_SESSION_KEY);
+    const raw = sessionStorage.getItem(AUTH_SESSION_KEY);
     if (!raw) return null;
     return JSON.parse(raw);
   } catch (e) { return null; }
 }
 function _saveSession(session) {
   try {
-    if (session) localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
-    else localStorage.removeItem(AUTH_SESSION_KEY);
+    if (session) sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+    else sessionStorage.removeItem(AUTH_SESSION_KEY);
   } catch (e) {}
 }
 async function _refreshSession(refreshToken) {
