@@ -3414,6 +3414,10 @@ function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
           </div>
         )}
 
+        {/* 브라우저 자동완성 차단용 미끼 필드 (화면에 보이지 않음) */}
+        <input type="text" name="username" tabIndex={-1} aria-hidden="true" autoComplete="username" style={{ position: "absolute", opacity: 0, height: 0, width: 0, pointerEvents: "none", zIndex: -1 }} />
+        <input type="password" name="password" tabIndex={-1} aria-hidden="true" autoComplete="current-password" style={{ position: "absolute", opacity: 0, height: 0, width: 0, pointerEvents: "none", zIndex: -1 }} />
+
         {/* 입력 폼 */}
         {view !== "setup" && (
           <div style={{ marginBottom: 12 }}>
