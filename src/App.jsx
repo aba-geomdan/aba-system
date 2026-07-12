@@ -13,102 +13,201 @@ import { createClient } from "@supabase/supabase-js";
 const SUPABASE_URL = "https://vdubgrxwijydwfabwpnk.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZkdWJncnh3aWp5ZHdmYWJ3cG5rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MDk1ODgsImV4cCI6MjA5NzE4NTU4OH0.nqNO3vany3M6fzmG5BG6QVdvi8BW2UbhTDhxNnwvA88";
 
-const _sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+/* ═══════════════════════════════════════════════════════════════
+   A방식: Supabase Auth + RLS + aba_data 어댑터
+   ───────────────────────────────────────────────────────────────
+   - 로그인: Supabase Auth (이메일+비번). 세션은 localStorage에 저장.
+   - 데이터: 모든 데이터는 "관리자 소유(aba_data)" 한 곳에 저장 → 모두 공유.
+     선생님별 "자기 아동만" 격리는 앱 화면 filter가 담당 (기존 로직 유지).
+   - window.storage.get/set/delete/list 인터페이스는 기존과 동일하게 유지.
+     (shared 파라미터는 무시 — 전부 공용 데이터)
+   ═══════════════════════════════════════════════════════════════ */
 
-// 현재 로그인한 선생님 이름을 알아내기 위한 헬퍼
-// (앱이 sessionStorage의 AUTH_CURRENT_USER_KEY에 {role,name}을 저장함 — 창 닫으면 로그아웃)
-function _currentOwner() {
+// 공용 데이터 소유자 = 관리자(민다혜) user_id
+const ABA_OWNER_ID = "aecb8a9c-000e-4ad5-9805-83450e9bc585";
+
+// ── Auth 세션 관리 ──────────────────────────────────────────────
+const AUTH_SESSION_KEY = "sb-aba-auth-session";
+
+function _getStoredSession() {
   try {
-    const raw = sessionStorage.getItem("gd-aba-current-user");
-    if (!raw) return "__nobody__";
-    const u = JSON.parse(raw);
-    return (u && u.name) ? u.name : "__nobody__";
-  } catch (e) {
-    return "__nobody__";
+    const raw = localStorage.getItem(AUTH_SESSION_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) { return null; }
+}
+function _saveSession(session) {
+  try {
+    if (session) localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+    else localStorage.removeItem(AUTH_SESSION_KEY);
+  } catch (e) {}
+}
+async function _refreshSession(refreshToken) {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (data.access_token) { _saveSession(data); return data; }
+    return null;
+  } catch (e) { return null; }
+}
+async function _getValidAccessToken() {
+  const session = _getStoredSession();
+  if (!session) return null;
+  // 만료 5분 전이면 refresh
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (session.expires_at && session.expires_at > nowSec + 300 && session.access_token) {
+    return session.access_token;
   }
+  if (session.refresh_token) {
+    const refreshed = await _refreshSession(session.refresh_token);
+    if (refreshed?.access_token) return refreshed.access_token;
+  }
+  return session.access_token || null;
+}
+async function _authHeaders() {
+  const token = await _getValidAccessToken();
+  return {
+    "apikey": SUPABASE_ANON_KEY,
+    "Authorization": token ? `Bearer ${token}` : `Bearer ${SUPABASE_ANON_KEY}`,
+    "Content-Type": "application/json",
+  };
 }
 
+// ── Auth API ────────────────────────────────────────────────────
+async function abaSignIn(email, password) {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await r.json();
+    if (!r.ok) return { error: data.error_description || data.msg || data.error || "로그인 실패" };
+    _saveSession(data);
+    return { session: data, user: data.user };
+  } catch (e) { return { error: "네트워크 오류: " + e.message }; }
+}
+async function abaSignOut() {
+  try {
+    const token = await _getValidAccessToken();
+    if (token) {
+      await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
+        method: "POST",
+        headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${token}` },
+      });
+    }
+  } catch (e) {}
+  _saveSession(null);
+}
+async function abaGetCurrentUser() {
+  try {
+    const token = await _getValidAccessToken();
+    if (!token) return null;
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${token}` },
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (e) { return null; }
+}
+
+// ── 관리자용 계정 관리 (Edge Function admin-users) ───────────────
+async function abaAdminCreateUser(email, password, displayName) {
+  try {
+    const headers = await _authHeaders();
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/admin-users`, {
+      method: "POST", headers,
+      body: JSON.stringify({ action: "create", email, password, display_name: displayName || email.split("@")[0] }),
+    });
+    const data = await r.json();
+    if (!r.ok) return { error: data.error || "계정 생성 실패" };
+    return { user: data.user };
+  } catch (e) { return { error: "네트워크 오류: " + e.message }; }
+}
+async function abaAdminDeleteUser(userId) {
+  try {
+    const headers = await _authHeaders();
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/admin-users`, {
+      method: "POST", headers,
+      body: JSON.stringify({ action: "delete", user_id: userId }),
+    });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); return { error: d.error || "삭제 실패" }; }
+    return { ok: true };
+  } catch (e) { return { error: "네트워크 오류: " + e.message }; }
+}
+async function abaAdminUpdatePassword(userId, newPassword) {
+  try {
+    const headers = await _authHeaders();
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/admin-users`, {
+      method: "POST", headers,
+      body: JSON.stringify({ action: "update_password", user_id: userId, password: newPassword }),
+    });
+    const data = await r.json();
+    if (!r.ok) return { error: data.error || "비번 변경 실패" };
+    return { ok: true };
+  } catch (e) { return { error: "네트워크 오류: " + e.message }; }
+}
+async function abaAdminListUsers() {
+  try {
+    const headers = await _authHeaders();
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/admin_list_users`, {
+      method: "POST", headers, body: "{}",
+    });
+    if (!r.ok) return [];
+    return await r.json();
+  } catch (e) { return []; }
+}
+
+// ── 데이터 저장/조회 (aba_data — 관리자 소유 고정, 모두 공유) ─────
 window.storage = {
-  async get(key, shared) {
+  async get(key /*, shared */) {
     try {
-      if (shared) {
-        const { data, error } = await _sb
-          .from("shared_store")
-          .select("value")
-          .eq("key", key)
-          .maybeSingle();
-        if (error) { console.warn("[supabase get shared]", error.message); return null; }
-        return data ? { value: data.value } : null;
-      } else {
-        const { data, error } = await _sb
-          .from("teacher_store")
-          .select("value")
-          .eq("owner_name", _currentOwner())
-          .eq("key", key)
-          .maybeSingle();
-        if (error) { console.warn("[supabase get teacher]", error.message); return null; }
-        return data ? { value: data.value } : null;
-      }
-    } catch (e) {
-      console.warn("[supabase get 예외]", e);
-      return null;
-    }
+      const headers = await _authHeaders();
+      const url = `${SUPABASE_URL}/rest/v1/aba_data?user_id=eq.${ABA_OWNER_ID}&key=eq.${encodeURIComponent(key)}&select=value`;
+      const r = await fetch(url, { headers });
+      if (!r.ok) { console.warn("[aba get]", r.status); return null; }
+      const rows = await r.json();
+      return (rows && rows.length > 0) ? { value: rows[0].value } : null;
+    } catch (e) { console.warn("[aba get 예외]", e); return null; }
   },
 
-  async set(key, value, shared) {
+  async set(key, value /*, shared */) {
     try {
-      if (shared) {
-        const { error } = await _sb
-          .from("shared_store")
-          .upsert(
-            { key, value, updated_at: new Date().toISOString(), last_editor: _currentOwner() },
-            { onConflict: "key" }
-          );
-        if (error) { console.warn("[supabase set shared]", error.message); return null; }
-      } else {
-        const { error } = await _sb
-          .from("teacher_store")
-          .upsert(
-            { owner_name: _currentOwner(), key, value, updated_at: new Date().toISOString() },
-            { onConflict: "owner_name,key" }
-          );
-        if (error) { console.warn("[supabase set teacher]", error.message); return null; }
-      }
+      const headers = await _authHeaders();
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/aba_data`, {
+        method: "POST",
+        headers: { ...headers, "Prefer": "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ user_id: ABA_OWNER_ID, key, value, updated_at: new Date().toISOString() }),
+      });
+      if (!r.ok) { console.warn("[aba set]", r.status); return null; }
       return { value };
-    } catch (e) {
-      console.warn("[supabase set 예외]", e);
-      return null;
-    }
+    } catch (e) { console.warn("[aba set 예외]", e); return null; }
   },
 
-  async delete(key, shared) {
+  async delete(key /*, shared */) {
     try {
-      if (shared) {
-        await _sb.from("shared_store").delete().eq("key", key);
-      } else {
-        await _sb.from("teacher_store").delete()
-          .eq("owner_name", _currentOwner()).eq("key", key);
-      }
+      const headers = await _authHeaders();
+      const url = `${SUPABASE_URL}/rest/v1/aba_data?user_id=eq.${ABA_OWNER_ID}&key=eq.${encodeURIComponent(key)}`;
+      await fetch(url, { method: "DELETE", headers });
       return { deleted: true };
-    } catch (e) {
-      console.warn("[supabase delete 예외]", e);
-      return null;
-    }
+    } catch (e) { console.warn("[aba delete 예외]", e); return null; }
   },
 
-  async list(prefix, shared) {
+  async list(prefix /*, shared */) {
     try {
-      const table = shared ? "shared_store" : "teacher_store";
-      let q = _sb.from(table).select("key");
-      if (!shared) q = q.eq("owner_name", _currentOwner());
-      if (prefix) q = q.like("key", prefix + "%");
-      const { data, error } = await q;
-      if (error) { console.warn("[supabase list]", error.message); return { keys: [] }; }
-      return { keys: (data || []).map(r => r.key) };
-    } catch (e) {
-      console.warn("[supabase list 예외]", e);
-      return { keys: [] };
-    }
+      const headers = await _authHeaders();
+      const filter = prefix ? `&key=like.${encodeURIComponent(prefix)}*` : "";
+      const url = `${SUPABASE_URL}/rest/v1/aba_data?user_id=eq.${ABA_OWNER_ID}&select=key${filter}`;
+      const r = await fetch(url, { headers });
+      if (!r.ok) { console.warn("[aba list]", r.status); return { keys: [] }; }
+      const rows = await r.json();
+      return { keys: (rows || []).map(row => row.key) };
+    } catch (e) { console.warn("[aba list 예외]", e); return { keys: [] }; }
   },
 };
 
@@ -3421,12 +3520,12 @@ function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
         {/* 입력 폼 */}
         {view !== "setup" && (
           <div style={{ marginBottom: 12 }}>
-            <label style={{ fontSize: 11, fontWeight: 600, color: PKD, display: "block", marginBottom: 4 }}>이름</label>
+            <label style={{ fontSize: 11, fontWeight: 600, color: PKD, display: "block", marginBottom: 4 }}>이메일</label>
             <input
-              type="text"
+              type="email"
               value={name}
               onChange={e => setName(e.target.value)}
-              placeholder="이름 입력 (관리자는 '관리자')"
+              placeholder="이메일 입력"
               autoComplete="off"
               onKeyDown={e => { if (e.key === "Enter") document.getElementById("auth-pw-input")?.focus(); }}
               style={{
@@ -3618,91 +3717,73 @@ function WelcomeModal({ teacherName, onClose }) {
 }
 
 function AdminPanel({ onClose }) {
-  const [teachers, setTeachers] = useState([]);
+  const [users, setUsers] = useState([]);        // Auth 계정 목록 (관리자 제외)
+  const [loading, setLoading] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
   const [newPw, setNewPw] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editPw, setEditPw] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const loadTeachers = async () => {
+  const loadUsers = async () => {
+    setLoading(true);
     try {
-      let raw = null;
-      if (typeof window !== "undefined" && window.storage) {
-        try {
-          const res = await window.storage.get(AUTH_TEACHERS_KEY, true);
-          raw = res?.value;
-        } catch (e) {}
-      }
-      if (!raw && typeof localStorage !== "undefined") {
-        raw = localStorage.getItem(AUTH_TEACHERS_KEY);
-        if (raw && typeof window !== "undefined" && window.storage) {
-          try { await window.storage.set(AUTH_TEACHERS_KEY, raw, true); } catch (e) {}
-        }
-      }
-      setTeachers(raw ? JSON.parse(raw) : []);
+      const list = await abaAdminListUsers();
+      // 관리자(admin)는 목록에서 제외 — 선생님만 표시
+      const teacherOnly = (list || []).filter(u => (u.role || "therapist") !== "admin");
+      setUsers(teacherOnly);
     } catch (e) {
-      setTeachers([]);
+      setUsers([]);
     }
+    setLoading(false);
   };
 
-  useEffect(() => { loadTeachers(); }, []);
-
-  const saveTeachers = async (list) => {
-    try {
-      const json = JSON.stringify(list);
-      if (typeof window !== "undefined" && window.storage) {
-        try { await window.storage.set(AUTH_TEACHERS_KEY, json, true); } catch (e) {}
-      }
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem(AUTH_TEACHERS_KEY, json);
-      }
-      setTeachers(list);
-    } catch (e) { alert("저장 실패: " + e?.message); }
-  };
+  useEffect(() => { loadUsers(); }, []);
 
   const handleAdd = async () => {
-    if (!newName.trim() || !newPw) {
-      alert("이름과 비밀번호를 모두 입력하세요.");
+    if (!newName.trim() || !newEmail.trim() || !newPw) {
+      alert("이름, 이메일, 비밀번호를 모두 입력하세요.");
       return;
     }
-    if (newPw.length < 4) {
-      alert("비밀번호는 최소 4자 이상이어야 합니다.");
+    if (newPw.length < 6) {
+      alert("비밀번호는 최소 6자 이상이어야 합니다.");
       return;
     }
-    if (teachers.some(t => t.name === newName.trim())) {
-      alert("이미 등록된 이름입니다.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail.trim())) {
+      alert("올바른 이메일 형식이 아닙니다.");
       return;
     }
-    if (newName.trim() === SUPERVISOR_NAME || newName.trim() === "관리자" || newName.trim() === "센터장") {
-      alert("이 이름은 관리자 전용입니다. 다른 이름을 사용하세요.");
+    setBusy(true);
+    const res = await abaAdminCreateUser(newEmail.trim(), newPw, newName.trim());
+    setBusy(false);
+    if (res.error) {
+      alert("추가 실패: " + res.error);
       return;
     }
-    const newTeacher = {
-      id: "t_" + Date.now(),
-      name: newName.trim(),
-      pwHash: await hashPasswordSecure(newPw),
-      createdAt: new Date().toISOString()
-    };
-    await saveTeachers([...teachers, newTeacher]);
-    setNewName(""); setNewPw("");
+    setNewName(""); setNewEmail(""); setNewPw("");
+    await loadUsers();
+    alert("선생님 계정이 추가되었습니다.");
   };
 
-  const handleDelete = async (id) => {
-    const t = teachers.find(x => x.id === id);
-    if (!confirm(`'${t?.name}' 선생님 계정을 삭제할까요?`)) return;
-    await saveTeachers(teachers.filter(x => x.id !== id));
+  const handleDelete = async (userId, displayName) => {
+    if (!window.confirm(`'${displayName}' 선생님 계정을 삭제할까요?\n(로그인 계정이 삭제됩니다. 아동 데이터는 유지됩니다.)`)) return;
+    setBusy(true);
+    const res = await abaAdminDeleteUser(userId);
+    setBusy(false);
+    if (res.error) { alert("삭제 실패: " + res.error); return; }
+    await loadUsers();
   };
 
-  const handleChangePw = async (id) => {
-    if (!editPw || editPw.length < 4) {
-      alert("새 비밀번호는 최소 4자 이상이어야 합니다.");
+  const handleChangePw = async (userId) => {
+    if (!editPw || editPw.length < 6) {
+      alert("새 비밀번호는 최소 6자 이상이어야 합니다.");
       return;
     }
-    const newHash = await hashPasswordSecure(editPw);
-    const updated = teachers.map(t =>
-      t.id === id ? { ...t, pwHash: newHash } : t
-    );
-    await saveTeachers(updated);
+    setBusy(true);
+    const res = await abaAdminUpdatePassword(userId, editPw);
+    setBusy(false);
+    if (res.error) { alert("변경 실패: " + res.error); return; }
     setEditingId(null); setEditPw("");
     alert("비밀번호가 변경되었습니다.");
   };
@@ -3741,60 +3822,76 @@ function AdminPanel({ onClose }) {
               type="text"
               value={newName}
               onChange={e => setNewName(e.target.value)}
-              placeholder="선생님 이름"
+              placeholder="선생님 이름 (예: 홍길동)"
+              style={{ padding: "8px 10px", border: `1px solid ${PK}`, borderRadius: 6, fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }}
+            />
+            <input
+              type="email"
+              value={newEmail}
+              onChange={e => setNewEmail(e.target.value)}
+              placeholder="로그인 이메일 (예: hong@geomdan.com)"
+              autoComplete="off"
               style={{ padding: "8px 10px", border: `1px solid ${PK}`, borderRadius: 6, fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }}
             />
             <input
               type="password"
               value={newPw}
               onChange={e => setNewPw(e.target.value)}
-              placeholder="초기 비밀번호 (4자 이상)"
+              placeholder="초기 비밀번호 (6자 이상)"
+              autoComplete="new-password"
               onKeyDown={e => { if (e.key === "Enter") handleAdd(); }}
               style={{ padding: "8px 10px", border: `1px solid ${PK}`, borderRadius: 6, fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }}
             />
             <button
               onClick={handleAdd}
-              style={{ padding: "8px 12px", background: PKD, color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-              + 선생님 추가
+              disabled={busy}
+              style={{ padding: "8px 12px", background: busy ? "#ccc" : PKD, color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer", fontFamily: "inherit" }}>
+              {busy ? "처리 중..." : "+ 선생님 추가"}
             </button>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 10.5, color: "#a06", lineHeight: 1.6 }}>
+            💡 이름은 담당 아동의 <b>담당 선생님</b>과 정확히 같아야 그 아동이 선생님에게 보입니다.
           </div>
         </div>
 
         {/* 선생님 목록 */}
         <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 8 }}>
-          📋 등록된 선생님 ({teachers.length}명)
+          📋 등록된 선생님 ({users.length}명)
         </div>
-        {teachers.length === 0 ? (
+        {loading ? (
+          <div style={{ padding: 20, textAlign: "center", fontSize: 12, color: "#888" }}>
+            불러오는 중...
+          </div>
+        ) : users.length === 0 ? (
           <div style={{ padding: 20, textAlign: "center", fontSize: 12, color: "#888" }}>
             아직 등록된 선생님이 없습니다.
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {teachers.map(t => (
-              <div key={t.id} style={{
+            {users.map(u => (
+              <div key={u.user_id} style={{
                 padding: 12,
                 background: "#fafafa", border: "1px solid #eee", borderRadius: 8
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#333" }}>{t.name}</div>
-                    <div style={{ fontSize: 10, color: "#888", marginTop: 2 }}>
-                      등록: {t.createdAt ? new Date(t.createdAt).toLocaleDateString("ko-KR") : "-"}
-                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#333" }}>{u.display_name || "(이름없음)"}</div>
+                    <div style={{ fontSize: 10, color: "#888", marginTop: 2 }}>{u.email}</div>
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
-                    {editingId === t.id ? (
+                    {editingId === u.user_id ? (
                       <>
                         <input
                           type="password"
                           value={editPw}
                           onChange={e => setEditPw(e.target.value)}
                           placeholder="새 비밀번호"
-                          onKeyDown={e => { if (e.key === "Enter") handleChangePw(t.id); }}
+                          onKeyDown={e => { if (e.key === "Enter") handleChangePw(u.user_id); }}
                           style={{ padding: "5px 8px", border: `1px solid ${PK}`, borderRadius: 5, fontSize: 11, fontFamily: "inherit", width: 130 }}
                         />
                         <button
-                          onClick={() => handleChangePw(t.id)}
+                          onClick={() => handleChangePw(u.user_id)}
+                          disabled={busy}
                           style={{ padding: "5px 10px", background: PKD, color: "#fff", border: "none", borderRadius: 5, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
                           저장
                         </button>
@@ -3807,12 +3904,12 @@ function AdminPanel({ onClose }) {
                     ) : (
                       <>
                         <button
-                          onClick={() => { setEditingId(t.id); setEditPw(""); }}
+                          onClick={() => { setEditingId(u.user_id); setEditPw(""); }}
                           style={{ padding: "5px 10px", background: "#fff", border: `1px solid ${PK}`, borderRadius: 5, fontSize: 11, cursor: "pointer", color: PKD, fontFamily: "inherit" }}>
                           🔑 비밀번호 변경
                         </button>
                         <button
-                          onClick={() => handleDelete(t.id)}
+                          onClick={() => handleDelete(u.user_id, u.display_name)}
                           style={{ padding: "5px 10px", background: "#fff", border: "1px solid #f5b7b1", borderRadius: 5, fontSize: 11, cursor: "pointer", color: "#c0392b", fontFamily: "inherit" }}>
                           🗑 삭제
                         </button>
@@ -3830,8 +3927,8 @@ function AdminPanel({ onClose }) {
           background: "#f8f8f8", borderRadius: 8,
           fontSize: 10.5, color: "#666", lineHeight: 1.7
         }}>
-          💡 <b>참고:</b> 선생님 계정은 클라우드에 공유 저장되어 모든 기기에서 사용 가능합니다.<br />
-          선생님은 본인 PC/태블릿/핸드폰 어디서든 같은 링크로 로그인할 수 있습니다.
+          💡 <b>참고:</b> 선생님 계정은 Supabase Auth로 안전하게 관리됩니다.<br />
+          선생님은 본인 PC/태블릿/핸드폰 어디서든 이메일+비밀번호로 로그인할 수 있습니다.
         </div>
 
         <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end" }}>
@@ -3852,42 +3949,18 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        let adminPwHash = null;
-        
-        if (typeof localStorage !== "undefined") {
-          adminPwHash = localStorage.getItem(AUTH_ADMIN_PW_KEY);
+        // A방식: Auth 세션이 있으면 자동 복원
+        const authUser = await abaGetCurrentUser();
+        if (authUser) {
+          const meta = authUser.user_metadata || {};
+          const roleRaw = meta.role || "therapist";
+          const displayName = meta.display_name || (authUser.email || "").split("@")[0];
+          setCurrentUser({
+            role: roleRaw === "admin" ? "admin" : "teacher",
+            name: displayName,
+          });
         }
-        
-        if (!adminPwHash && typeof window !== "undefined" && window.storage) {
-          try {
-            const res = await window.storage.get(AUTH_ADMIN_PW_KEY, true);
-            adminPwHash = res?.value;
-          } catch (e) {
-            console.warn("[window.storage 읽기 실패 - localStorage만 사용]", e);
-          }
-        }
-        
-        if (!adminPwHash) {
-          setAuthView("setup");  // 처음 — 관리자 비밀번호 설정 필요
-        } else {
-          // ★ [수정] 로그인 정보는 브라우저별 독립 — sessionStorage 사용 (창 닫으면 로그아웃)
-          let userRaw = null;
-          if (typeof sessionStorage !== "undefined") {
-            userRaw = sessionStorage.getItem(AUTH_CURRENT_USER_KEY);
-          }
-          // 과거 localStorage에 남아있던 자동로그인 흔적 제거 (보안)
-          try { if (typeof localStorage !== "undefined") localStorage.removeItem(AUTH_CURRENT_USER_KEY); } catch (e) {}
-          
-          if (userRaw) {
-            try {
-              const user = JSON.parse(userRaw);
-              if (user && user.role && user.name) {
-                setCurrentUser(user);
-              }
-            } catch (e) {}
-          }
-          setAuthView("login");
-        }
+        setAuthView("login");
       } catch (e) {
         console.error("[AUTH 로드 실패]", e);
         setAuthView("login");
@@ -5865,99 +5938,36 @@ export default function App() {
             setAuthMessage("비밀번호 저장 실패: " + (e?.message || ""));
           }
         }}
-        onLogin={async (name, pw) => {
-          if (!name || !pw) {
-            setAuthMessage("⚠️ 이름과 비밀번호를 모두 입력하세요.");
+        onLogin={async (email, pw) => {
+          if (!email || !pw) {
+            setAuthMessage("⚠️ 이메일과 비밀번호를 모두 입력하세요.");
             return;
           }
-          
+
           try {
-            if (name === SUPERVISOR_NAME || name === "관리자" || name === "센터장") {
-              let adminPwHash = null;
-              if (typeof localStorage !== "undefined") {
-                adminPwHash = localStorage.getItem(AUTH_ADMIN_PW_KEY);
-              }
-              
-              if (!adminPwHash && typeof window !== "undefined" && window.storage) {
-                try {
-                  const res = await window.storage.get(AUTH_ADMIN_PW_KEY, true);
-                  adminPwHash = res?.value;
-                } catch (e) {}
-              }
-              
-              if (await verifyPassword(pw, adminPwHash)) {
-                // 옛 형식(simpleHash) 비번이면 PBKDF2로 자동 업그레이드
-                if (isLegacyHash(adminPwHash)) {
-                  try {
-                    const upgraded = await hashPasswordSecure(pw);
-                    if (typeof localStorage !== "undefined") localStorage.setItem(AUTH_ADMIN_PW_KEY, upgraded);
-                    if (typeof window !== "undefined" && window.storage) {
-                      await window.storage.set(AUTH_ADMIN_PW_KEY, upgraded, true).catch(() => {});
-                    }
-                  } catch (e) {}
-                }
-                const adminUser = { role: "admin", name: SUPERVISOR_NAME };
-                
-                // ★ [수정] 로그인 정보는 브라우저별 독립 — sessionStorage 사용 (창 닫으면 로그아웃)
-                if (typeof sessionStorage !== "undefined") {
-                  sessionStorage.setItem(AUTH_CURRENT_USER_KEY, JSON.stringify(adminUser));
-                }
-                
-                setCurrentUser(adminUser);
-                setAuthMessage("");
-                return;
-              } else {
-                setAuthMessage("⚠️ 관리자 비밀번호가 틀렸습니다.");
-                return;
-              }
-            }
-            
-            let teachersRaw = null;
-            if (typeof window !== "undefined" && window.storage) {
-              try {
-                const res = await window.storage.get(AUTH_TEACHERS_KEY, true);
-                teachersRaw = res?.value;
-              } catch (e) {}
-            }
-            
-            if (!teachersRaw && typeof localStorage !== "undefined") {
-              teachersRaw = localStorage.getItem(AUTH_TEACHERS_KEY);
-            }
-            
-            const teachers = teachersRaw ? JSON.parse(teachersRaw) : [];
-            const teacher = teachers.find(t => t.name === name);
-            if (!teacher) {
-              setAuthMessage(`⚠️ '${name}' 선생님이 등록되어 있지 않습니다. 관리자에게 문의하세요.`);
+            // Supabase Auth 로그인
+            const res = await abaSignIn(email.trim(), pw);
+            if (res.error) {
+              setAuthMessage("⚠️ 로그인 실패: 이메일 또는 비밀번호를 확인하세요.");
               return;
             }
-            if (!(await verifyPassword(pw, teacher.pwHash))) {
-              setAuthMessage("⚠️ 비밀번호가 틀렸습니다.");
+            // 로그인한 사용자 정보 조회 (role, display_name)
+            const authUser = await abaGetCurrentUser();
+            if (!authUser) {
+              setAuthMessage("⚠️ 사용자 정보를 불러오지 못했습니다. 다시 시도해주세요.");
               return;
             }
-            // 옛 형식(simpleHash) 비번이면 PBKDF2로 자동 업그레이드
-            if (isLegacyHash(teacher.pwHash)) {
-              try {
-                const upgraded = await hashPasswordSecure(pw);
-                const newTeachers = teachers.map(t => t.name === teacher.name ? { ...t, pwHash: upgraded } : t);
-                const json = JSON.stringify(newTeachers);
-                if (typeof window !== "undefined" && window.storage) {
-                  await window.storage.set(AUTH_TEACHERS_KEY, json, true).catch(() => {});
-                }
-                if (typeof localStorage !== "undefined") localStorage.setItem(AUTH_TEACHERS_KEY, json);
-              } catch (e) {}
-            }
-            const teacherUser = { role: "teacher", name: teacher.name };
-            
-            // ★ [수정] 로그인 정보는 브라우저별 독립 — sessionStorage 사용 (창 닫으면 로그아웃)
-            if (typeof sessionStorage !== "undefined") {
-              sessionStorage.setItem(AUTH_CURRENT_USER_KEY, JSON.stringify(teacherUser));
-            }
-            
-            if (!teacher.welcomed) {
-              setShowWelcome(true);
-            }
-            
-            setCurrentUser(teacherUser);
+            const meta = authUser.user_metadata || {};
+            const roleRaw = meta.role || "therapist";
+            const displayName = meta.display_name || (authUser.email || "").split("@")[0];
+
+            // 앱 내부 형식으로 매핑: admin → role "admin", 그 외 → "teacher"
+            const appUser = {
+              role: roleRaw === "admin" ? "admin" : "teacher",
+              name: displayName,
+            };
+
+            setCurrentUser(appUser);
             setAuthMessage("");
           } catch (e) {
             setAuthMessage("로그인 처리 실패: " + (e?.message || ""));
@@ -6265,23 +6275,11 @@ export default function App() {
                 setConfirmDialog({
                   message: "로그아웃 하시겠습니까?",
                   onConfirm: async () => {
-                    // ★ [수정] 로그인 정보는 sessionStorage에 저장 — 로그아웃 시 거기서 삭제
-                    // (과거 localStorage / window.storage에 남아있을 수 있으니 함께 정리)
-                    try {
-                      if (typeof sessionStorage !== "undefined") {
-                        sessionStorage.removeItem(AUTH_CURRENT_USER_KEY);
-                      }
-                    } catch (e) {}
-                    try {
-                      if (typeof localStorage !== "undefined") {
-                        localStorage.removeItem(AUTH_CURRENT_USER_KEY);
-                      }
-                    } catch (e) {}
-                    try {
-                      if (typeof window !== "undefined" && window.storage) {
-                        await window.storage.delete(AUTH_CURRENT_USER_KEY, true);
-                      }
-                    } catch (e) {}
+                    // A방식: Supabase Auth 세션 종료
+                    try { await abaSignOut(); } catch (e) {}
+                    // 과거 방식 잔재 정리
+                    try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(AUTH_CURRENT_USER_KEY); } catch (e) {}
+                    try { if (typeof localStorage !== "undefined") localStorage.removeItem(AUTH_CURRENT_USER_KEY); } catch (e) {}
                     setCurrentUser(null);
                     setAuthView("login");
                   }
