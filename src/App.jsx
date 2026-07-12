@@ -16,10 +16,10 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const _sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // 현재 로그인한 선생님 이름을 알아내기 위한 헬퍼
-// (앱이 localStorage의 AUTH_CURRENT_USER_KEY에 {role,name}을 저장함)
+// (앱이 sessionStorage의 AUTH_CURRENT_USER_KEY에 {role,name}을 저장함 — 창 닫으면 로그아웃)
 function _currentOwner() {
   try {
-    const raw = localStorage.getItem("gd-aba-current-user");
+    const raw = sessionStorage.getItem("gd-aba-current-user");
     if (!raw) return "__nobody__";
     const u = JSON.parse(raw);
     return (u && u.name) ? u.name : "__nobody__";
@@ -3870,11 +3870,13 @@ export default function App() {
         if (!adminPwHash) {
           setAuthView("setup");  // 처음 — 관리자 비밀번호 설정 필요
         } else {
-          // ★ [수정] 로그인 정보는 브라우저별 독립 — localStorage만 사용 (공유 저장소 미사용)
+          // ★ [수정] 로그인 정보는 브라우저별 독립 — sessionStorage 사용 (창 닫으면 로그아웃)
           let userRaw = null;
-          if (typeof localStorage !== "undefined") {
-            userRaw = localStorage.getItem(AUTH_CURRENT_USER_KEY);
+          if (typeof sessionStorage !== "undefined") {
+            userRaw = sessionStorage.getItem(AUTH_CURRENT_USER_KEY);
           }
+          // 과거 localStorage에 남아있던 자동로그인 흔적 제거 (보안)
+          try { if (typeof localStorage !== "undefined") localStorage.removeItem(AUTH_CURRENT_USER_KEY); } catch (e) {}
           
           if (userRaw) {
             try {
@@ -5852,9 +5854,9 @@ export default function App() {
             
             const adminUser = { role: "admin", name: SUPERVISOR_NAME };
             
-            // ★ [수정] 로그인 정보는 브라우저별 독립 — localStorage만 사용
-            if (typeof localStorage !== "undefined") {
-              localStorage.setItem(AUTH_CURRENT_USER_KEY, JSON.stringify(adminUser));
+            // ★ [수정] 로그인 정보는 브라우저별 독립 — sessionStorage 사용 (창 닫으면 로그아웃)
+            if (typeof sessionStorage !== "undefined") {
+              sessionStorage.setItem(AUTH_CURRENT_USER_KEY, JSON.stringify(adminUser));
             }
             
             setCurrentUser(adminUser);
@@ -5896,9 +5898,9 @@ export default function App() {
                 }
                 const adminUser = { role: "admin", name: SUPERVISOR_NAME };
                 
-                // ★ [수정] 로그인 정보는 브라우저별 독립 — localStorage만 사용
-                if (typeof localStorage !== "undefined") {
-                  localStorage.setItem(AUTH_CURRENT_USER_KEY, JSON.stringify(adminUser));
+                // ★ [수정] 로그인 정보는 브라우저별 독립 — sessionStorage 사용 (창 닫으면 로그아웃)
+                if (typeof sessionStorage !== "undefined") {
+                  sessionStorage.setItem(AUTH_CURRENT_USER_KEY, JSON.stringify(adminUser));
                 }
                 
                 setCurrentUser(adminUser);
@@ -5946,9 +5948,9 @@ export default function App() {
             }
             const teacherUser = { role: "teacher", name: teacher.name };
             
-            // ★ [수정] 로그인 정보는 브라우저별 독립 — localStorage만 사용
-            if (typeof localStorage !== "undefined") {
-              localStorage.setItem(AUTH_CURRENT_USER_KEY, JSON.stringify(teacherUser));
+            // ★ [수정] 로그인 정보는 브라우저별 독립 — sessionStorage 사용 (창 닫으면 로그아웃)
+            if (typeof sessionStorage !== "undefined") {
+              sessionStorage.setItem(AUTH_CURRENT_USER_KEY, JSON.stringify(teacherUser));
             }
             
             if (!teacher.welcomed) {
@@ -6263,8 +6265,13 @@ export default function App() {
                 setConfirmDialog({
                   message: "로그아웃 하시겠습니까?",
                   onConfirm: async () => {
-                    // ★ [수정] 로그인 정보는 localStorage에만 저장하므로 거기서만 삭제
-                    // (혹시 이전 버전에서 window.storage에 남아있을 수 있으니 함께 정리)
+                    // ★ [수정] 로그인 정보는 sessionStorage에 저장 — 로그아웃 시 거기서 삭제
+                    // (과거 localStorage / window.storage에 남아있을 수 있으니 함께 정리)
+                    try {
+                      if (typeof sessionStorage !== "undefined") {
+                        sessionStorage.removeItem(AUTH_CURRENT_USER_KEY);
+                      }
+                    } catch (e) {}
                     try {
                       if (typeof localStorage !== "undefined") {
                         localStorage.removeItem(AUTH_CURRENT_USER_KEY);
