@@ -2,6 +2,33 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 /* ═══════════════════════════════════════════════════════════════
+   도메인 잠금 — 검단ABA언어행동연구소의 지적재산
+   허용된 호스트 외에서는 앱 실행을 차단한다.
+   ═══════════════════════════════════════════════════════════════ */
+(function domainGuard() {
+  try {
+    var host = window.location.hostname;
+    var allowed =
+      host === "aba-geomdan.github.io" ||
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "" ||
+      /\.local$/.test(host);
+    if (!allowed) {
+      document.documentElement.innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:center;' +
+        'height:100vh;margin:0;font-family:sans-serif;text-align:center;' +
+        'color:#D4728A;background:#FFF0F3;padding:24px;box-sizing:border-box;">' +
+        '<div><h1 style="font-size:20px;margin:0 0 8px;">접근할 수 없는 페이지</h1>' +
+        '<p style="font-size:14px;margin:0;">검단ABA언어행동연구소의 지적재산</p></div></div>';
+      throw new Error("Unauthorized host");
+    }
+  } catch (e) {
+    throw e;
+  }
+})();
+
+/* ═══════════════════════════════════════════════════════════════
    Supabase 클라우드 연결 어댑터
    ───────────────────────────────────────────────────────────────
    기존 window.storage 호출(get/set/delete)을 그대로 받아서
