@@ -2437,9 +2437,17 @@ function calcDayRateGlobal(day, plannedTrials) {
     // ★ 실제 입력된 시도(+/-)가 하나도 없으면 '측정 안 한 날' → null (그래프에 점 안 찍힘)
     const entered = day.trials.filter(x => x === "+" || x === "-");
     if (entered.length === 0) return null;
-    // ★ [수정] 분모를 전역 목표횟수(plannedTrials)가 아니라 그 날 실제 입력한 시도 수로 계산.
-    //    목표횟수를 나중에 바꿔도 과거 날짜의 %가 소급 왜곡되지 않도록 함.
-    //    (plannedTrials 인자는 호출부 호환을 위해 그대로 받되, 분모로는 쓰지 않음)
+    // ★ 분모: 그 날 저장된 목표횟수(day.plannedN)를 우선 사용 → 나중에 목표횟수를 바꿔도
+    //    과거 날짜의 %가 소급 왜곡되지 않음. 저장값 없는 기존 데이터는 plannedTrials로(하위호환).
+    const effN = (day.plannedN != null) ? day.plannedN : plannedTrials;
+    if (effN != null) {
+      const N = Math.max(1, Math.min(99, effN));
+      let pluses = 0;
+      for (let i = 0; i < N; i++) {
+        if (day.trials[i] === "+") pluses++;
+      }
+      return Math.round((pluses / N) * 100);
+    }
     const pluses = entered.filter(x => x === "+").length;
     return Math.round((pluses / entered.length) * 100);
   }
@@ -4991,14 +4999,25 @@ export default function App() {
     }));
   };
 
-  const setTaskPlannedTrials = (goalId, taskId, trials) => {
+  const setTaskPlannedTrials = (goalId, taskId, trials, date) => {
     const n = Math.max(1, Math.min(99, Math.round(Number(trials))));
     if (isNaN(n)) return;
     setGoals(prev => prev.map(g => {
       if (g.id !== goalId) return g;
       return {
         ...g,
-        tasks: (g.tasks || []).map(t => t.id === taskId ? { ...t, plannedTrials: n } : t)
+        tasks: (g.tasks || []).map(t => {
+          if (t.id !== taskId) return t;
+          const next = { ...t, plannedTrials: n };
+          // ★ date가 넘어오고 그 날 데이터가 있으면: 오늘 목표횟수(plannedN)를 새 값으로 갱신하고
+          //    새 목표보다 뒤에 있는 칸은 잘라냄(방법1의 실제 삭제 단계). date 없으면 목표만 변경(하위호환).
+          if (date && t.daily && t.daily[date]) {
+            const day = t.daily[date];
+            let trialsArr = Array.isArray(day.trials) ? day.trials.slice(0, n) : day.trials;
+            next.daily = { ...t.daily, [date]: { ...day, plannedN: n, trials: trialsArr } };
+          }
+          return next;
+        })
       };
     }));
   };
@@ -5044,7 +5063,9 @@ export default function App() {
           } else {
             trials[index] = value;
           }
-          daily[date] = { trials, enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10) };
+          // ★ 그 날의 목표횟수 도장: 이미 있으면 유지, 없으면 현재 목표횟수로 고정
+          const plannedN = (day.plannedN != null) ? day.plannedN : (t.plannedTrials || 10);
+          daily[date] = { ...day, trials, plannedN, enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10) };
           return { ...t, daily };
         })
       };
@@ -5074,9 +5095,10 @@ export default function App() {
         ...g,
         tasks: (g.tasks || []).map(t => {
           if (t.id !== taskId) return t;
-          const plannedN = Math.max(1, Math.min(99, t.plannedTrials || 10));
           const daily = { ...(t.daily || {}) };
           const day = daily[date] || {};
+          // ★ 그 날 목표횟수 도장 우선: 이미 있으면 그 값, 없으면 현재 목표횟수
+          const plannedN = Math.max(1, Math.min(99, (day.plannedN != null) ? day.plannedN : (t.plannedTrials || 10)));
           let trials = Array.isArray(day.trials) ? [...day.trials] : [];
           while (trials.length < plannedN) trials.push(null);
           if (trials.length > plannedN) trials = trials.slice(0, plannedN);
@@ -5085,7 +5107,7 @@ export default function App() {
               trials[i] = value;
             }
           }
-          daily[date] = { trials, enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10) };
+          daily[date] = { ...day, trials, plannedN, enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10) };
           return { ...t, daily };
         })
       };
@@ -5148,14 +5170,18 @@ export default function App() {
     const calcDayRateForMastery = (day, plannedTrials) => {
       if (!day) return null;
       if (Array.isArray(day.trials)) {
-        // ★ [수정] 완료(기준도달) 판정도 화면 표시용 calcDayRateGlobal과 동일 기준으로 통일.
-        //    분모 = 그 날 실제 입력한 시도 수, 부실한 날을 건너뛰던 minFilled 게이트 제거.
-        //    (목표횟수 변경 시 과거 완료판정이 소급 왜곡되거나, 부실한 날을 유령처럼 건너뛰어
-        //     연속일 판정이 잘못 이어지던 문제 해결)
-        const entered = day.trials.filter(x => x === "+" || x === "-");
-        if (entered.length === 0) return null;
-        const pluses = entered.filter(x => x === "+").length;
-        return Math.round((pluses / entered.length) * 100);
+        // ★ 분모: 그 날 저장된 목표횟수(day.plannedN) 우선 사용(하위호환: 없으면 plannedTrials)
+        const effN = (day.plannedN != null) ? day.plannedN : (plannedTrials || 10);
+        const N = Math.max(1, Math.min(99, effN));
+        const minFilled = Math.ceil(N * 0.8);  // 유효 하루 기준 (10→8, 5→4, 7→6)
+        let pluses = 0, filledCount = 0;
+        for (let i = 0; i < N; i++) {
+          const v = day.trials[i];
+          if (v === "+") { pluses++; filledCount++; }
+          else if (v === "-" || v === "NA") { filledCount++; }
+        }
+        if (filledCount < minFilled) return null;
+        return Math.round((pluses / N) * 100);
       }
       if (day.mode === "pct") return typeof day.pct === "number" ? day.pct : null;
       const total = (day.c || 0) + (day.ic || 0);
@@ -13358,6 +13384,27 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
     setEditing(false);
   };
 
+  // ★ 목표횟수 변경 헬퍼(방법1): 오늘 날짜 뒤 칸에 입력 기록이 있으면 경고 후 삭제.
+  //    - 늘리거나(newN>=현재 칸수) 뒤 칸이 비어있으면 경고 없이 바로 변경
+  //    - 줄이면서 잘려나갈 칸(newN 이후)에 +/-/NA 기록이 있으면 askConfirm으로 확인
+  const changePlannedTrials = (newN) => {
+    const day = (task.daily || {})[date];
+    const trials = day && Array.isArray(day.trials) ? day.trials : [];
+    let hasTailRecord = false;
+    for (let i = newN; i < trials.length; i++) {
+      const v = trials[i];
+      if (v === "+" || v === "-" || v === "NA") { hasTailRecord = true; break; }
+    }
+    if (hasTailRecord && askConfirm) {
+      askConfirm(
+        `${newN}회로 줄이면 오늘 입력한 ${newN + 1}번 이후 시도 기록이 삭제됩니다.\n계속하시겠습니까?`,
+        () => setTaskPlannedTrials(goal.id, task.id, newN, date)
+      );
+    } else {
+      setTaskPlannedTrials(goal.id, task.id, newN, date);
+    }
+  };
+
   return (
     <div className="responsive-task-grid" style={{
       display: "grid",
@@ -13418,13 +13465,13 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                 <span style={{ display: "inline-grid", gridTemplateColumns: "60px 60px", gap: 3, marginLeft: 4 }} title={isClickMode ? "시도 모드 — 정해진 칸 수가 의미 없습니다" : "측정 방식 + 시도 수"}>
                   {/* 1행 1열: 10회 */}
                   <button
-                    onClick={(e) => { e.stopPropagation(); ensureRawMode(); setTaskPlannedTrials(goal.id, task.id, 10); setEditingTrials(false); setShowCustomDropdown(false); }}
+                    onClick={(e) => { e.stopPropagation(); ensureRawMode(); changePlannedTrials(10); setEditingTrials(false); setShowCustomDropdown(false); }}
                     style={{ ...btnBase, ...((cur === 10 && !showCustomDropdown) ? rawOnStyle : rawOffStyle), opacity: isClickMode ? 0.65 : 1 }}>
                     10회
                   </button>
                   {/* 1행 2열: 5회 */}
                   <button
-                    onClick={(e) => { e.stopPropagation(); ensureRawMode(); setTaskPlannedTrials(goal.id, task.id, 5); setEditingTrials(false); setShowCustomDropdown(false); }}
+                    onClick={(e) => { e.stopPropagation(); ensureRawMode(); changePlannedTrials(5); setEditingTrials(false); setShowCustomDropdown(false); }}
                     style={{ ...btnBase, ...((cur === 5 && !showCustomDropdown) ? rawOnStyle : rawOffStyle), opacity: isClickMode ? 0.65 : 1 }}>
                     5회
                   </button>
@@ -13442,7 +13489,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                           e.stopPropagation();
                           if (e.key === "Enter") {
                             const n = Math.max(1, Math.min(99, Math.round(Number(trialsInput))));
-                            if (!isNaN(n)) { ensureRawMode(); setTaskPlannedTrials(goal.id, task.id, n); }
+                            if (!isNaN(n)) { ensureRawMode(); changePlannedTrials(n); }
                             setEditingTrials(false);
                           } else if (e.key === "Escape") {
                             setTrialsInput(String(task.plannedTrials || 10));
@@ -13451,7 +13498,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                         }}
                         onBlur={() => {
                           const n = Math.max(1, Math.min(99, Math.round(Number(trialsInput))));
-                          if (!isNaN(n)) { ensureRawMode(); setTaskPlannedTrials(goal.id, task.id, n); }
+                          if (!isNaN(n)) { ensureRawMode(); changePlannedTrials(n); }
                           setEditingTrials(false);
                         }}
                         style={{ width: 42, fontSize: 12, padding: "4px 4px", border: `1px solid ${PK}`, borderRadius: 6, fontFamily: "inherit", outline: "none", textAlign: "center" }}
@@ -13483,7 +13530,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                           minWidth: 90
                         }}>
                           <button
-                            onClick={(e) => { e.stopPropagation(); ensureRawMode(); setTaskPlannedTrials(goal.id, task.id, 15); setShowCustomDropdown(false); }}
+                            onClick={(e) => { e.stopPropagation(); ensureRawMode(); changePlannedTrials(15); setShowCustomDropdown(false); }}
                             style={{
                               padding: "5px 10px", fontSize: 12, fontWeight: 700,
                               background: cur === 15 ? PK : "#fff",
@@ -13496,7 +13543,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                             15회
                           </button>
                           <button
-                            onClick={(e) => { e.stopPropagation(); ensureRawMode(); setTaskPlannedTrials(goal.id, task.id, 20); setShowCustomDropdown(false); }}
+                            onClick={(e) => { e.stopPropagation(); ensureRawMode(); changePlannedTrials(20); setShowCustomDropdown(false); }}
                             style={{
                               padding: "5px 10px", fontSize: 12, fontWeight: 700,
                               background: cur === 20 ? PK : "#fff",
