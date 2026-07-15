@@ -4988,13 +4988,23 @@ export default function App() {
     }));
   };
 
-  const setTaskMeasureMode = (goalId, taskId, mode) => {
+  const setTaskMeasureMode = (goalId, taskId, mode, date) => {
     if (mode !== "pct" && mode !== "raw" && mode !== "click") return;
     setGoals(prev => prev.map(g => {
       if (g.id !== goalId) return g;
       return {
         ...g,
-        tasks: (g.tasks || []).map(t => t.id === taskId ? { ...t, measureMode: mode } : t)
+        tasks: (g.tasks || []).map(t => {
+          if (t.id !== taskId) return t;
+          const next = { ...t, measureMode: mode };
+          // ★ 모드가 실제로 바뀌고 date가 넘어오면 그 날 데이터 초기화(raw의 trials ↔ click의 c·ic 섞임 방지)
+          if (date && (t.measureMode || "raw") !== mode && t.daily && t.daily[date]) {
+            const daily = { ...t.daily };
+            delete daily[date];
+            next.daily = daily;
+          }
+          return next;
+        })
       };
     }));
   };
@@ -13406,6 +13416,29 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
     }
   };
 
+  // ★ 오늘 날짜에 입력된 데이터가 있는지 (raw: trials에 +/-/NA / click: 정·오 카운트)
+  const dayHasData = () => {
+    const day = (task.daily || {})[date];
+    if (!day) return false;
+    if (Array.isArray(day.trials) && day.trials.some(v => v === "+" || v === "-" || v === "NA")) return true;
+    if ((day.c || 0) > 0 || (day.ic || 0) > 0) return true;
+    return false;
+  };
+
+  // ★ 측정 모드 변경 헬퍼: 실제로 모드가 바뀌고 오늘 데이터가 있으면 초기화 경고
+  const changeMeasureMode = (newMode) => {
+    const curMode = task.measureMode || "raw";
+    if (curMode === newMode) return;  // 안 바뀌면 아무것도 안 함
+    if (dayHasData() && askConfirm) {
+      askConfirm(
+        `측정 방식을 바꾸면 오늘 입력한 이 과제의 기록이 초기화됩니다.\n(횟수 기록과 정·오 기록은 방식이 달라 함께 보관할 수 없어요)\n계속하시겠습니까?`,
+        () => setTaskMeasureMode(goal.id, task.id, newMode, date)
+      );
+    } else {
+      setTaskMeasureMode(goal.id, task.id, newMode, date);
+    }
+  };
+
   return (
     <div className="responsive-task-grid" style={{
       display: "grid",
@@ -13459,20 +13492,32 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
               const clickStyle = isClickMode
                 ? { background: PK, color: "#fff", border: `1px solid ${PK}` }
                 : { background: "#f0f0f0", color: "#888", border: "1px solid #ddd" };
-              const ensureRawMode = () => {
-                if (isClickMode) setTaskMeasureMode(goal.id, task.id, "raw");
+              // ★ click 모드에서 횟수 버튼을 누르면 raw로 전환(모드 변경 → 초기화 경고 대상).
+              //    newN이 주어지면 전환 후 그 목표횟수까지 함께 설정. raw 모드면 아무 것도 안 함.
+              const ensureRawMode = (newN) => {
+                if (!isClickMode) return true;  // 이미 raw → 그대로 진행
+                const applyN = (typeof newN === "number") ? newN : (task.plannedTrials || 10);
+                if (dayHasData() && askConfirm) {
+                  askConfirm(
+                    `측정 방식을 바꾸면 오늘 입력한 이 과제의 기록이 초기화됩니다.\n(횟수 기록과 정·오 기록은 방식이 달라 함께 보관할 수 없어요)\n계속하시겠습니까?`,
+                    () => { setTaskMeasureMode(goal.id, task.id, "raw", date); setTaskPlannedTrials(goal.id, task.id, applyN, date); }
+                  );
+                  return false;  // 확인 대기 — 바깥 흐름은 중단
+                }
+                setTaskMeasureMode(goal.id, task.id, "raw", date);
+                return true;
               };
               return (
                 <span style={{ display: "inline-grid", gridTemplateColumns: "60px 60px", gap: 3, marginLeft: 4 }} title={isClickMode ? "시도 모드 — 정해진 칸 수가 의미 없습니다" : "측정 방식 + 시도 수"}>
                   {/* 1행 1열: 10회 */}
                   <button
-                    onClick={(e) => { e.stopPropagation(); ensureRawMode(); changePlannedTrials(10); setEditingTrials(false); setShowCustomDropdown(false); }}
+                    onClick={(e) => { e.stopPropagation(); if (ensureRawMode(10)) changePlannedTrials(10); setEditingTrials(false); setShowCustomDropdown(false); }}
                     style={{ ...btnBase, ...((cur === 10 && !showCustomDropdown) ? rawOnStyle : rawOffStyle), opacity: isClickMode ? 0.65 : 1 }}>
                     10회
                   </button>
                   {/* 1행 2열: 5회 */}
                   <button
-                    onClick={(e) => { e.stopPropagation(); ensureRawMode(); changePlannedTrials(5); setEditingTrials(false); setShowCustomDropdown(false); }}
+                    onClick={(e) => { e.stopPropagation(); if (ensureRawMode(5)) changePlannedTrials(5); setEditingTrials(false); setShowCustomDropdown(false); }}
                     style={{ ...btnBase, ...((cur === 5 && !showCustomDropdown) ? rawOnStyle : rawOffStyle), opacity: isClickMode ? 0.65 : 1 }}>
                     5회
                   </button>
@@ -13490,7 +13535,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                           e.stopPropagation();
                           if (e.key === "Enter") {
                             const n = Math.max(1, Math.min(99, Math.round(Number(trialsInput))));
-                            if (!isNaN(n)) { ensureRawMode(); changePlannedTrials(n); }
+                            if (!isNaN(n)) { if (ensureRawMode(n)) changePlannedTrials(n); }
                             setEditingTrials(false);
                           } else if (e.key === "Escape") {
                             setTrialsInput(String(task.plannedTrials || 10));
@@ -13499,7 +13544,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                         }}
                         onBlur={() => {
                           const n = Math.max(1, Math.min(99, Math.round(Number(trialsInput))));
-                          if (!isNaN(n)) { ensureRawMode(); changePlannedTrials(n); }
+                          if (!isNaN(n)) { if (ensureRawMode(n)) changePlannedTrials(n); }
                           setEditingTrials(false);
                         }}
                         style={{ width: 42, fontSize: 12, padding: "4px 4px", border: `1px solid ${PK}`, borderRadius: 6, fontFamily: "inherit", outline: "none", textAlign: "center" }}
@@ -13510,7 +13555,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                     <span style={{ position: "relative", display: "inline-block" }}>
                       <button
                         ref={customTriggerRef}
-                        onClick={(e) => { e.stopPropagation(); ensureRawMode(); setShowCustomDropdown(s => !s); }}
+                        onClick={(e) => { e.stopPropagation(); setShowCustomDropdown(s => !s); }}
                         style={{ ...btnBase, ...((!isPreset || showCustomDropdown) ? rawOnStyle : rawOffStyle), opacity: isClickMode ? 0.65 : 1 }}>
                         {!isPreset ? `${cur}회 ▾` : "직접 ▾"}
                       </button>
@@ -13531,7 +13576,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                           minWidth: 90
                         }}>
                           <button
-                            onClick={(e) => { e.stopPropagation(); ensureRawMode(); changePlannedTrials(15); setShowCustomDropdown(false); }}
+                            onClick={(e) => { e.stopPropagation(); if (ensureRawMode(15)) changePlannedTrials(15); setShowCustomDropdown(false); }}
                             style={{
                               padding: "5px 10px", fontSize: 12, fontWeight: 700,
                               background: cur === 15 ? PK : "#fff",
@@ -13544,7 +13589,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                             15회
                           </button>
                           <button
-                            onClick={(e) => { e.stopPropagation(); ensureRawMode(); changePlannedTrials(20); setShowCustomDropdown(false); }}
+                            onClick={(e) => { e.stopPropagation(); if (ensureRawMode(20)) changePlannedTrials(20); setShowCustomDropdown(false); }}
                             style={{
                               padding: "5px 10px", fontSize: 12, fontWeight: 700,
                               background: cur === 20 ? PK : "#fff",
@@ -13557,7 +13602,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                             20회
                           </button>
                           <button
-                            onClick={(e) => { e.stopPropagation(); ensureRawMode(); setTrialsInput(String(cur)); setEditingTrials(true); setShowCustomDropdown(false); }}
+                            onClick={(e) => { e.stopPropagation(); setTrialsInput(String(cur)); setEditingTrials(true); setShowCustomDropdown(false); }}
                             style={{
                               padding: "5px 10px", fontSize: 12, fontWeight: 700,
                               background: (!isPreset && cur !== 15 && cur !== 20) ? PK : "#fff",
@@ -13575,7 +13620,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                   )}
                   {/* 2행 2열: 시도 */}
                   <button
-                    onClick={(e) => { e.stopPropagation(); setTaskMeasureMode(goal.id, task.id, mode === "click" ? "raw" : "click"); }}
+                    onClick={(e) => { e.stopPropagation(); changeMeasureMode(mode === "click" ? "raw" : "click"); }}
                     style={{ ...btnBase, ...clickStyle }}>
                     시도
                   </button>
