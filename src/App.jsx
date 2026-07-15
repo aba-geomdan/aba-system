@@ -5040,7 +5040,7 @@ export default function App() {
   };
 
   const setTaskTrial = (goalId, taskId, date, index, value) => {
-    if (index < 0 || index > 9) return;
+    if (index < 0 || index > 98) return;
     if (value !== "+" && value !== "-" && value !== "NA" && value !== null) return;
     setGoals(prev => prev.map(g => {
       if (g.id !== goalId) return g;
@@ -5050,21 +5050,22 @@ export default function App() {
           if (t.id !== taskId) return t;
           const daily = { ...(t.daily || {}) };
           const day = daily[date] || {};
-          let trials = Array.isArray(day.trials) ? [...day.trials] : [null, null, null, null, null, null, null, null, null, null];
-          while (trials.length < 10) trials.push(null);
-          if (trials.length > 10) trials = trials.slice(0, 10);
+          // ★ 그 날의 목표횟수 도장: 이미 있으면 유지, 없으면 현재 목표횟수로 고정
+          const plannedN = Math.max(1, Math.min(99, (day.plannedN != null) ? day.plannedN : (t.plannedTrials || 10)));
+          if (index >= plannedN) return t;  // 목표횟수 범위 밖은 무시
+          let trials = Array.isArray(day.trials) ? [...day.trials] : [];
+          while (trials.length < plannedN) trials.push(null);
+          if (trials.length > plannedN) trials = trials.slice(0, plannedN);
           if (value !== null) {
             for (let i = 0; i < index; i++) {
               if (trials[i] === null) return t;  // 앞 칸 비었으므로 무시
             }
           }
           if (value === null) {
-            for (let i = index; i < 10; i++) trials[i] = null;
+            for (let i = index; i < plannedN; i++) trials[i] = null;
           } else {
             trials[index] = value;
           }
-          // ★ 그 날의 목표횟수 도장: 이미 있으면 유지, 없으면 현재 목표횟수로 고정
-          const plannedN = (day.plannedN != null) ? day.plannedN : (t.plannedTrials || 10);
           daily[date] = { ...day, trials, plannedN, enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10) };
           return { ...t, daily };
         })
@@ -13630,7 +13631,9 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
           );
         }
 
-        const plannedN = Math.max(1, Math.min(99, task.plannedTrials || 10));
+        // ★ 칸 개수: 그 날 저장된 목표횟수(day.plannedN) 우선, 없으면 현재 설정값.
+        //    저장 기준(setTaskTrial)과 표시 기준을 일치시킴.
+        const plannedN = Math.max(1, Math.min(99, (day && day.plannedN != null) ? day.plannedN : (task.plannedTrials || 10)));
         const trials = Array.isArray(day.trials) ? day.trials : [];
         const cells = [];
         for (let i = 0; i < plannedN; i++) cells.push(trials[i] !== undefined ? trials[i] : null);
