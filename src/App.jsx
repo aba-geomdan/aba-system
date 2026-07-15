@@ -13618,6 +13618,13 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                 style={{ display: "inline-flex", alignItems: "center", gap: 5, background: isMastered ? "#f0f0f0" : "#f4f9ed", borderRadius: 6, padding: "3px 9px", border: `1.5px solid ${isMastered ? "#ddd" : GREEN + "60"}`, cursor: isMastered ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
                 <span style={{ fontSize: 10, fontWeight: 700, color: GREEN }}>정</span>
                 <span style={{ fontSize: 12, fontWeight: 700, color: GREEN, minWidth: 12, textAlign: "right" }}>{day.c || 0}</span>
+                <span
+                  role="button"
+                  onClick={(e) => { e.stopPropagation(); if (!isMastered && (day.c || 0) > 0) bumpTask(goal.id, task.id, date, "c", -1); }}
+                  title="정반응 −1 (잘못 눌렀을 때 되돌리기)"
+                  style={{ fontSize: 13, fontWeight: 800, lineHeight: 1, padding: "0 3px", marginLeft: 2, borderRadius: 4, border: `1px solid ${GREEN}59`, background: "#fff", color: GREEN, cursor: (!isMastered && (day.c || 0) > 0) ? "pointer" : "default", opacity: (!isMastered && (day.c || 0) > 0) ? 1 : 0.35, userSelect: "none" }}>
+                  −
+                </span>
               </button>
               <button
                 onClick={() => !isMastered && bumpTask(goal.id, task.id, date, "ic", +1)}
@@ -13626,6 +13633,13 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                 style={{ display: "inline-flex", alignItems: "center", gap: 5, background: isMastered ? "#f0f0f0" : "#fdecec", borderRadius: 6, padding: "3px 9px", border: `1.5px solid ${isMastered ? "#ddd" : RED + "60"}`, cursor: isMastered ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
                 <span style={{ fontSize: 10, fontWeight: 700, color: RED }}>오</span>
                 <span style={{ fontSize: 12, fontWeight: 700, color: RED, minWidth: 12, textAlign: "right" }}>{day.ic || 0}</span>
+                <span
+                  role="button"
+                  onClick={(e) => { e.stopPropagation(); if (!isMastered && (day.ic || 0) > 0) bumpTask(goal.id, task.id, date, "ic", -1); }}
+                  title="오반응 −1 (잘못 눌렀을 때 되돌리기)"
+                  style={{ fontSize: 13, fontWeight: 800, lineHeight: 1, padding: "0 3px", marginLeft: 2, borderRadius: 4, border: `1px solid ${RED}59`, background: "#fff", color: RED, cursor: (!isMastered && (day.ic || 0) > 0) ? "pointer" : "default", opacity: (!isMastered && (day.ic || 0) > 0) ? 1 : 0.35, userSelect: "none" }}>
+                  −
+                </span>
               </button>
             </div>
           );
