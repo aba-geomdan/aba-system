@@ -13667,7 +13667,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                   role="button"
                   onClick={(e) => { e.stopPropagation(); if (!isMastered && (day.c || 0) > 0) bumpTask(goal.id, task.id, date, "c", -1); }}
                   title="정반응 −1 (잘못 눌렀을 때 되돌리기)"
-                  style={{ fontSize: 13, fontWeight: 800, lineHeight: 1, padding: "0 3px", marginLeft: 2, borderRadius: 4, border: `1px solid ${GREEN}59`, background: "#fff", color: GREEN, cursor: (!isMastered && (day.c || 0) > 0) ? "pointer" : "default", opacity: (!isMastered && (day.c || 0) > 0) ? 1 : 0.35, userSelect: "none" }}>
+                  style={{ fontSize: 13, fontWeight: 800, lineHeight: 1, padding: "3px 7px", marginLeft: 3, borderRadius: 5, border: `1px solid ${GREEN}59`, background: "#fff", color: GREEN, cursor: (!isMastered && (day.c || 0) > 0) ? "pointer" : "default", opacity: (!isMastered && (day.c || 0) > 0) ? 1 : 0.35, userSelect: "none", display: "inline-flex", alignItems: "center" }}>
                   −
                 </span>
               </button>
@@ -13682,7 +13682,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
                   role="button"
                   onClick={(e) => { e.stopPropagation(); if (!isMastered && (day.ic || 0) > 0) bumpTask(goal.id, task.id, date, "ic", -1); }}
                   title="오반응 −1 (잘못 눌렀을 때 되돌리기)"
-                  style={{ fontSize: 13, fontWeight: 800, lineHeight: 1, padding: "0 3px", marginLeft: 2, borderRadius: 4, border: `1px solid ${RED}59`, background: "#fff", color: RED, cursor: (!isMastered && (day.ic || 0) > 0) ? "pointer" : "default", opacity: (!isMastered && (day.ic || 0) > 0) ? 1 : 0.35, userSelect: "none" }}>
+                  style={{ fontSize: 13, fontWeight: 800, lineHeight: 1, padding: "3px 7px", marginLeft: 3, borderRadius: 5, border: `1px solid ${RED}59`, background: "#fff", color: RED, cursor: (!isMastered && (day.ic || 0) > 0) ? "pointer" : "default", opacity: (!isMastered && (day.ic || 0) > 0) ? 1 : 0.35, userSelect: "none", display: "inline-flex", alignItems: "center" }}>
                   −
                 </span>
               </button>
