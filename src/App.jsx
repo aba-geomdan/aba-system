@@ -2431,6 +2431,16 @@ function isValidTaskName(name) {
   return true;
 }
 
+// ★ [신규] 그 날 기록이 O·X(시도) 방식인지 데이터로 판별.
+//    measureMode(현재 설정)가 아니라 저장된 데이터 모양으로 보므로,
+//    중간에 방식을 바꿔도 과거 날짜가 잘못 해석되지 않는다.
+function dayIsOX(day) {
+  if (!day) return false;
+  if (Array.isArray(day.trials)) return false;
+  if (day.mode === "pct") return false;
+  return ((day.c || 0) + (day.ic || 0)) > 0;
+}
+
 function calcDayRateGlobal(day, plannedTrials) {
   if (!day) return null;
   if (Array.isArray(day.trials)) {
@@ -5524,6 +5534,17 @@ export default function App() {
         masteryDate,
         points: allPoints,
         listBoundaries,                  // ★ 핵심: list 경계 정보
+        // ★ [신규] 모든 날짜 기록이 O·X일 때만 스트립으로 표시. 하나라도 섮이면 기존 그래프.
+        isOX: (function () {
+          let has = false;
+          for (const t of (g.tasks || [])) {
+            for (const d of Object.keys(t.daily || {})) {
+              if (!dayIsOX(t.daily[d])) return false;
+              has = true;
+            }
+          }
+          return has;
+        })(),
         vbmapp: g.vbmapp,
         esdm: g.esdm,
         source: g.source
@@ -15036,6 +15057,10 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
         // ★ 컷오프·보고 기간과 동일한 날짜 집합(allDates)으로 제한 — 이전 차수 데이터 제거.
         const allowedDates = new Set(allDates);
         (goals || []).filter(g => g.includeInIep).forEach(g => {
+          // ★ [추가] O·X 목표는 영역 평균에서 제외 (0/100 값이 평균을 왜곡)
+          const gIsOX = (g.tasks || []).some(t => Object.keys(t.daily || {}).length > 0)
+            && (g.tasks || []).every(t => Object.keys(t.daily || {}).every(d => dayIsOX(t.daily[d])));
+          if (gIsOX) return;
           const dom = g.domain || "(영역 없음)";
           const series = (typeof getTimeline === "function") ? getTimeline(g) : [];
           series.forEach(pt => {
@@ -17522,6 +17547,33 @@ function GoalDashboard({ stos }) {
     currGroups[curr][dom].push(s);
   });
 
+  // ★ [신규] O·X 스트립 — 회기별 O·X 칸 + 요약 한 줄
+  const OXStrip = ({ points }) => {
+    if (!points || points.length === 0) return null;
+    const OX_GREEN = "#3B6D11", OX_GREEN_BG = "#EAF3DE";
+    const OX_RED = "#A32D2D", OX_RED_BG = "#FCEBEB";
+    const fmt = (d) => { const a = (d || "").split("-"); return a.length >= 3 ? `${Number(a[1])}.${Number(a[2])}` : d; };
+    return (
+      <div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+          {points.map((p, i) => {
+            const ok = p.value >= 100;
+            return (
+              <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                <div style={{
+                  width: 28, height: 28, borderRadius: 6, display: "flex", alignItems: "center",
+                  justifyContent: "center", fontSize: 13, fontWeight: 700,
+                  background: ok ? OX_GREEN_BG : OX_RED_BG, color: ok ? OX_GREEN : OX_RED
+                }}>{ok ? "O" : "X"}</div>
+                <span style={{ fontSize: 8.5, color: "#aaa" }}>{fmt(p.date)}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   const BigChart = ({ points, color, listBoundaries, pdf }) => {
     if (!points || points.length < 1) return null;
     const STAGE_COLORS = ["#e34948", "#eb6834", "#eda100", "#1baf7a", "#2a78d6", "#3f51b5", "#8e44ad"];
@@ -17745,7 +17797,9 @@ function GoalDashboard({ stos }) {
                       <div style={{ fontSize: 10, color: "#888", marginBottom: 12 }}>{cleanDomainKey(dom)}</div>
                       {growthInfo && (
                         <div style={{ background: "#FAFAFA", borderRadius: 10, padding: "10px 8px 6px", marginBottom: 10 }}>
-                          <BigChart points={points} color={meta.chartLine} listBoundaries={s.listBoundaries} pdf={true} />
+                          {s.isOX
+                            ? <OXStrip points={points} />
+                            : <BigChart points={points} color={meta.chartLine} listBoundaries={s.listBoundaries} pdf={true} />}
                         </div>
                       )}
                       {/* ★ [제거] 시작/현재 % 박스 — 차트에 % 축·날짜가 들어가 중복이므로 삭제 */}
