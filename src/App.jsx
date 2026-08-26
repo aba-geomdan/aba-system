@@ -17673,10 +17673,24 @@ function GoalDashboard({ stos }) {
         {/* 점 + 값 + 날짜 */}
         {(() => {
           const boundaryIdx = new Set((listBoundaries || []).map(b => b.atIndex));
+          // ★ [수정] 날짜 라벨 겹침 방지 — 후보를 뽑은 뒤 최소 간격을 못 채우면 버린다.
+          //    마지막 날짜를 우선 확보하려고 뒤에서부터 훑는다.
+          const MIN_GAP = 24;
+          const wanted = [];
+          coords.forEach((c2, i2) => {
+            const sp = i2 > 0 && coords[i2 - 1].date === c2.date;
+            if (sp) return;
+            if ((i2 % every === 0) || i2 === coords.length - 1 || boundaryIdx.has(i2)) wanted.push(i2);
+          });
+          const dateIdx = new Set();
+          let prevX = Infinity;
+          for (let k = wanted.length - 1; k >= 0; k--) {
+            const i2 = wanted[k];
+            if (prevX - coords[i2].x >= MIN_GAP) { dateIdx.add(i2); prevX = coords[i2].x; }
+          }
           return coords.map((c, i) => {
           const isLast = i === coords.length - 1;
-          const sameAsPrev = i > 0 && coords[i - 1].date === c.date;
-          const showDate = ((i % every === 0) || isLast || boundaryIdx.has(i)) && !sameAsPrev;
+          const showDate = dateIdx.has(i);
           const col = colorAt(c);
           return (
             <g key={"pt" + i}>
