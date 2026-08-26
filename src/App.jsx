@@ -5059,6 +5059,34 @@ export default function App() {
     }));
   };
 
+  // ★ [신규] O·X — 하루 한 번만 기록. 같은 버튼을 다시 누르면 취소.
+  const setTaskDayOX = (goalId, taskId, date, value) => {
+    if (value !== "+" && value !== "-") return;
+    setGoals(prev => prev.map(g => {
+      if (g.id !== goalId) return g;
+      return {
+        ...g,
+        tasks: (g.tasks || []).map(t => {
+          if (t.id !== taskId) return t;
+          const daily = { ...(t.daily || {}) };
+          const day = daily[date] || {};
+          const cur = (day.c > 0) ? "+" : (day.ic > 0) ? "-" : null;
+          if (cur === value) {
+            delete daily[date];
+          } else {
+            daily[date] = {
+              ...day,
+              c: value === "+" ? 1 : 0,
+              ic: value === "-" ? 1 : 0,
+              enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10)
+            };
+          }
+          return { ...t, daily };
+        })
+      };
+    }));
+  };
+
   const setTaskTrial = (goalId, taskId, date, index, value) => {
     if (index < 0 || index > 98) return;
     if (value !== "+" && value !== "-" && value !== "NA" && value !== null) return;
@@ -8604,7 +8632,7 @@ export default function App() {
           <DailyTab goals={dailyGoals} dailyDate={dailyDate} setDailyDate={setDailyDate}
             calcDayRate={calcDayRate}
             addTask={addTask} removeTask={removeTask} renameTask={renameTask}
-            bumpTask={bumpTask} resetTask={resetTask}
+            bumpTask={bumpTask} setTaskDayOX={setTaskDayOX} resetTask={resetTask}
             setTaskListGroup={setTaskListGroup}
             setTaskMeasureMode={setTaskMeasureMode}
             setTaskPlannedTrials={setTaskPlannedTrials}
@@ -12219,7 +12247,7 @@ function StrategyConsolidatedTable({ goals }) {
   );
 }
 
-function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, removeTask, renameTask, bumpTask, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, clearPendingNext, updateGoal, dailyMemos, setDailyMemo, archiveList, mediaList, setInfo, addHistory, onPrev, onNext }) {
+function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, removeTask, renameTask, bumpTask, setTaskDayOX, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, clearPendingNext, updateGoal, dailyMemos, setDailyMemo, archiveList, mediaList, setInfo, addHistory, onPrev, onNext }) {
   const [hideMastered, setHideMastered] = useState({ "ELCAR": true, "VB-MAPP": true, "ESDM": true, "기타": true });
   const [hidePaused, setHidePaused] = useState({ "ELCAR": true, "VB-MAPP": true, "ESDM": true, "기타": true });
   const currentMemo = (dailyMemos && dailyMemos[dailyDate]) || "";
@@ -13113,6 +13141,7 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
                         removeTask={removeTask}
                         renameTask={renameTask}
                         bumpTask={bumpTask}
+                        setTaskDayOX={setTaskDayOX}
                         resetTask={resetTask}
                         setTaskListGroup={setTaskListGroup}
                         setTaskMeasureMode={setTaskMeasureMode}
@@ -13142,7 +13171,7 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
   );
 }
 
-function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask, bumpTask, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, clearPendingNext, updateGoal }) {
+function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask, bumpTask, setTaskDayOX, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, clearPendingNext, updateGoal }) {
   const [newTaskName, setNewTaskName] = useState("");
   const [showMastered, setShowMastered] = useState(false);
   const [showPaused, setShowPaused] = useState(true);  // paused는 기본 펼침 (확인 필요한 항목)
@@ -13295,7 +13324,7 @@ function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask
           return (
             <TaskRow key={t.id} goal={goal} task={t} date={date} calcDayRate={calcDayRate}
               taskIndex={absIdx + (goal.startListNum || 1)}
-              bumpTask={bumpTask} resetTask={resetTask}
+              bumpTask={bumpTask} setTaskDayOX={setTaskDayOX} resetTask={resetTask}
               setTaskListGroup={setTaskListGroup}
               setTaskMeasureMode={setTaskMeasureMode}
               setTaskPlannedTrials={setTaskPlannedTrials}
@@ -13354,7 +13383,7 @@ function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask
   );
 }
 
-function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, removeTask, renameTask, isMastered, taskIndex }) {
+function TaskRow({ goal, task, date, calcDayRate, bumpTask, setTaskDayOX, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, removeTask, renameTask, isMastered, taskIndex }) {
   const day = task.daily?.[date] || {};
   const total = Array.isArray(day.trials)
     ? Math.max(1, Math.min(99, task.plannedTrials || 10))
@@ -13675,38 +13704,28 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, resetTask, setTaskLi
         const mode = task.measureMode || "raw";
 
         if (mode === "click") {
+          const cur = (day.c > 0) ? "+" : (day.ic > 0) ? "-" : null;
+          const mk = (val, label, col, bg) => (
+            <button
+              key={val}
+              onClick={() => !isMastered && setTaskDayOX(goal.id, task.id, date, val)}
+              disabled={isMastered}
+              title={`${val === "+" ? "성공" : "실패"} — 하루 한 번. 다시 누르면 취소`}
+              style={{
+                width: 54, padding: "5px 0", borderRadius: 6, fontFamily: "inherit",
+                fontSize: 15, fontWeight: 800, lineHeight: 1.1,
+                cursor: isMastered ? "not-allowed" : "pointer",
+                background: cur === val ? col : (isMastered ? "#f0f0f0" : bg),
+                color: cur === val ? "#fff" : (isMastered ? "#bbb" : col),
+                border: `1.5px solid ${cur === val ? col : (isMastered ? "#ddd" : col + "60")}`
+              }}>
+              {label}
+            </button>
+          );
           return (
             <div style={{ display: "inline-flex", gap: 6 }}>
-              <button
-                onClick={() => !isMastered && bumpTask(goal.id, task.id, date, "c", +1)}
-                disabled={isMastered}
-                title="정반응 원클릭 — 클릭 시 +1"
-                style={{ display: "inline-flex", alignItems: "center", gap: 5, background: isMastered ? "#f0f0f0" : "#f4f9ed", borderRadius: 6, padding: "3px 9px", border: `1.5px solid ${isMastered ? "#ddd" : GREEN + "60"}`, cursor: isMastered ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: GREEN }}>정</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: GREEN, minWidth: 12, textAlign: "right" }}>{day.c || 0}</span>
-                <span
-                  role="button"
-                  onClick={(e) => { e.stopPropagation(); if (!isMastered && (day.c || 0) > 0) bumpTask(goal.id, task.id, date, "c", -1); }}
-                  title="정반응 −1 (잘못 눌렀을 때 되돌리기)"
-                  style={{ fontSize: 13, fontWeight: 800, lineHeight: 1, padding: "3px 7px", marginLeft: 3, borderRadius: 5, border: `1px solid ${GREEN}59`, background: "#fff", color: GREEN, cursor: (!isMastered && (day.c || 0) > 0) ? "pointer" : "default", opacity: (!isMastered && (day.c || 0) > 0) ? 1 : 0.35, userSelect: "none", display: "inline-flex", alignItems: "center" }}>
-                  −
-                </span>
-              </button>
-              <button
-                onClick={() => !isMastered && bumpTask(goal.id, task.id, date, "ic", +1)}
-                disabled={isMastered}
-                title="오반응 원클릭 — 클릭 시 +1"
-                style={{ display: "inline-flex", alignItems: "center", gap: 5, background: isMastered ? "#f0f0f0" : "#fdecec", borderRadius: 6, padding: "3px 9px", border: `1.5px solid ${isMastered ? "#ddd" : RED + "60"}`, cursor: isMastered ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: RED }}>오</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: RED, minWidth: 12, textAlign: "right" }}>{day.ic || 0}</span>
-                <span
-                  role="button"
-                  onClick={(e) => { e.stopPropagation(); if (!isMastered && (day.ic || 0) > 0) bumpTask(goal.id, task.id, date, "ic", -1); }}
-                  title="오반응 −1 (잘못 눌렀을 때 되돌리기)"
-                  style={{ fontSize: 13, fontWeight: 800, lineHeight: 1, padding: "3px 7px", marginLeft: 3, borderRadius: 5, border: `1px solid ${RED}59`, background: "#fff", color: RED, cursor: (!isMastered && (day.ic || 0) > 0) ? "pointer" : "default", opacity: (!isMastered && (day.ic || 0) > 0) ? 1 : 0.35, userSelect: "none", display: "inline-flex", alignItems: "center" }}>
-                  −
-                </span>
-              </button>
+              {mk("+", "O", GREEN, "#f4f9ed")}
+              {mk("-", "X", RED, "#fdecec")}
             </div>
           );
         }
