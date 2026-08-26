@@ -11166,7 +11166,8 @@ cleanedHTML + '\n' +
                 <PrintSection num={nextSn()} title="영역별 세부 학습 목표">
                   <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                     ※ 각 목표는 영역별로 그룹화되어 있으며, 진행률과 최근 데이터 추이를 함께 표시합니다.<br />
-                    ※ 미니 추이선은 학습 시작부터 현재까지의 평가 데이터 흐름을 보여줍니다.
+                    ※ 미니 추이선은 학습 시작부터 현재까지의 평가 데이터 흐름을 보여줍니다.<br />
+                    ※ 회기당 1회만 시도하는 목표는 O(성공) · X(실패)로 표시됩니다.
                   </div>
                   <GoalDashboard stos={goalsForReport} />
                 </PrintSection>
@@ -15159,7 +15160,8 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
             <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 8, color: PKD }}>📊 영역별 세부 학습 목표</h3>
             <div style={{ fontSize: 11, color: "#666", lineHeight: 1.7, padding: "8px 12px", background: "#FFFAFB", borderLeft: "2px solid #F5A0B1", borderRadius: 4, marginBottom: 12 }}>
               ※ 각 목표는 영역별로 그룹화되어 있으며, 진행률과 최근 데이터 추이를 함께 표시합니다.<br />
-              ※ 미니 추이선은 학습 시작부터 현재까지의 평가 데이터 흐름을 보여줍니다.
+              ※ 미니 추이선은 학습 시작부터 현재까지의 평가 데이터 흐름을 보여줍니다.<br />
+              ※ 회기당 1회만 시도하는 목표는 O(성공) · X(실패)로 표시됩니다.
             </div>
             {/* ★ 컷오프 알림 — 이전 보고서 보관 후 그래프 새로 그리는 중 */}
             {effectiveArchiveList && effectiveArchiveList.length > 0 && effectiveArchiveList[0].savedAt && (
@@ -17813,7 +17815,11 @@ function GoalDashboard({ stos }) {
                           {status}{isCompleted ? " 🎉" : ""}
                         </span>
                       </div>
-                      <div style={{ fontSize: 10, color: "#888", marginBottom: 12 }}>{cleanDomainKey(dom)}</div>
+                      <div style={{ fontSize: 10, color: "#888", marginBottom: 12 }}>
+                        {cleanDomainKey(dom)}
+                        {/* ★ [신규] O·X 목표에만 붙는 설명 — 보호자가 O·X를 보는 자리에서 바로 읽도록 */}
+                        {s.isOX && <span style={{ color: "#7A5AA8", fontWeight: 700 }}>{" · 회기당 1회 기회 · O 성공 / X 실패"}</span>}
+                      </div>
                       {growthInfo && (
                         <div style={{ background: "#FAFAFA", borderRadius: 10, padding: "10px 8px 6px", marginBottom: 10 }}>
                           {s.isOX
