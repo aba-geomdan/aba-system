@@ -7294,7 +7294,8 @@ export default function App() {
                           .filter(child => dashFilter === "all" ? true : dashFilter === "active" ? !child.info?.finalEndDate : !!child.info?.finalEndDate)
                           .map(child => {
                           const goals = (child.goals || []).filter(g => g.includeInIep);
-                          const dailyGoals = goals.filter(g => (g.tasks || []).some(t => t.showInDaily && t.isActive));
+                          // ★ [버그수정] 교사 헤더와 필터가 달라 아동 행만 "데이터 없음"이 떴다. || g.includeInIep 추가.
+                          const dailyGoals = goals.filter(g => (g.tasks || []).some(t => t.showInDaily && t.isActive) || g.includeInIep);
                           const isTerminated = !!child.info?.finalEndDate;  // ★ [신규] 종료 여부
                           
                           let latestDate = null;
@@ -7314,6 +7315,10 @@ export default function App() {
                                     if (x === "+") { correctCount++; totalCount++; }
                                     else if (x === "-") { totalCount++; }
                                   });
+                                } else if (((day?.c || 0) + (day?.ic || 0)) > 0) {
+                                  // ★ [추가] O·X(시도) 기록은 trials가 없고 c/ic에 담긴다 — O는 정반응 1회, X는 시행 1회.
+                                  correctCount += (day.c || 0);
+                                  totalCount += (day.c || 0) + (day.ic || 0);
                                 }
                               });
                             });
