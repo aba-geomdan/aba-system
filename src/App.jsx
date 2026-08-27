@@ -11336,10 +11336,9 @@ cleanedHTML + '\n' +
                     {/* 구체적 변화 사건 - 강점 다음 */}
                     {highlightsText && (
                       <div>
+                        {/* ★ [수정] '구체적인 변화의 순간들' 소제목 제거 — 아래 내용이 기간 전체 성과 요약이라 '순간'과 맞지 않았다. 구분선만 남긴다. */}
                         {strengthsText && (
-                          <div style={{ paddingTop: 10, borderTop: "0.5pt solid #f0e0e5", marginBottom: 8 }}>
-                            <div style={{ fontSize: 10.5, fontWeight: 700, color: PKD }}>구체적인 변화의 순간들</div>
-                          </div>
+                          <div style={{ paddingTop: 10, borderTop: "0.5pt solid #f0e0e5", marginBottom: 4 }} />
                         )}
                         {personalize(highlightsText).split("\n").map((line, i) => (
                           <p key={`h-${i}`} style={{ margin: line.trim() === "" ? "4px 0" : "0 0 6px 0" }}>
