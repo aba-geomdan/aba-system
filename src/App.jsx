@@ -17571,8 +17571,10 @@ function GoalDashboard({ stos }) {
   // ★ [신규] O·X 스트립 — 회기별 O·X 칸 + 요약 한 줄
   const OXStrip = ({ points }) => {
     if (!points || points.length === 0) return null;
-    const OX_GREEN = "#3B6D11", OX_GREEN_BG = "#EAF3DE";
-    const OX_RED = "#A32D2D", OX_RED_BG = "#FCEBEB";
+    // ★ [수정] X를 회색조로 낮춤 — 기록은 그대로 두되 강조만 뺀다.
+    //    O만 초록으로 남아 진전이 눈에 들어온다.
+    const OX_GREEN = "#38680F", OX_GREEN_BG = "#E4F0D6";
+    const OX_RED = "#9C9A94", OX_RED_BG = "#F1F1F0";
     const fmt = (d) => { const a = (d || "").split("-"); return a.length >= 3 ? `${Number(a[1])}.${Number(a[2])}` : d; };
     return (
       <div>
