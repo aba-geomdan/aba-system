@@ -11138,13 +11138,13 @@ cleanedHTML + '\n' +
               const allDates = [...dateSet].sort();
               if (allDates.length < 2) return null;
               return (
-                <PrintSection num={nextSn()} title="성장 추이 (전체 목표 평균)">
+                <PrintSection num={nextSn()} title="단계 달성 누적">
                   <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                    ※ 보고 기간 동안 날짜별 전체 목표의 평균 정반응률 추이입니다.<br/>
-                    ※ 우상향 = 전반적 성장, 평탄 = 숙달 안정기.
+                    ※ 각 목표의 단계(L1, L2…)를 달성할 때마다 한 칸씩 올라갑니다.<br/>
+                    ※ 선은 내려가지 않으며, 가팔라질수록 습득 속도가 붙고 있다는 뜻입니다.
                   </div>
                   <div style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
-                    <GrowthLineChart goals={goals} dates={allDates} getTimeline={null} />
+                    <StageCumulativeChart goals={goals} dates={allDates} />
                   </div>
                 </PrintSection>
               );
@@ -15140,10 +15140,10 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
       {/* 성장 추이 (시계열) */}
       {allDates.length > 1 && (
         <div style={CS}>
-          <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 12, color: PKD }}>성장 추이 (전체 목표 평균)</h3>
-          <GrowthLineChart goals={goals} dates={allDates} getTimeline={getTimeline} />
+          <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 12, color: PKD }}>단계 달성 누적</h3>
+          <StageCumulativeChart goals={goals} dates={allDates} />
           <div style={{ marginTop: 10, padding: "8px 12px", background: PKL, borderRadius: 8, fontSize: 11, color: PKD, lineHeight: 1.6 }}>
-            💡 날짜별 전체 목표의 평균 정반응률 추이입니다. 우상향 = 전반적 성장, 평탄 = 숙달 안정기.
+            💡 각 목표의 단계(L1, L2…)를 달성할 때마다 한 칸씩 올라갑니다. 선은 내려가지 않으며, 가팔라질수록 습득 속도가 붙고 있다는 뜻입니다.
           </div>
         </div>
       )}
@@ -17471,6 +17471,80 @@ function GoalStatusTable({ goals, listGroup, title, color }) {
             })}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+// ★ [신규] 단계 달성 누적 차트 — 과제(L1, L2…)를 숙달할 때마다 한 칸씩 오른다.
+//    전체 평균(GrowthLineChart)과 달리 선이 내려가지 않고, 새 목표를 추가해도 값이 떨어지지 않는다.
+function StageCumulativeChart({ goals, dates }) {
+  const data = useMemo(() => {
+    if (!dates || dates.length < 2) return null;
+    const from = dates[0], to = dates[dates.length - 1];
+    // 기간 내 단계(과제) 달성일 모음
+    const stageDates = [];
+    (goals || []).forEach(g => {
+      (g.tasks || []).forEach(t => {
+        const m = t.masteredAt;
+        if (m && m >= from && m <= to) stageDates.push(m);
+      });
+    });
+    // 기간 내 목표 완료 수
+    let goalDone = 0;
+    (goals || []).forEach(g => {
+      const taskM = (g.tasks || []).map(t => t.masteredAt).filter(Boolean).sort();
+      const m = (taskM.length > 0 ? taskM[taskM.length - 1] : null) || g.masteredAt;
+      if (g.status === "mastered" && m && m >= from && m <= to) goalDone++;
+    });
+    const pts = dates.map(d => ({ date: d, cum: stageDates.filter(x => x <= d).length }));
+    return { pts, total: stageDates.length, goalDone };
+  }, [goals, dates]);
+
+  if (!data) return null;
+  const { pts, total, goalDone } = data;
+
+  const W = 700, H = 215, padL = 42, padR = 24, padT = 26, padB = 36;
+  const chartH = H - padT - padB, chartW = W - padL - padR;
+  // ★ 아동별로 축을 맞춰 느린 아동도 선이 바닥에 깔리지 않도록
+  const maxV = Math.max(4, Math.ceil(total / 4) * 4);
+  const step = Math.max(1, Math.round(maxV / 4));
+  const GRN = "#4A7D22";
+  const xy = pts.map((p, i) => ({
+    x: padL + i * (chartW / Math.max(1, pts.length - 1)),
+    y: padT + (1 - p.cum / maxV) * chartH,
+    cum: p.cum, date: p.date
+  }));
+  const gridV = [];
+  for (let v = 0; v <= maxV; v += step) gridV.push(v);
+  const lblStep = Math.max(1, Math.ceil(pts.length / 7));
+  const last = xy[xy.length - 1];
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: "100%", display: "block" }}>
+        {gridV.map(v => {
+          const y = padT + (1 - v / maxV) * chartH;
+          return (
+            <g key={"sg" + v}>
+              <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="#eee" strokeWidth="0.7" />
+              <text x={padL - 6} y={y + 3} textAnchor="end" fontSize="9" fill="#999">{v}개</text>
+            </g>
+          );
+        })}
+        <path d={`M${padL},${padT + chartH} ${xy.map(p => `L${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")} L${padL + chartW},${padT + chartH} Z`} fill="#EAF3DE" />
+        <polyline fill="none" stroke={GRN} strokeWidth="2.2" points={xy.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")} />
+        {xy.map((p, i) => {
+          const rose = i > 0 && p.cum > xy[i - 1].cum;
+          return <circle key={"sc" + i} cx={p.x} cy={p.y} r={rose ? 4 : 3} fill="#fff" stroke={GRN} strokeWidth="2" />;
+        })}
+        <text x={last.x - 7} y={last.y - 11} fontSize="11.5" fill={GRN} textAnchor="end" fontWeight="700">{last.cum}개</text>
+        {xy.map((p, i) => (i % lblStep === 0 || i === xy.length - 1) && (
+          <text key={"sd" + i} x={p.x} y={H - padB + 15} fontSize="9" fill="#888" textAnchor="middle">{p.date.slice(5)}</text>
+        ))}
+      </svg>
+      <div style={{ marginTop: 10, fontSize: 12, color: "#555", background: "#fafafa", borderRadius: 7, padding: "8px 12px" }}>
+        이 기간 <b style={{ color: "#222" }}>목표 완료 {goalDone}개</b>{" · "}<b style={{ color: "#222" }}>단계 달성 {total}개</b>
       </div>
     </div>
   );
