@@ -17745,15 +17745,18 @@ function GoalDashboard({ stos }) {
       );
     }
     const stepX = innerW / (points.length - 1);
-    const coords = points.map((p, i) => ({ x: padL + i * stepX, y: yOf(p.value), value: p.value, date: p.date, taskIdx: p.taskIdx, taskListNum: p.taskListNum }));
+    const coords = points.map((p, i) => ({ x: padL + i * stepX, y: yOf(p.value), value: p.value, date: p.date, taskIdx: p.taskIdx, taskListNum: p.taskListNum, taskListGroup: p.taskListGroup }));
     // 각 점의 색: 단계(taskListNum)가 있으면 단계색, 없으면 기존 기본색
     const hasStages = coords.some(c => c.taskListNum != null);
-    const colorAt = (c) => (c.taskListNum != null ? stageColorOf(c.taskListNum) : safeColor);
+    // ★ [수정] 중단(paused) 계열은 회색으로 물러나게 해 진행·완료와 구분된다.
+    const PAUSED_COL = "#BFBCB6";
+    const colorAt = (c) => (c.taskListGroup === "paused" ? PAUSED_COL
+      : (c.taskListNum != null ? stageColorOf(c.taskListNum) : safeColor));
     // 선을 단계(taskIdx)별로 모아 각각 선으로 그림 (단계 없으면 전체 한 선)
     const stageGroups = {};
     coords.forEach((c, i) => {
       const key = (c.taskIdx != null ? c.taskIdx : "_all");
-      if (!stageGroups[key]) stageGroups[key] = { taskListNum: c.taskListNum, pts: [] };
+      if (!stageGroups[key]) stageGroups[key] = { taskListNum: c.taskListNum, taskListGroup: c.taskListGroup, pts: [] };
       stageGroups[key].pts.push({ ...c, _i: i });
     });
     const every = labelEvery(coords.length);
@@ -17765,30 +17768,38 @@ function GoalDashboard({ stos }) {
         {/* 단계별 선 */}
         {Object.entries(stageGroups).map(([key, grp]) => {
           if (grp.pts.length === 0) return null;
-          const col = grp.taskListNum != null ? stageColorOf(grp.taskListNum) : safeColor;
+          const isPaused = grp.taskListGroup === "paused";
+          const col = isPaused ? PAUSED_COL
+            : (grp.taskListNum != null ? stageColorOf(grp.taskListNum) : safeColor);
           const dPath = grp.pts.map((c, k) => `${k === 0 ? "M" : "L"}${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(" ");
           if (grp.pts.length === 1) {
             return <circle key={"seg" + key} cx={grp.pts[0].x} cy={grp.pts[0].y} r="2.6" fill={col} />;
           }
-          return <path key={"seg" + key} d={dPath} fill="none" stroke={col} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />;
+          return <path key={"seg" + key} d={dPath} fill="none" stroke={col} strokeWidth={isPaused ? 1.6 : 2.2} strokeDasharray={isPaused ? "5,4" : "none"} strokeLinejoin="round" strokeLinecap="round" />;
         })}
         {/* 점 + 값 + 날짜 */}
         {(() => {
-          const boundaryIdx = new Set((listBoundaries || []).map(b => b.atIndex));
-          // ★ [수정] 날짜 라벨 겹침 방지 — 후보를 뽑은 뒤 최소 간격을 못 채우면 버린다.
-          //    마지막 날짜를 우선 확보하려고 뒤에서부터 훑는다.
-          const MIN_GAP = 24;
-          const wanted = [];
-          coords.forEach((c2, i2) => {
-            const sp = i2 > 0 && coords[i2 - 1].date === c2.date;
-            if (sp) return;
-            if ((i2 % every === 0) || i2 === coords.length - 1 || boundaryIdx.has(i2)) wanted.push(i2);
-          });
+          // ★ [수정] 날짜 라벨을 x좌표 기준으로 고르게 뽑는다.
+          //    기존 i % every 방식은 단계(계열)가 여럿일 때 인덱스가 계열을 가로질러
+          //    한쪽에만 몰려, 날짜가 두어 개만 남는 문제가 있었다.
+          const WANT = Math.max(2, Math.min(8, Math.floor(innerW / 46)));
           const dateIdx = new Set();
-          let prevX = Infinity;
-          for (let k = wanted.length - 1; k >= 0; k--) {
-            const i2 = wanted[k];
-            if (prevX - coords[i2].x >= MIN_GAP) { dateIdx.add(i2); prevX = coords[i2].x; }
+          if (coords.length <= WANT) {
+            coords.forEach((c2, i2) => {
+              if (i2 === 0 || coords[i2 - 1].date !== c2.date) dateIdx.add(i2);
+            });
+          } else {
+            for (let t = 0; t < WANT; t++) {
+              const targetX = padL + (innerW * t) / (WANT - 1);
+              let best = -1, bestD = Infinity;
+              for (let i2 = 0; i2 < coords.length; i2++) {
+                if (i2 > 0 && coords[i2 - 1].date === coords[i2].date) continue;
+                const d = Math.abs(coords[i2].x - targetX);
+                if (d < bestD) { bestD = d; best = i2; }
+              }
+              if (best >= 0) dateIdx.add(best);
+            }
+            dateIdx.add(coords.length - 1);
           }
           return coords.map((c, i) => {
           const isLast = i === coords.length - 1;
