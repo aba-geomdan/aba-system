@@ -11145,13 +11145,13 @@ cleanedHTML + '\n' +
               const allDates = [...dateSet].sort();
               if (allDates.length < 2) return null;
               return (
-                <PrintSection num={nextSn()} title="단계 달성 누적">
+                <PrintSection num={nextSn()} title="성장 추이 (전체 목표 평균)">
                   <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                    ※ 각 목표의 단계(L1, L2…)를 달성할 때마다 한 칸씩 올라갑니다.<br/>
-                    ※ 선은 내려가지 않으며, 가팔라질수록 습득 속도가 붙고 있다는 뜻입니다.
+                    ※ 보고 기간 동안 날짜별 전체 목표의 평균 정반응률 추이입니다.<br/>
+                    ※ 우상향 = 전반적 성장, 평탄 = 숙달 안정기.
                   </div>
                   <div style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
-                    <StageCumulativeChart goals={goals} dates={allDates} />
+                    <GrowthLineChart goals={goals} dates={allDates} getTimeline={null} />
                   </div>
                 </PrintSection>
               );
@@ -15147,10 +15147,10 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
       {/* 성장 추이 (시계열) */}
       {allDates.length > 1 && (
         <div style={CS}>
-          <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 12, color: PKD }}>단계 달성 누적</h3>
-          <StageCumulativeChart goals={goals} dates={allDates} />
+          <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 12, color: PKD }}>성장 추이 (전체 목표 평균)</h3>
+          <GrowthLineChart goals={goals} dates={allDates} getTimeline={getTimeline} />
           <div style={{ marginTop: 10, padding: "8px 12px", background: PKL, borderRadius: 8, fontSize: 11, color: PKD, lineHeight: 1.6 }}>
-            💡 각 목표의 단계(L1, L2…)를 달성할 때마다 한 칸씩 올라갑니다. 선은 내려가지 않으며, 가팔라질수록 습득 속도가 붙고 있다는 뜻입니다.
+            💡 날짜별 전체 목표의 평균 정반응률 추이입니다. 우상향 = 전반적 성장, 평탄 = 숙달 안정기.
           </div>
         </div>
       )}
@@ -17593,6 +17593,13 @@ function GrowthLineChart({ goals, dates, getTimeline }) {
   const chartW = W - padL - padR, chartH = H - padT - padB;
   const xStep = points.length > 1 ? chartW / (points.length - 1) : 0;
   const pts = points.map((p, i) => ({ x: padL + i * xStep, y: padT + (1 - p.avg / 100) * chartH, avg: p.avg, date: p.date }));
+  // ★ [수정] 라벨 겹침 방지 — 최소 간격을 못 채우면 버린다. 마지막 지점 우선으로 뒤에서부터 훑는다.
+  const MIN_GAP = 30;
+  const labelIdx = new Set();
+  let _prevX = Infinity;
+  for (let k = pts.length - 1; k >= 0; k--) {
+    if (_prevX - pts[k].x >= MIN_GAP) { labelIdx.add(k); _prevX = pts[k].x; }
+  }
   const path = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 
   return (
@@ -17617,13 +17624,17 @@ function GrowthLineChart({ goals, dates, getTimeline }) {
       {pts.map((p, i) => (
         <g key={i}>
           <circle cx={p.x} cy={p.y} r="4" fill="#fff" stroke={PK} strokeWidth="2" />
-          <text
-            x={i === 0 ? p.x + 6 : (i === pts.length - 1 ? p.x - 6 : p.x)}
-            y={p.y < padT + 18 ? p.y + 16 : p.y - 9}
-            fontSize="10" fill={PKD}
-            textAnchor={i === 0 ? "start" : (i === pts.length - 1 ? "end" : "middle")}
-            fontWeight="700">{p.avg}%</text>
-          <text x={p.x} y={H - padB + 14} fontSize="9" fill="#888" textAnchor="middle">{p.date.slice(5)}</text>
+          {labelIdx.has(i) && (
+            <text
+              x={i === 0 ? p.x + 6 : (i === pts.length - 1 ? p.x - 6 : p.x)}
+              y={p.y < padT + 18 ? p.y + 16 : p.y - 9}
+              fontSize="10" fill={PKD}
+              textAnchor={i === 0 ? "start" : (i === pts.length - 1 ? "end" : "middle")}
+              fontWeight="700">{p.avg}%</text>
+          )}
+          {labelIdx.has(i) && (
+            <text x={p.x} y={H - padB + 14} fontSize="9" fill="#888" textAnchor="middle">{p.date.slice(5)}</text>
+          )}
         </g>
       ))}
     </svg>
