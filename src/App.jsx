@@ -17996,7 +17996,25 @@ function GoalDashboard({ stos }) {
                                 fontWeight: 500,
                                 wordBreak: "keep-all",
                                 overflowWrap: "break-word"
-                              }}>{b.taskName}</span>
+                              }}>
+                                {b.taskName}
+                                {/* ★ [신규] 중단된 단계에만 표시 — 색만으로는 보호자가 중단인지 알 수 없다. */}
+                                {b.taskListGroup === "paused" && (
+                                  <span style={{
+                                    display: "inline-block",
+                                    marginLeft: 6,
+                                    padding: "1px 7px",
+                                    background: "#F1F1F0",
+                                    border: "1px solid #DED9D2",
+                                    borderRadius: 8,
+                                    fontSize: 9,
+                                    fontWeight: 700,
+                                    color: "#7A736A",
+                                    lineHeight: 1.5,
+                                    verticalAlign: "middle"
+                                  }}>중단</span>
+                                )}
+                              </span>
                             </div>
                             );
                             });
