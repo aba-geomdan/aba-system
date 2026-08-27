@@ -1565,28 +1565,8 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
     });
   }
 
-  if (dailyMemos && typeof dailyMemos === "object" && highlights.length < 3) {
-    const POSITIVE_KEYWORDS = ["처음으로", "스스로", "자발적", "자발", "먼저", "혼자", "스스럼", "능숙", "정확히", "또렷", "분명히"];
-    const memoEntries = Object.entries(dailyMemos);
-    for (const [date, memo] of memoEntries) {
-      if (typeof memo !== "string" || !memo.trim()) continue;
-      for (const kw of POSITIVE_KEYWORDS) {
-        if (memo.includes(kw)) {
-          const sentences = memo.split(/[.!?。]/);
-          const targetSentence = sentences.find(s => s.includes(kw));
-          if (targetSentence && targetSentence.trim().length >= 5 && targetSentence.trim().length <= 80) {
-            const cleanSentence = targetSentence.trim().replace(/^[\s,;:]+|[\s,;:]+$/g, "");
-            highlights.push({
-              title: "회기 중 관찰 사항",
-              desc: `${date} 회기에서 "${cleanSentence}"라는 양상이 관찰됐습니다.`
-            });
-            break;
-          }
-        }
-      }
-      if (highlights.length >= 3) break;
-    }
-  }
+  // ★ [수정] 회기 메모 자동 추출 제거 — 메모는 내부 기록용이며 보고서에 인용되지 않는다.
+  //    특정 단어가 우연히 들어간 문장이 보호자 보고서에 뽑혀 나가던 동작을 없앴다.
 
   if (highlights.length === 0) {
     return "";  // 하이라이트 없으면 섹션 자체를 생략
@@ -12776,7 +12756,7 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
               }}>
                 <div>
                   <div style={{ fontSize: 15, fontWeight: 700 }}>📋 전체 회기 메모</div>
-                  <div style={{ fontSize: 11, opacity: 0.9, marginTop: 2 }}>{allDates.length}개 메모 · 최신순</div>
+                  <div style={{ fontSize: 11, opacity: 0.9, marginTop: 2 }}>{allDates.length}개 메모 · 최신순 · 내부 기록용(보고서 미포함)</div>
                 </div>
                 <button
                   onClick={() => setShowAllMemos(false)}
