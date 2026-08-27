@@ -7299,32 +7299,39 @@ export default function App() {
                           const isTerminated = !!child.info?.finalEndDate;  // ★ [신규] 종료 여부
                           
                           let latestDate = null;
-                          let correctCount = 0;
-                          let totalCount = 0;
+                          // ★ [수정] 전체 기간 누적 → 최근 3주, 과제 단위 평균.
+                          const RECENT_DAYS = 21;
+                          const cutoff = new Date(Date.now() - RECENT_DAYS * 86400000).toISOString().slice(0, 10);
+                          const taskRates = [];
                           dailyGoals.forEach(g => {
                             (g.tasks || []).forEach(t => {
                               const dates = Object.keys(t.daily || {});
                               if (dates.length === 0) return;
-                              const maxDate = dates.sort()[dates.length - 1];
+                              const maxDate = dates.slice().sort()[dates.length - 1];
                               if (!latestDate || maxDate > latestDate) latestDate = maxDate;
-                              // ★ [버그수정] 데이터 구조는 { trials: ["+","-",...] }. 기존 ○ 비교는 항상 0 → 정반응률 오류.
-                              //    CSV 다운로드와 동일하게 trials의 +/- 로 전체 기간 정반응률 계산.
-                              Object.values(t.daily || {}).forEach(day => {
+                              let c = 0, n = 0;
+                              dates.forEach(d => {
+                                if (d < cutoff) return;                       // 최근 3주만
+                                const day = t.daily[d];
                                 if (Array.isArray(day?.trials)) {
                                   day.trials.forEach(x => {
-                                    if (x === "+") { correctCount++; totalCount++; }
-                                    else if (x === "-") { totalCount++; }
+                                    if (x === "+") { c++; n++; }
+                                    else if (x === "-") { n++; }
                                   });
                                 } else if (((day?.c || 0) + (day?.ic || 0)) > 0) {
-                                  // ★ [추가] O·X(시도) 기록은 trials가 없고 c/ic에 담긴다 — O는 정반응 1회, X는 시행 1회.
-                                  correctCount += (day.c || 0);
-                                  totalCount += (day.c || 0) + (day.ic || 0);
+                                  // O·X(시도) 기록은 trials가 없고 c/ic에 담긴다
+                                  c += (day.c || 0);
+                                  n += (day.c || 0) + (day.ic || 0);
                                 }
                               });
+                              if (n > 0) taskRates.push((c / n) * 100);       // 과제마다 먼저 평균
                             });
                           });
 
-                          const percentage = totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : null;
+                          const taskCount = taskRates.length;
+                          const percentage = taskCount > 0
+                            ? Math.round(taskRates.reduce((x, y) => x + y, 0) / taskCount)
+                            : null;
                           // ★ [2번] 최근 입력일이 오래됐는지 — 14일 이상이면 "밀림" 경고
                           const daysSinceData = latestDate ? Math.floor((Date.now() - new Date(latestDate).getTime()) / 86400000) : null;
                           const isStale = !isTerminated && daysSinceData !== null && daysSinceData >= 14;
@@ -7371,7 +7378,7 @@ export default function App() {
                                       <div style={{ fontWeight: 700, color: percentage >= 70 ? "#10b981" : percentage >= 50 ? "#f59e0b" : "#dc2626" }}>
                                         {percentage}%
                                       </div>
-                                      <div style={{ fontSize: 10, color: "#888" }}>({correctCount}/{totalCount})</div>
+                                      <div style={{ fontSize: 10, color: "#888" }}>최근 3주 · 과제 {taskCount}개</div>
                                       {latestDate && (
                                         <div style={{ fontSize: 9.5, color: isStale ? "#b45309" : "#bbb", marginTop: 1 }}>{latestDate.slice(5)} 입력</div>
                                       )}
