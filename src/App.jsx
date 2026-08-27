@@ -5549,7 +5549,15 @@ export default function App() {
           });
         }
       });
-      const status = g.status === "mastered" ? "완료" : "진행중";
+      // ★ [수정] 목표 배지를 과제 상태에서 끌어낸다.
+      //    기존엔 g.status만 보서, 과제가 전부 완료·중단이어도 "진행중"으로 떴다.
+      const _tg = (g.tasks || []).map(t => t.listGroup || "1");
+      const _hasActive = _tg.some(x => x !== "2" && x !== "paused");
+      const status = g.status === "mastered" ? "완료"
+        : _hasActive ? "진행중"
+        : (_tg.length > 0 && _tg.every(x => x === "2")) ? "완료"
+        : _tg.some(x => x === "paused") ? "일시대기"
+        : "진행중";
       const masteryDate = g.masteredAt || null;
       const latestPoint = allPoints.length > 0 ? allPoints[allPoints.length - 1] : null;
       return {
@@ -12925,6 +12933,11 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
             if (!groupedByDomain[key]) groupedByDomain[key] = [];
             groupedByDomain[key].push(g);
           });
+          // ★ [신규] 진행 과제가 없는 목표는 아래로 — 매일 입력하는 것이 위로 모이도록
+          const _hasActiveTask = (g) => (g.tasks || []).some(t => (t.listGroup || "1") !== "2" && t.listGroup !== "paused" && t.isActive !== false);
+          Object.keys(groupedByDomain).forEach(k => {
+            groupedByDomain[k].sort((a, b) => (_hasActiveTask(a) ? 0 : 1) - (_hasActiveTask(b) ? 0 : 1));
+          });
           return (
             <div key={src} style={{ marginBottom: 16, padding: 12, background: meta.bg, border: `2px solid ${meta.accent}`, borderRadius: 8 }}>
               {/* 커리큘럼 헤더 */}
@@ -13195,6 +13208,9 @@ function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask
 
   const tasks = goal.tasks || [];
   const list1 = tasks.filter(t => (t.listGroup || "1") === "1" && t.isActive !== false);
+  // ★ [신규] 오늘 입력할 진행 과제가 없는 목표는 기본 접힘 — 데일리 시트에서 자리만 차지했다.
+  const hasActiveTask = list1.length > 0;
+  const [collapsed, setCollapsed] = useState(!hasActiveTask);
   const list2 = tasks.filter(t => (t.listGroup || "1") === "2");
   const listPaused = tasks.filter(t => t.listGroup === "paused");  // D-1: 중단됨
   const isPendingNext = goal.pendingNext === true;
@@ -13244,9 +13260,15 @@ function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask
     <div style={{ border: `1px solid #f0e0e5`, borderRadius: 10, marginBottom: 8, overflow: "hidden", background: "#fff" }}>
       {/* 영역 목표 헤더 */}
       <div style={{ padding: "10px 14px", background: "#fdf8f9", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", borderBottom: "1px solid #f0e0e5" }}>
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: "#333", lineHeight: 1.4 }}>{goal.item}</div>
-          <div style={{ fontSize: 10, color: "#888", marginTop: 3 }}>{goal.subDomain}</div>
+        <div style={{ flex: 1, minWidth: 200, cursor: "pointer" }} onClick={() => setCollapsed(v => !v)}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: "#333", lineHeight: 1.4 }}>
+            <span style={{ display: "inline-block", width: 12, color: "#bbb", fontSize: 10 }}>{collapsed ? "▶" : "▼"}</span>
+            {goal.item}
+            {!hasActiveTask && (
+              <span style={{ marginLeft: 7, padding: "1px 7px", background: "#F1F1F0", border: "1px solid #DED9D2", borderRadius: 8, fontSize: 9, fontWeight: 700, color: "#7A736A", verticalAlign: "middle" }}>진행 과제 없음</span>
+            )}
+          </div>
+          <div style={{ fontSize: 10, color: "#888", marginTop: 3, paddingLeft: 12 }}>{goal.subDomain}</div>
         </div>
         <div style={{ textAlign: "center", padding: "4px 10px", background: todayAvgRate === null ? "#fafafa" : (todayAvgRate >= 80 ? GREEN : todayAvgRate >= 50 ? BLUE : ORANGE) + "15", border: `1.5px solid ${todayAvgRate === null ? "#ddd" : todayAvgRate >= 80 ? GREEN : todayAvgRate >= 50 ? BLUE : ORANGE}`, borderRadius: 8, minWidth: 70 }}>
           <div style={{ fontSize: 9, color: "#888", fontWeight: 500 }}>영역 목표 평균</div>
@@ -13256,6 +13278,9 @@ function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask
         </div>
       </div>
 
+      {/* ★ [신규] 접힘 상태면 본문 전체를 숨긴다 (헤더 클릭으로 펼침) */}
+      {!collapsed && (
+      <>
       {/* 🎉 습득 완료 축하 · 다음 과제 입력 배너 (pendingNext = true 시) */}
       {isPendingNext && (
         <div style={{
@@ -13391,6 +13416,9 @@ function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask
           </button>
         </div>
       </div>
+
+      </>
+      )}
 
       {/* 리스트 2(습득 완료)는 카드 안에 표시하지 않음 — 커리큘럼 박스 하단 '완료된 목표' 모음 섹션으로 이동 */}
 
