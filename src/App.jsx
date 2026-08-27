@@ -8642,6 +8642,7 @@ export default function App() {
         {/* ═══════════════════════════════════════════════════ */}
         {tab === "daily" && (
           <DailyTab goals={dailyGoals} dailyDate={dailyDate} setDailyDate={setDailyDate}
+            activeChildId={activeChildId}
             calcDayRate={calcDayRate}
             addTask={addTask} removeTask={removeTask} renameTask={renameTask}
             bumpTask={bumpTask} setTaskDayOX={setTaskDayOX} resetTask={resetTask}
@@ -12260,7 +12261,7 @@ function StrategyConsolidatedTable({ goals }) {
   );
 }
 
-function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, removeTask, renameTask, bumpTask, setTaskDayOX, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, clearPendingNext, updateGoal, dailyMemos, setDailyMemo, archiveList, mediaList, setInfo, addHistory, onPrev, onNext }) {
+function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, addTask, removeTask, renameTask, bumpTask, setTaskDayOX, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, clearPendingNext, updateGoal, dailyMemos, setDailyMemo, archiveList, mediaList, setInfo, addHistory, onPrev, onNext }) {
   const [hideMastered, setHideMastered] = useState({ "ELCAR": true, "VB-MAPP": true, "ESDM": true, "기타": true });
   const [hidePaused, setHidePaused] = useState({ "ELCAR": true, "VB-MAPP": true, "ESDM": true, "기타": true });
   const currentMemo = (dailyMemos && dailyMemos[dailyDate]) || "";
@@ -12269,16 +12270,18 @@ function DailyTab({ goals, dailyDate, setDailyDate, calcDayRate, addTask, remove
   const [showAllMemos, setShowAllMemos] = useState(false);
   const [showMediaGallery, setShowMediaGallery] = useState(false);
   const [showInputHelp, setShowInputHelp] = useState(false); // ★ 입력 방법 안내 토글
-  const lastSyncedKeyRef = useRef(`${dailyDate}::${currentMemo}`);
+  // ★ [버그수정] 동기화 키에 아동(activeChildId)이 빠져 있어,
+  //    아동을 바꿔도 앞 아동의 메모 초안이 화면에 남았다.
+  const lastSyncedKeyRef = useRef(`${activeChildId}::${dailyDate}::${currentMemo}`);
   useEffect(() => {
     const externalValue = (dailyMemos && dailyMemos[dailyDate]) || "";
-    const key = `${dailyDate}::${externalValue}`;
-    if (key !== lastSyncedKeyRef.current && externalValue !== memoDraft) {
+    const key = `${activeChildId}::${dailyDate}::${externalValue}`;
+    if (key !== lastSyncedKeyRef.current) {
       setMemoDraft(externalValue);
-      if (externalValue) setMemoOpen(true);
+      setMemoOpen(!!externalValue);
       lastSyncedKeyRef.current = key;
     }
-  }, [dailyDate, dailyMemos, memoDraft]);
+  }, [activeChildId, dailyDate, dailyMemos]);
   const grouped = useMemo(() => {
     const m = {};
     goals.forEach(g => { if (!m[g.domain]) m[g.domain] = []; m[g.domain].push(g); });
