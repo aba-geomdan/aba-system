@@ -2411,6 +2411,16 @@ function isValidTaskName(name) {
   return true;
 }
 
+// ★ [신규] 보고서 문장에 넣을 과제명 축약.
+//    "'…질문하기 (5번 이상 / 1:30분)'" 처럼 괄호 안 수행 조건이 붙으면 문장이 길어져 읽히지 않는다.
+//    괄호 부분을 떼고, 그래도 길면 잘라낸다.
+function shortTaskName(name, maxLen = 28) {
+  let t = String(name || "").replace(/\s*[（(][^)）]*[)）]\s*/g, " ").replace(/\s+/g, " ").trim();
+  if (!t) t = String(name || "").trim();
+  if (t.length > maxLen) t = t.slice(0, maxLen).trim() + "…";
+  return t;
+}
+
 // ★ [신규] 그 날 기록이 O·X(시도) 방식인지 데이터로 판별.
 //    measureMode(현재 설정)가 아니라 저장된 데이터 모양으로 보므로,
 //    중간에 방식을 바꿔도 과거 날짜가 잘못 해석되지 않는다.
@@ -14058,7 +14068,10 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
 
   const langK = ["맨드","택트","에코","인트라버벌","화자","청자","LRFFC","언어","Mand","Tact","Echoic","수용","표현"];
   const socK = ["사회","상호작용","눈맞춤","또래","인사","공유","차례","놀이","Social","공동"];
-  const match = (s, kw) => kw.some(k => (s.name||"").includes(k) || (s.domain||"").includes(k) || (s.goalName||"").includes(k));
+  // ★ [수정] 과제 이름·목표명까지 뒤져서, 우연히 키워드가 든 과제가 없는 영역을 만들어냈다.
+  //    (예: 청자 과제의 예문 '장난감을 가지고 놀고' → '놀이' 키워드 → 사회성 영역으로 오인)
+  //    영역명(domain)만 보도록 좁힌다.
+  const match = (s, kw) => kw.some(k => (s.domain||"").includes(k));
 
   const calcCV = (points) => {
     if (!points || points.length < 3) return null;
@@ -14138,6 +14151,28 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   const meaningfulGrowthList = Object.values(growthMap).filter(g => g.meaningfulGrowth).sort((a,b) => b.diff - a.diff);
   const stableMasteredList = Object.values(growthMap).filter(g => g.masteredFromStart);
   const topGrowth = [...meaningfulGrowthList, ...stableMasteredList];
+
+  // ★ [신규] 영역 단위 성장 집계.
+  //    기존 topGrowth는 '과제' 목록인데 문장에서 영역처럼 써서, 같은 영역이 두 번 나오고
+  //    수치도 과제 하나의 변화(+100%p)가 영역 변화인 것처럼 표기됐다.
+  //    영역별로 과제들의 시작·마지막 값을 평균 내 실제 영역 변화를 구한다.
+  const domGrowth = (() => {
+    const bucket = {};
+    stos.forEach(st => {
+      const pts = (st.points || []).filter(x => x && x.value !== null);
+      if (pts.length < 2) return;
+      const key = cleanDomainKey(st.domain || "");
+      if (!key) return;
+      if (!bucket[key]) bucket[key] = { first: [], last: [] };
+      bucket[key].first.push(pts[0].value);
+      bucket[key].last.push(pts[pts.length - 1].value);
+    });
+    const avg = (arr) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
+    return Object.entries(bucket).map(([label, v]) => {
+      const f = avg(v.first), l = avg(v.last);
+      return { domainLabel: label, first: f, last: l, diff: l - f, masteredFromStart: f >= 80 && l >= 80, count: v.first.length };
+    }).sort((a, b) => b.diff - a.diff);
+  })();
   const recentMastery = done.filter(s => s.masteryDate).sort((a,b) => (b.masteryDate||"").localeCompare(a.masteryDate||"")).slice(0, 5);
 
   const best = domAvgs.length > 0 ? domAvgs.reduce((a,b) => a.avg > b.avg ? a : b, { domain: "—", avg: 0 }) : { domain: "—", avg: 0 };
@@ -14292,7 +14327,8 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
 
   const sec1Parts = [];
 
-  const lgD = Object.entries(growthMap).filter(([n]) => langK.some(k => n.includes(k))).map(([,v]) => v).sort((a,b) => b.diff - a.diff);
+  // ★ [수정] growthMap의 키는 과제 이름이라 영역 판정에 쓰면 안 된다 — v.domain으로 판정.
+  const lgD = Object.entries(growthMap).filter(([, v]) => langK.some(k => (v.domain||"").includes(k))).map(([,v]) => v).sort((a,b) => b.diff - a.diff);
   const lgDone = done.filter(s => match(s, langK));
   const lgProg = prog.filter(s => match(s, langK));
   const langCountText = langStos.length > 0 && langDoneCount > 0
@@ -14307,19 +14343,20 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     const lgRecent = lgPts.slice(-3);
     const isAccelerating = lgRecent.length >= 2 && (lgRecent[lgRecent.length - 1].value - lgRecent[0].value) > 10;
     if (g.masteredFromStart) {
-      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역에서 안정적으로 수행하고 있습니다. 요구하기(Mand)와 따라말하기(Echoic) 모두 일관되게 나오고 있고,${langCountText}${lgDone.length > 0 && isValidTaskName(lgDone[0].name) ? ` '${lgDone[0].name}' 등 핵심 목표에서 준거를 달성했습니다.` : (lgDone.length > 0 ? " 핵심 목표에서 준거를 달성했습니다." : "")} 일반화 단계로 넘어갈 수 있는 수준입니다.`);
+      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역에서 안정적으로 수행하고 있습니다. 요구하기(Mand)와 따라말하기(Echoic) 모두 일관되게 나오고 있고,${langCountText}${lgDone.length > 0 && isValidTaskName(lgDone[0].name) ? ` '${shortTaskName(lgDone[0].name)}' 등 핵심 목표에서 준거를 달성했습니다.` : (lgDone.length > 0 ? " 핵심 목표에서 준거를 달성했습니다." : "")} 일반화 단계로 넘어갈 수 있는 수준입니다.`);
     } else if (isAccelerating) {
-      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역 점수가 ${g.first}%에서 ${g.last}%로 +${g.diff}%p 올랐습니다. 요구하기(Mand)와 따라말하기(Echoic) 반응이 늘었고,${langCountText}${lgDone.length > 0 && isValidTaskName(lgDone[0].name) ? ` '${lgDone[0].name}'에서 준거를 달성했습니다.` : (lgDone.length > 0 ? " 핵심 목표에서 준거를 달성했습니다." : "")} 수용·표현 언어 전반에서 변화가 ${pv()}`);
+      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역 점수가 ${g.first}%에서 ${g.last}%로 +${g.diff}%p 올랐습니다. 요구하기(Mand)와 따라말하기(Echoic) 반응이 늘었고,${langCountText}${lgDone.length > 0 && isValidTaskName(lgDone[0].name) ? ` '${shortTaskName(lgDone[0].name)}'에서 준거를 달성했습니다.` : (lgDone.length > 0 ? " 핵심 목표에서 준거를 달성했습니다." : "")} 수용·표현 언어 전반에서 변화가 ${pv()}`);
     } else {
-      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역 점수가 ${g.first}%에서 ${g.last}%로 ${g.diff > 0 ? `+${g.diff}%p 올랐고,` : `유지되고 있고,`}${langCountText}${lgDone.length > 0 && isValidTaskName(lgDone[0].name) ? ` '${lgDone[0].name}' 등 ${lgDone.length}개 목표에서 준거를 달성했습니다.` : (lgDone.length > 0 ? ` ${lgDone.length}개 목표에서 준거를 달성했습니다.` : "")} 요구하기(Mand)와 따라말하기(Echoic)가 ${pg()}`);
+      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역 점수가 ${g.first}%에서 ${g.last}%로 ${g.diff > 0 ? `+${g.diff}%p 올랐고,` : `유지되고 있고,`}${langCountText}${lgDone.length > 0 && isValidTaskName(lgDone[0].name) ? ` '${shortTaskName(lgDone[0].name)}' 등 ${lgDone.length}개 목표에서 준거를 달성했습니다.` : (lgDone.length > 0 ? ` ${lgDone.length}개 목표에서 준거를 달성했습니다.` : "")} 요구하기(Mand)와 따라말하기(Echoic)가 ${pg()}`);
     }
   } else if (lgDone.length > 0) {
-    sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역에서 ${isValidTaskName(lgDone[0].name) ? `'${lgDone[0].name}'의 준거를` : "핵심 목표의 준거를"} 달성했습니다.${langCountText} 따라말하기(Echoic) 정확도와 요구하기(Mand) 빈도가 ${pv()} 택트(Tact)와 인트라버벌(Intraverbal) 기초가 늘고 있습니다.`);
+    // ★ [수정] "따라말하기 정확도 / 택트·인트라버벌 기초" 꼬리 제거 — 데이터 근거 없는 상투구.
+    sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역에서 ${isValidTaskName(lgDone[0].name) ? `'${shortTaskName(lgDone[0].name)}'의 준거를` : "핵심 목표의 준거를"} 달성했습니다.${langCountText}`);
   } else if (total > 0) {
     sec1Parts.push(`${fn}${jEunNeun(fn)} 지금은 언어 기능의 초기 평가 단계입니다. 요구하기(Mand)와 따라말하기(Echoic) 반응이 조금씩 ${pv()}`);
   }
 
-  const scD = Object.entries(growthMap).filter(([n]) => socK.some(k => n.includes(k))).map(([,v]) => v).sort((a,b) => b.diff - a.diff);
+  const scD = Object.entries(growthMap).filter(([, v]) => socK.some(k => (v.domain||"").includes(k))).map(([,v]) => v).sort((a,b) => b.diff - a.diff);
   const scDone = done.filter(s => match(s, socK));
   const socCountText = socStos.length > 0 && socDoneCount > 0
     ? ` 사회성 영역 ${socStos.length}개 단기 목표 중 ${socDoneCount}개를 달성하여,`
@@ -14336,7 +14373,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
       sec1Parts.push(`사회성 영역 점수는 ${g.first}%에서 ${g.last}%로 ${g.diff > 0 ? `+${g.diff}%p 올랐고,` : `유지되고 있고,`}${socCountText} 또래 공동주의와 눈맞춤이 ${pg()}`);
     }
   } else if (scDone.length > 0) {
-    sec1Parts.push(`사회성 영역에서 ${isValidTaskName(scDone[0].name) ? `'${scDone[0].name}'의 준거를` : "핵심 목표의 준거를"} 달성했습니다.${socCountText} 자유놀이 상황에서도 차례 지키기(Turn-taking)와 공유 행동이 자발적으로 ${pv()}`);
+    sec1Parts.push(`사회성 영역에서 ${isValidTaskName(scDone[0].name) ? `'${shortTaskName(scDone[0].name)}'의 준거를` : "핵심 목표의 준거를"} 달성했습니다.${socCountText} 자유놀이 상황에서도 차례 지키기(Turn-taking)와 공유 행동이 자발적으로 ${pv()}`);
   }
 
   if (curFields[2] && curFields[2].trim()) {
@@ -14344,15 +14381,16 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   } else if (bName && bName.trim()) {
     const it = bInter && bInter.trim() ? bInter : "기능적 의사소통 훈련(FCT)";
     sec1Parts.push(`${bName}의 빈도는 중재 시작 이후 줄고 있습니다. ${it}${josa을를(it)} 적용한 뒤 대체 행동이 자발적으로 늘었습니다.${funcTxt ? ` 행동 기능은 ${funcTxt}${josa으로(funcTxt)} 확인되었고, 그에 맞춰 환경과 강화 전략을 조정하고 있습니다.` : ""}`);
-  } else {
-    sec1Parts.push(`문제행동은 낮은 수준으로 유지되고 있습니다. 교수 상황에서 주의 집중 시간이 늘었고, 활동 전환 시 안정적인 모습입니다.`);
   }
+  // ★ [수정] 문제행동 데이터가 없을 때 넣던 "문제행동은 낮은 수준으로 유지" 상투구 제거.
+  //    기록이 없는 아동에게도 무조건 나가서 사실과 다를 수 있었다.
 
   if (curFields[3] && curFields[3].trim()) {
     sec1Parts.push(curFields[3]);
   } else if (done.length > 0 && highRate.length > 0) {
-    const exemplar = done[0]?.name || done[0]?.goalName || "주요 목표";
-    sec1Parts.push(`교수 참여도는 안정적입니다. '${exemplar}' 등 ${done.length}개 목표에서 촉구(prompt) 수준을 줄였고(prompt fading), 리스트도 상향했습니다. ${highRate.length}개 STO에서 80% 이상이 연속으로 나오고 있고, DTT와 NET 모두에서 독립 반응 비율이 늘었습니다.`);
+    const exemplar = shortTaskName(done[0]?.name || done[0]?.goalName || "주요 목표");
+    // ★ [수정] 뒤쪽 "80% 이상 연속 / DTT·NET 독립 반응" 문장 제거 — 앞 문장과 중복이고 근거 데이터가 없다.
+    sec1Parts.push(`'${exemplar}' 등 ${done.length}개 목표에서 촉구(prompt) 수준을 줄였고, 리스트도 상향했습니다.`);
   } else if (lastAvg > 0) {
     if (lastAvg >= 80) {
       sec1Parts.push(`교수 참여도가 안정적입니다. 진행 중인 ${prog.length}개 목표에서 평균 ${lastAvg}%의 정반응률을 보이고 있습니다. ${stratTxt}이 ${fn}에게 잘 맞습니다.`);
@@ -14440,10 +14478,10 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
       ? ` 특히 ${masteredDomains.slice(0, 2).map(d => `'${cleanDomainKey(d.domain)}'`).join(", ")} 영역이 숙달 수준입니다.`
       : (best.domain !== "—" ? ` '${cleanDomainKey(best.domain)}' 영역은 평균 ${best.avg}%로 숙달 수준입니다.` : "");
     sec2Parts.push(`${fn}${jEunNeun(fn)} 이번 기간에 설정된 ${total}개 단기 목표(STO) 전체에서 '2회 연속 80% 이상' 준거를 달성했습니다. 학습한 기술이 안정적으로 유지되고 있습니다.${masteredText} 일반화 단계로 넘어갈 차례입니다.`);
-  } else if (topGrowth.length >= 2) {
-    const g1 = topGrowth[0], g2 = topGrowth[1];
-    const desc1 = g1.masteredFromStart ? `'${g1.domain}' 영역은 안정적으로 수행되고 있고` : `'${g1.domain}' 영역이 +${g1.diff}%p 올랐고`;
-    const desc2 = g2.masteredFromStart ? `'${g2.domain}' 영역은 일관되게 수행되고 있습니다` : `'${g2.domain}' 영역도 +${g2.diff}%p 올랐습니다`;
+  } else if (domGrowth.length >= 2) {
+    const g1 = domGrowth[0], g2 = domGrowth[1];
+    const desc1 = g1.masteredFromStart ? `'${g1.domainLabel}' 영역은 안정적으로 수행되고 있고` : `'${g1.domainLabel}' 영역이 ${g1.diff >= 0 ? "+" : ""}${g1.diff}%p 올랐고`;
+    const desc2 = g2.masteredFromStart ? `'${g2.domainLabel}' 영역은 일관되게 수행되고 있습니다` : `'${g2.domainLabel}' 영역도 ${g2.diff >= 0 ? "+" : ""}${g2.diff}%p 올랐습니다`;
     const doneText = done.length > 0 ? ` 전체 ${total}개 STO 중 ${done.length}개에서 준거를 달성했습니다.` : "";
     const accelText = acceleratingTrend ? " 최근 회기에서 더 빠르게 올라가고 있습니다." : "";
     const masteredTail = masteredDomains.length > 0
@@ -14467,105 +14505,13 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     sec2Parts.push(curFields[4]);
   }
 
-  if (weeklyTrend && weeklyTrend.byDomain.length > 0) {
-    const top = weeklyTrend.byDomain.slice(0, 3);
-    const positiveTrends = top.filter(d => d.perWeek > 0);
-    if (positiveTrends.length > 0) {
-      const trendTxt = positiveTrends
-        .map(d => `'${cleanDomainKey(d.domain)}' 주당 평균 ${d.perWeek > 0 ? "+" : ""}${d.perWeek}%p`)
-        .join(", ");
-      sec2Parts.push(`주간 변화율을 보면 ${weeklyTrend.weeks}주 동안 ${trendTxt}으로 올라갔습니다.`);
-    }
-  }
+  // ★ [수정] '주간 변화율' 문장 제거 — 앞 문장의 영역별 상승과 같은 내용을 다른 단위로 반복해 숫자만 늘었다.
 
-  let memoInsights = [];
-  if (dailyMemos && Object.keys(dailyMemos).length > 0) {
-    active.forEach(s => {
-      const points = (s.points || []).filter(p => p.value !== null);
-      if (points.length < 4) return;
-      const recent = points.slice(-3);
-      const prev = points.slice(-6, -3);
-      if (recent.length < 3 || prev.length < 3) return;
-      const recentAvg = recent.reduce((a, b) => a + b.value, 0) / recent.length;
-      const prevAvg = prev.reduce((a, b) => a + b.value, 0) / prev.length;
-      if (prevAvg - recentAvg < 25) return; // 좋은 하락만
-      const dropDates = recent.map(p => p.date);
-      const dropMemos = dropDates.map(d => dailyMemos[d]).filter(Boolean);
-      if (dropMemos.length > 0) {
-        memoInsights.push({
-          taskName: s.name,
-          domain: s.domain,
-          memos: dropMemos.slice(0, 1)  // 첫 메모만 인용 (간결함)
-        });
-      }
-    });
-    if (memoInsights.length > 0) {
-      const top = memoInsights[0];
-      sec2Parts.push(`일부 회기에서 ${fn}의 컨디션이나 환경 요인이 수행에 영향을 준 적이 있습니다 (예: "${top.memos[0]}"). 그 뒤 다시 회복되는 모습도 관찰되었습니다.`);
-    }
+  // ★ [수정] 회기 메모 기반 문장 전부 제거 — 메모는 내부 기록용이며 보고서에 인용하지 않는다.
+  //    (메모 원문 인용 문장과 키워드 패턴 문장 두 갈래 모두 삭제)
 
-    if (memoInsights.length === 0) {
-      const allMemos = Object.values(dailyMemos).filter(m => m && m.trim());
-      if (allMemos.length >= 3) {
-        const positivePatterns = [
-          { kw: /컨디션\s*좋|적극\s*참여|기분\s*좋|즐거|🌟|✓\s*컨디션/, label: "컨디션 양호" },
-          { kw: /집중|몰입/, label: "집중력 향상" },
-          { kw: /자발|스스로|먼저/, label: "자발적 시도" }
-        ];
-        const negativePatterns = [
-          { kw: /컨디션\s*저조|졸림|피곤|기분\s*안\s*좋|😴|✗\s*컨디션/, label: "컨디션 저조" },
-          { kw: /불안|짜증|울음|💢|정서\s*불안/, label: "정서적 어려움" },
-          { kw: /환경\s*변화|새|날씨|🌧/, label: "환경 변화" }
-        ];
-
-        const matchedPositive = positivePatterns.filter(p =>
-          allMemos.some(m => p.kw.test(m))
-        );
-        const matchedNegative = negativePatterns.filter(p =>
-          allMemos.some(m => p.kw.test(m))
-        );
-
-        if (matchedPositive.length > 0 || matchedNegative.length > 0) {
-          const parts = [];
-          if (matchedPositive.length > 0) {
-            const labels = matchedPositive.slice(0, 2).map(p => p.label).join(", ");
-            parts.push(`${labels}이 자주 관찰된 회기에서는 학습 참여도가 높았으며`);
-          }
-          if (matchedNegative.length > 0) {
-            const labels = matchedNegative.slice(0, 2).map(p => p.label).join(", ");
-            parts.push(`${labels} 같은 외부 요인이 있는 회기에서는 일시적인 수행 변동이 관찰되기도 하였습니다`);
-          }
-          if (parts.length > 0) {
-            sec2Parts.push(`회기 메모를 보면, ${parts.join(", ")}.`);
-          }
-        }
-      }
-    }
-  }
-
-  if (active.length >= 2 && reportWeeks >= 2) {
-    const cvList = active.map(s => calcCV(s.points)).filter(v => v !== null);
-    const meanCV = cvList.length > 0 ? Math.round(cvList.reduce((a, b) => a + b, 0) / cvList.length) : null;
-    const spontPositive = active.filter(s => calcSpontaneityTrend(s.points) >= 8).length;
-    const fadingCount = done.length;
-
-    const profParts = [];
-    if (fadingCount > 0) {
-      profParts.push(`${fadingCount}개 STO에서 준거(2회 연속 80%↑)를 충족해 촉구 용암(prompt fading) 단계로 넘어갔고`);
-    }
-    if (meanCV !== null) {
-      const cvDesc = meanCV < 15 ? "회기 간 안정성이 좋습니다" :
-                     meanCV < 25 ? "회기 간 안정성이 양호합니다" :
-                     "회기 간 변동이 있어 환경 요인을 살펴볼 필요가 있습니다";
-      profParts.push(`회기 간 안정성(across-session stability)은 변동계수 평균 ${meanCV}%로 ${cvDesc}`);
-    }
-    if (spontPositive > 0) {
-      profParts.push(`${spontPositive}개 영역에서 자발성(spontaneity) 비율이 보고 기간 후반부에 늘었습니다`);
-    }
-    if (profParts.length > 0) {
-      sec2Parts.push(`전문 지표를 보면, ${profParts.join("; ")}.`);
-    }
-  }
+  // ★ [수정] '전문 지표' 문장 제거 — 촉구 용암은 앞의 준거 달성 문장과 중복이고,
+  //    변동계수·자발성 수치는 보호자용으로 과하며 '개 영역'처럼 단위가 틀린 표현도 있었다.
 
   r["이번 기간의 성장과 변화"] = sec2Parts.join(" ");
   r["총괄 요약 및 권고사항"] = sec2Parts.join(" "); // 호환용
@@ -14675,7 +14621,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   r["다음 목표 제안"] = sentences.join(" "); // 호환용
 
   const totalMemoCount = dailyMemos ? Object.keys(dailyMemos).length : 0;
-  const citedMemoCount = memoInsights.length;
+  const citedMemoCount = 0;   // ★ [수정] 메모 인용을 없앴으므로 항상 0
   r.__meta = {
     totalMemoCount,
     citedMemoCount,
