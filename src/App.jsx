@@ -962,8 +962,17 @@ function buildSummary(stosForReport, info) {
   const lastAvg = lastCnt > 0 ? Math.round(lastSum / lastCnt) : 0;
   const firstAvg = firstCnt > 0 ? Math.round(firstSum / firstCnt) : 0;
   const diff = lastAvg - firstAvg;
+  // ★ [48-6 버그수정] % 기록이 하나도 없는 아동(전 목표가 O·X)일 때 rated가 비어
+  //    lastAvg=firstAvg=0 → diff=0으로 떨어지면서
+  //    "달성률 평균 0%를 유지했고, 9개 STO 중 6개에서 준거를 달성했습니다"라는
+  //    자기모순 문장이 나갔다. 이 경우 %는 아예 말하지 않는다.
+  const hasRated = lastCnt > 0;
   if (total === 0) {
     return `${fn}${josa은는(fn)} 본 보고 기간에 평가가 진행됐습니다.`;
+  } else if (!hasRated) {
+    return done > 0
+      ? `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 단기 목표(STO) 중 ${done}개에서 준거를 달성했습니다. 모든 목표가 회기당 1회 기록(O·X) 방식이라 달성률 평균은 산출하지 않습니다.`
+      : `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 단기 목표(STO)를 회기당 1회 기록(O·X) 방식으로 진행했습니다.`;
   } else if (done === total && done > 0) {
     return `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 단기 목표(STO) 전체에서 준거를 달성해 안정화 단계에 들어갔습니다.`;
   } else if (diff >= 10) {
@@ -1429,7 +1438,12 @@ function buildInterimNextGoal(selected, info) {
 }
 
 function buildInterimStrengths(domAvgs, stos, info) {
-  if (!Array.isArray(domAvgs) || domAvgs.length === 0) return "";
+  // ★ [48-6 버그수정] domAvgs가 비면 강점 섹션이 통째로 사라졌다.
+  //    전 목표가 O·X인 아동(영역 평균이 산출되지 않음)은 준거를 6개 달성하고도
+  //    "이번 기간의 강점과 주요 변화" 제목 아래 강점이 한 줄도 안 나왔다.
+  //    영역 평균이 필요한 항목만 뒤에서 건너뛰고, 개수 기반 강점은 그대로 낸다.
+  const domList = Array.isArray(domAvgs) ? domAvgs : [];
+  if (!Array.isArray(stos) || stos.length === 0) return "";
   const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
 
   const has받침 = (word) => {
@@ -1452,7 +1466,7 @@ function buildInterimStrengths(domAvgs, stos, info) {
 
   const strengths = [];
 
-  const highDomains = domAvgs.filter(d => d.avg >= 80);
+  const highDomains = domList.filter(d => d.avg >= 80);
   if (highDomains.length >= 2) {
     const names = highDomains.slice(0, 3).map(d => cleanDomainKey(d.domain)).join("·");
     strengths.push({
@@ -1488,39 +1502,24 @@ function buildInterimStrengths(domAvgs, stos, info) {
     });
   }
 
-  // ★ [수정] O·X 목표 제외 — 마지막 O 하나로 0%→100% '향상'이 잡혀 개수가 부풀었다.
-  const withGrowth = activeStos.filter(s => {
-    if (s.isOX) return false;
-    const pts = s.points || [];
-    if (pts.length < 2) return false;
-    const first = pts[0]?.value;
-    const last = pts[pts.length - 1]?.value;
-    return typeof first === "number" && typeof last === "number" && (last - first) >= 20;
-  });
+  // ★ [48-1 버그수정] 향상 집계를 STO 단위 → 목표(goal) 단위로. 공용 buildGoalSeries를 쓴다.
+  //    STO 단위로 세면 이미 끝난 하위 단계의 상승폭(L3 0→100)까지 잡혀 개수가 부풀었고,
+  //    바로 아래 '주요 변화'(목표 단위)와 기준이 달라 같은 보고서 안에서 숫자가 어긋났다.
+  const strengthGoalSeries = buildGoalSeries(activeStos);
+  const withGrowth = strengthGoalSeries.filter(g =>
+    g.quotable && g.series.length >= 2 && (g.last - g.first) >= 20
+  ).sort((a, b) => (b.last - b.first) - (a.last - a.first));
   if (withGrowth.length >= 3) {
     strengths.push({
       title: "여러 영역의 향상",
-      desc: `${withGrowth.length}개 단기 목표에서 초기 대비 향상이 보여, ${fn}의 학습 진행이 데이터로 확인됩니다.`
+      desc: `${withGrowth.length}개 목표에서 초기 대비 향상이 보여, ${fn}의 학습 진행이 데이터로 확인됩니다.`
     });
   } else if (withGrowth.length >= 1) {
-    // ★ [버그수정] 개수를 셀 때는 단계(STO) 단위가 맞지만, 수치를 서술할 때는 목표 단위여야 한다.
-    //    단계를 올리면 값이 리셋되므로 task의 첫·마지막 값을 그대로 쓰면 끝난 단계의 수치가 '최근'으로 나간다.
-    const exemplar = withGrowth[0];
-    const exKey = exemplar.goalName || exemplar.name;
-    const exDates = new Map();
-    activeStos.filter(s => (s.goalName || s.name) === exKey).forEach(s => {
-      (s.points || []).forEach(p => {
-        if (!p || !p.date || typeof p.value !== "number") return;
-        const prev = exDates.get(p.date);
-        if (prev == null || p.value > prev) exDates.set(p.date, p.value);
-      });
-    });
-    const exSeries = [...exDates.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(e => e[1]);
-    const first = exSeries.length > 0 ? exSeries[0] : exemplar.points[0].value;
-    const last = exSeries.length > 0 ? exSeries[exSeries.length - 1] : exemplar.points[exemplar.points.length - 1].value;
+    // ★ [48-1] 시계열 재구성 제거 — buildGoalSeries가 이미 목표 단위로 묶어 준다.
+    const ex = withGrowth[0];
     strengths.push({
       title: "구체적 향상 사례",
-      desc: `'${shortTaskName(exemplar.goalName || exemplar.name)}'에서 ${first}%에서 ${last}%로 향상돼, ${fn}의 학습 진행이 데이터로 확인됩니다.`
+      desc: `'${ex.name}'에서 ${ex.first}%에서 ${ex.last}%로 향상돼, ${fn}의 학습 진행이 데이터로 확인됩니다.`
     });
   }
 
@@ -1562,43 +1561,18 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
   //    !s.isPaused는 항상 참이라 중단 목표가 섞였고, s.isMastered는 항상 거짓이라
   //    "여러 활동의 안정적 수행" 항목이 한 번도 나오지 않았다.
   const activeStos = stos.filter(s => s.status !== "중단");
-  // ★ [수정] O·X 목표는 %로 말하면 안 된다.
-  //    "회기당 1회 성공"인 목표를 "초기 0% → 최근 100%"로 적으면 8회 중 3회 성공이 완전한 성공처럼 읽힌다.
-  const ratedStos = activeStos.filter(s => !s.isOX);
+  // ★ [48-1] O·X 제외는 buildGoalSeries 안에서 처리한다(별도 ratedStos 불필요).
 
-  // ★ [버그수정] 향상 집계를 단계(task) 단위 → 목표(goal) 단위로 바꾼다.
-  //    단계를 올리면 값이 0부터 다시 시작하는데, task 단위로 보면 이미 끝난 단계의 상승폭(예: L3 0→100)이
-  //    가장 큰 값으로 뽑혀 "최근 100%"로 나갔다. 정작 카드의 마지막 점은 진행 중인 단계의 값(화폐 L4 40%)이라
-  //    글과 그래프가 어긋났다. 목표 전체의 첫 값 → 가장 최근 값으로 본다.
-  const growthByGoal = (() => {
-    const m = {};
-    // ★ [버그수정] 같은 날 여러 단계를 기록하면 '그날 최고값'을 쓰던 규칙이 문제였다.
-    //    예: 8.24에 L3=100(이미 끝난 단계), L4=0(현재 단계)이면 100이 이겨서
-    //    "최근 100%"로 나갔지만 카드의 마지막 점은 0%였다.
-    //    stos는 목표별로 단계 순서대로 들어오므로, 배열 위치가 뒤일수록 상위 단계다.
-    //    같은 날짜에는 '가장 상위 단계'의 값을 쓴다.
-    ratedStos.forEach((s, order) => {
-      const key = shortTaskName(s.goalName || s.name);
-      if (!m[key]) m[key] = { name: key, domain: s.domain, dates: new Map() };
-      (s.points || []).forEach(p => {
-        if (!p || !p.date || typeof p.value !== "number") return;
-        const prev = m[key].dates.get(p.date);
-        if (prev == null || order >= prev.order) m[key].dates.set(p.date, { value: p.value, order });
-      });
-    });
-    return Object.values(m).map(g => {
-      const series = [...g.dates.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(e => e[1].value);
-      return { name: g.name, domain: g.domain, series };
-    });
-  })();
+  // ★ [48-1] 목표 단위 시계열을 공용 buildGoalSeries로 일원화.
+  //    (기존엔 여기서만 따로 묶었는데 ① 키가 shortTaskName(goalName||name)이라 goalName이 빈 단계가
+  //     별도 목표로 갈라졌고 ② O·X 단계가 섞인 목표에서 %단계의 마지막 값만 보고 "최근 100%"라고 적어
+  //     카드의 마지막 점(O·X의 X = 0%)·영역별 균형 차트와 어긋났다.
+  //     이제 현재 단계가 O·X인 목표(quotable=false)는 %로 서술하지 않는다.)
+  const growthByGoal = buildGoalSeries(activeStos);
 
   const withGrowth = growthByGoal
-    .filter(g => g.series.length >= 2 && (g.series[g.series.length - 1] - g.series[0]) >= 25)
-    .map(g => {
-      const first = g.series[0];
-      const last = g.series[g.series.length - 1];
-      return { name: g.name, first, last, diff: last - first, domain: g.domain };
-    })
+    .filter(g => g.quotable && g.series.length >= 2 && (g.last - g.first) >= 25)
+    .map(g => ({ name: g.name, first: g.first, last: g.last, diff: g.last - g.first, domain: g.domain }))
     .sort((a, b) => b.diff - a.diff);
 
   // ★ [수정] 같은 목표가 두 항목에 중복해 나오던 문제 — 이미 쓴 목표를 기록해 둔다.
@@ -1639,21 +1613,29 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
     });
   }
 
-  // ★ [수정] 최소 데이터 수를 3회 → 5회로 올림.
-  //    X·O·O 3회만으로 "단기간에 안정적인 수행"이라고 적히던 문제. O·X 목표도 제외한다.
-  const fastClimb = ratedStos.filter(s => {
-    if (usedNames.has(shortTaskName(s.goalName || s.name))) return false;  // ★ 중복 배제
-    const pts = s.points || [];
-    if (pts.length < 5 || pts.length > 8) return false;
-    const last = pts[pts.length - 1]?.value;
-    return typeof last === "number" && last >= 80;
+  // ★ [48-4 버그수정] '빠른 적응' 판정이 아직 STO(단계) 단위라 이미 끝난 하위 단계가 뽑혔다.
+  //    ① '구강 움직임 모방' — 목표 전체로는 8회기 연속 0% 뒤에 올랐는데, 마지막 단계(5점)만 보고
+  //       "학습 시작 후 단기간에 안정적인 수행"이라고 적혔다.
+  //    ② '단단어 자극 택트' — 끝난 L8(6점, 마지막 80%)이 뽑혀 '빠른 적응' 강점으로 나가는 동시에
+  //       다음 목표 문단에는 '정체'로 적혀 한 보고서 안에서 정면으로 모순됐다.
+  //    이제 목표(goal) 전체 시계열로 판정한다 — 목표 첫 기록부터 8회기 안에 80%에 닿았을 때만.
+  const FAST_MAX_SESSIONS = 8;
+  const fastClimb = growthByGoal.filter(g => {
+    if (!g.quotable) return false;
+    if (usedNames.has(g.name)) return false;               // ★ 중복 배제
+    if (g.series.length < 5 || g.series.length > FAST_MAX_SESSIONS) return false;
+    const hitIdx = g.series.findIndex(v => v >= 80);        // 처음 80%에 닿은 회차
+    if (hitIdx < 0) return false;
+    if (g.last < 80) return false;                          // 지금도 유지되고 있어야 한다
+    return true;
   });
 
   if (fastClimb.length > 0 && highlights.length < 3) {
     const ex = fastClimb[0];
+    const hitAt = ex.series.findIndex(v => v >= 80) + 1;
     highlights.push({
-      title: `'${shortTaskName(ex.goalName || ex.name)}'에 빠른 적응`,
-      desc: `학습 시작 후 단기간에 안정적인 수행이 나와, ${fn}${이가(fn)} 새 학습 내용에 빠르게 적응했습니다.`
+      title: `'${ex.name}'에 빠른 적응`,
+      desc: `학습 시작 후 ${hitAt}회기 만에 준거(80%)에 도달해 지금까지 유지되고 있어, ${fn}${이가(fn)} 새 학습 내용에 빠르게 적응했습니다.`
     });
   }
 
@@ -2513,6 +2495,74 @@ function shortTaskName(name, maxLen = 28) {
   return t;
 }
 
+// ★ [48-1] 목표(goal) 병합 키 — id 우선.
+//    기존엔 shortTaskName(goalName || name)으로 묶어서, 어떤 단계에 goalName이 비면
+//    그 단계만 별도 목표로 갈라졌다(소근육 모방 L4가 '브이'라는 다른 목표가 됨).
+function goalKeyOf(s) {
+  if (!s) return "";
+  if (s.goalId !== undefined && s.goalId !== null && s.goalId !== "") return "#" + s.goalId;
+  return shortTaskName(s.goalName || s.name || "");
+}
+
+// ★ [48-1] 보고서 자동 문장이 쓰는 "목표 단위 시계열" — 단일 진실원.
+//    표지 요약 / 영역별 균형 / 강점·주요 변화 / 정체 판정 / 종합 소견이 각자 STO를 다시 묶는 바람에
+//    같은 목표를 두고 문장은 "최근 100%", 차트는 "0%"로 나가는 일이 반복됐다. 계산을 여기 하나로 모은다.
+//
+//    규칙
+//      1) 키는 goalId 우선(goalKeyOf).
+//      2) status "중단" STO 제외.
+//      3) O·X STO의 점은 %가 아니므로 시계열에서 뺀다(0/100 환산값이 평균을 부풀림).
+//      4) 같은 날 여러 단계가 기록되면 '가장 상위 단계'의 값을 쓴다 — 끝난 단계(L3=100)가
+//         현재 단계(L4=0)를 가리지 않게. stos는 목표별 단계 순서로 들어오므로 배열 위치가 뒤일수록 상위.
+//      5) 현재 진행 단계가 O·X면 currentIsOX=true. 이 목표는 "최근 N%" 문장에 쓰면 안 된다
+//         (%로 말할 수 있는 마지막 값이 이미 끝난 하위 단계의 값이라 실제 수행과 어긋난다).
+function buildGoalSeries(stos) {
+  const m = {};
+  (Array.isArray(stos) ? stos : []).forEach((s, order) => {
+    if (!s || s.status === "중단") return;
+    const key = goalKeyOf(s);
+    if (!key) return;
+    if (!m[key]) m[key] = {
+      key, name: shortTaskName(s.goalName || s.name), domain: s.domain,
+      dates: new Map(), topOrder: -1, currentIsOX: false, hasProgress: false, anyPoints: false
+    };
+    const g = m[key];
+    if (order >= g.topOrder) { g.topOrder = order; g.currentIsOX = !!s.isOX; }
+    if (s.status === "진행중") g.hasProgress = true;
+    (s.points || []).forEach(p => {
+      if (!p || !p.date || typeof p.value !== "number") return;
+      g.anyPoints = true;
+      if (s.isOX) return;
+      const prev = g.dates.get(p.date);
+      if (prev == null || order >= prev.order) g.dates.set(p.date, { value: p.value, order });
+    });
+  });
+  return Object.values(m).map(g => {
+    const entries = [...g.dates.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const series = entries.map(e => e[1].value);
+    return {
+      key: g.key, name: g.name, domain: g.domain,
+      hasProgress: g.hasProgress, currentIsOX: g.currentIsOX, anyPoints: g.anyPoints,
+      dates: entries.map(e => e[0]),
+      series,
+      first: series.length > 0 ? series[0] : null,
+      last: series.length > 0 ? series[series.length - 1] : null,
+      // %로 서술해도 되는 목표인가 — 현재 단계가 O·X면 안 된다.
+      quotable: series.length > 0 && !g.currentIsOX
+    };
+  });
+}
+
+// ★ [48-1] 뒤에서부터 준거 미달이 몇 회기 이어졌는지.
+//    "N회기 동안 준거에 닿지 않아"의 N을 목표 전체 회기 수로 쓰던 문제를 고치기 위한 계산.
+function belowCriterionRun(series, criterion = 80) {
+  let n = 0;
+  for (let i = (series || []).length - 1; i >= 0; i--) {
+    if (series[i] < criterion) n++; else break;
+  }
+  return n;
+}
+
 // ★ [신규] 그 날 기록이 O·X(시도) 방식인지 데이터로 판별.
 //    measureMode(현재 설정)가 아니라 저장된 데이터 모양으로 보므로,
 //    중간에 방식을 바꿔도 과거 날짜가 잘못 해석되지 않는다.
@@ -2608,6 +2658,18 @@ function getCombinedDailySeries(goal) {
     result.push({ date: d, rate });
   });
   return result;
+}
+
+// ★ [48-1] 영역별 균형 평균에 쓰는 목표 시계열 — O·X '단계'를 뺀다.
+//    기존 currentAvgs는 goalIsOX(목표 전체가 O·X인지)만 봐서, %단계와 O·X단계가 섞인 목표에서
+//    O·X 단계의 0/100 환산값이 영역 평균에 그대로 들어갔다.
+//    (예: 소근육 모방 L1~L3은 %, L4만 O·X → 마지막 날 L4의 X가 0%로 잡혀 영역 평균이 내려감.
+//     같은 목표를 문장 쪽은 O·X를 빼고 계산해 "최근 100%"라고 적어 차트와 어긋났다.)
+//    이제 차트·문장이 같은 집합(=%단계만)을 본다.
+function getRatedGoalSeries(goal) {
+  const ratedTasks = (goal?.tasks || []).filter(t => !taskIsOX(t));
+  if (ratedTasks.length === 0) return [];
+  return getCombinedDailySeries({ ...goal, tasks: ratedTasks });
 }
 
 function generateCurrentLevel(goal) {
@@ -5608,6 +5670,7 @@ export default function App() {
           name: t.name,
           domain: g.domain,
           subDomain: g.subDomain,
+          goalId: g.id,      // ★ [48-1] 목표 병합 키 — goalName이 비면 STO명으로 갈라졌다
           goalName: g.item,  // 상위 영역목표명
           source: g.source || "ELCAR",  // ★ 커리큘럼
           status,
@@ -5733,7 +5796,9 @@ export default function App() {
       if (goalIsOX(g)) return;
       // ★ 요약카드(summary.avg)와 동일 기준으로 통일 — goal 통합 시계열의 최근 값 사용.
       //   (기존: task별 독립 최신값 평균 → goal 최근 세션 통합값. 요약카드와 계산 일치)
-      const tl = getTimeline(g);
+      // ★ [48-1] getTimeline → getRatedGoalSeries. O·X 단계가 섞인 목표에서
+      //    O·X 단계의 0/100 환산값이 영역 평균에 새어 들어가던 문제.
+      const tl = getRatedGoalSeries(g);
       const goalValue = tl.length > 0 ? tl[tl.length - 1].rate : null;
       if (goalValue === null) return;
       if (!grouped[g.domain]) grouped[g.domain] = { sum: 0, n: 0 };
@@ -11524,7 +11589,7 @@ cleanedHTML + '\n' +
               const highlightsText = buildInterimHighlights(domainAvgs || [], stosForReport || [], info, dailyMemos || {});
               if (!strengthsText && !highlightsText) return null;
               return (
-                <PrintSection num={nextSn()} title="이번 기간의 강점과 주요 변화" accent>
+                <PrintSection num={nextSn()} title={strengthsText ? "이번 기간의 강점과 주요 변화" : "이번 기간의 주요 변화"} accent>
                   <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333" }}>
                     {/* 강점 (전반적 패턴) - 먼저 큰 그림 */}
                     {strengthsText && (
@@ -14420,20 +14485,24 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   const stableMasteredList = Object.values(growthMap).filter(g => g.masteredFromStart);
   const topGrowth = [...meaningfulGrowthList, ...stableMasteredList];
 
-  // ★ [신규] 영역 단위 성장 집계.
-  //    기존 topGrowth는 '과제' 목록인데 문장에서 영역처럼 써서, 같은 영역이 두 번 나오고
-  //    수치도 과제 하나의 변화(+100%p)가 영역 변화인 것처럼 표기됐다.
-  //    영역별로 과제들의 시작·마지막 값을 평균 내 실제 영역 변화를 구한다.
+  // ★ [48-2 버그수정] 영역 성장(%p) 집계를 STO(단계) 단위 → 목표(goal) 단위로 바꾼다.
+  //    STO 단위로 first/last를 평균 내면 이미 끝난 단계의 마지막 값(≈100)이 그대로 들어가
+  //    영역별 균형 차트(목표 단위 최근값)와 숫자가 정면으로 어긋났다.
+  //      예1) 신체발달 = 퍼즐 L2(20→100) + L3(0→40) → first 10, last 70 → "+60%p"
+  //           같은 보고서의 차트는 40%(집중 지도)이고 다음 목표엔 '정체'로 적혀 있었다.
+  //      예2) 화자 = 단단어 택트 L8(10→80) + L9(60→50) + 동물소리 L1(0→100) → "+54%p"
+  //           실제 영역 최종은 75%.
+  //    이제 목표 단위 첫 값 → 마지막 값으로 계산해 차트와 같은 기준을 쓴다.
+  const domGrowthGoals = buildGoalSeries(active);
   const domGrowth = (() => {
     const bucket = {};
-    rated.forEach(st => {
-      const pts = (st.points || []).filter(x => x && x.value !== null);
-      if (pts.length < 2) return;
-      const key = cleanDomainKey(st.domain || "");
+    domGrowthGoals.forEach(g => {
+      if (!g.quotable || g.series.length < 2) return;
+      const key = cleanDomainKey(g.domain || "");
       if (!key) return;
       if (!bucket[key]) bucket[key] = { first: [], last: [] };
-      bucket[key].first.push(pts[0].value);
-      bucket[key].last.push(pts[pts.length - 1].value);
+      bucket[key].first.push(g.first);
+      bucket[key].last.push(g.last);
     });
     const avg = (arr) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
     return Object.entries(bucket).map(([label, v]) => {
@@ -14938,41 +15007,29 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   //    task 단위로 보면 (1) 이미 진행 중인 목표에 새 단계(L3 등)를 추가했을 뿐인데
   //    "다음 기간부터 지도를 시작합니다"로 나갔고(예: TEACCH),
   //    (2) 회기 수도 단계 하나치만 세어 카드에 보이는 칸 수와 어긋났다(받아쓰기 27칸인데 14회기).
-  const goalBuckets = (() => {
-    const m = {};
-    // ★ [버그수정] 같은 날 여러 단계 기록 시 '최고값'이 아니라 '가장 상위 단계'의 값을 쓴다.
-    //    끝난 이전 단계(L3=100)가 현재 단계(L4=0)를 가려 정체 판정이 어긋났다.
-    stos.filter(s => s.status !== "중단").forEach((s, order) => {
-      const key = shortTaskName(s.goalName || s.name);
-      if (!m[key]) m[key] = { name: key, dates: new Map(), hasProgress: false };
-      (s.points || []).forEach(p => {
-        if (!p || !p.date || typeof p.value !== "number") return;
-        const prev = m[key].dates.get(p.date);
-        if (prev == null || order >= prev.order) m[key].dates.set(p.date, { value: p.value, order });
-      });
-      if (s.status === "진행중") m[key].hasProgress = true;
-    });
-    return Object.values(m).map(g => ({
-      name: g.name,
-      hasProgress: g.hasProgress,
-      series: [...g.dates.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(e => e[1].value)
-    }));
-  })();
+  // ★ [48-1] 공용 buildGoalSeries로 일원화(키를 goalId로 잡아 목표가 갈라지지 않게).
+  const goalBuckets = buildGoalSeries(stos);
 
   // 진행 예정 — 목표 전체에 기록이 하나도 없는 것만
-  const upcoming = goalBuckets.filter(g => g.series.length === 0);
+  // ★ [48-1] series는 %단계만 담으므로, O·X로만 기록 중인 목표가 "아직 시작 안 함"으로
+  //    잘못 잡히지 않도록 anyPoints(기록 자체가 하나라도 있는지)로 판정한다.
+  const upcoming = goalBuckets.filter(g => !g.anyPoints);
   if (upcoming.length > 0) {
     const names = upcoming.slice(0, 3).map(g => `'${g.name}'`).join(", ");
     sentences.push(`${names}${upcoming.length > 3 ? ` 등 ${upcoming.length}개 목표` : ""}는 다음 보고 기간부터 지도를 시작합니다.`);
   }
 
-  // 장기 정체 — 목표 단위 회기 수(중복 날짜 제거)로 센다
+  // ★ [48-3 버그수정] 판정 조건은 '최근 8회기'인데 문장은 목표 전체 회기 수를 찍고 있었다.
+  //    그래서 중간에 준거를 달성하고 단계를 올린 목표도 "28회기 동안 준거에 닿지 않아"로 나갔다.
+  //    (단단어 자극 택트 L8은 80% 도달 후 L9로 승급, 퍼즐 맞추기 L2도 100% 도달 후 L3로 승급)
+  //    이제 '뒤에서부터 준거 미달이 이어진 실제 회기 수'를 세어 그 숫자를 쓴다.
+  const STALL_MIN = 8;
   const stalled = goalBuckets
-    .filter(g => g.hasProgress && g.series.length >= 8 && g.series.slice(-8).every(v => v < 80))
-    .sort((a, b) => b.series.length - a.series.length);
+    .filter(g => g.quotable && g.hasProgress && belowCriterionRun(g.series) >= STALL_MIN)
+    .sort((a, b) => belowCriterionRun(b.series) - belowCriterionRun(a.series));
   if (stalled.length > 0) {
     const s0 = stalled[0];
-    sentences.push(`'${s0.name}'${josa은는(s0.name)} ${s0.series.length}회기 동안 준거에 닿지 않아, 과제 난이도와 지도 방법을 다시 점검하겠습니다.`);
+    sentences.push(`'${s0.name}'${josa은는(s0.name)} 최근 ${belowCriterionRun(s0.series)}회기 연속으로 준거(80%)에 닿지 않아, 과제 난이도와 지도 방법을 다시 점검하겠습니다.`);
   }
 
   if (paused.length > 0) {
