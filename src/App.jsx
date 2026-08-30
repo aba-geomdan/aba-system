@@ -2149,7 +2149,7 @@ function buildFinalSummary(goals, info) {
   } else {
     para1Parts.push(`${fn}${josa은는(fn)} 본 ABA 치료 프로그램에 참여하였습니다.`);
   }
-  const referral = (info?.finalReferralReason || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").trim();
+  const referral = (info?.finalReferralReason || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
   if (referral) {
     const firstSentence = referral.split(/[.\n]/).find(s => s.trim().length > 10) || referral.split("\n")[0];
     if (firstSentence && firstSentence.trim()) {
@@ -10845,7 +10845,7 @@ cleanedHTML + '\n' +
 
         {/* ★ [IEP 신규] 의뢰 사유 — 맨 앞 (선택 입력 · 비워두면 생략) */}
         {isIepMode && (() => {
-          const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").trim();
+          const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
           const referralClean = stripMarker(info.iepReferralReason);
           if (!referralClean) return null;
           const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
@@ -11145,7 +11145,7 @@ cleanedHTML + '\n' +
 
         {/* ★ [IEP 신규] 보호자 협력 방안 — IEP 계획안 직후 (선택) */}
         {isIepMode && (() => {
-          const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").trim();
+          const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
           const collabClean = stripMarker(info.iepHomeCollab);
           if (!collabClean) return null;
           const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
@@ -11163,7 +11163,7 @@ cleanedHTML + '\n' +
 
         {/* ★ [IEP 신규] 권고사항 — 마지막 (선택) */}
         {isIepMode && (() => {
-          const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").trim();
+          const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
           const recsClean = stripMarker(info.iepRecommendations);
           if (!recsClean) return null;
           const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
@@ -11197,7 +11197,7 @@ cleanedHTML + '\n' +
                       </td>
                     </tr>
                     {(() => {
-                      const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").trim();
+                      const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
                       const refClean = stripMarker(info.finalReferralReason);
                       const endClean = stripMarker(info.finalEndReason);
                       return (
@@ -11339,7 +11339,7 @@ cleanedHTML + '\n' +
 
             {/* ★ [v19 흐름 개선] 중간모드 문제행동 변화 — 차트 영역 끝 (사실 데이터와 함께) */}
             {!isFinalMode && !isIepMode && (() => {
-              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").trim();
+              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
               const behaviorClean = stripMarker(info.finalBehaviorChange);
               if (!behaviorClean) return null;
               const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
@@ -11450,7 +11450,7 @@ cleanedHTML + '\n' +
 
             {/* 1. 종합 현황 — ★ 종결모드에서는 제외 (종합 평가와 내용 중복) */}
             {!isFinalMode && reportSections && (() => {
-              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").trim();
+              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
               const overviewClean = stripMarker(reportSections["종합 현황"]);
               const summaryClean = stripMarker(reportSections["총괄 요약 및 권고사항"]);
               if (overviewClean) {
@@ -11513,7 +11513,7 @@ cleanedHTML + '\n' +
 
             {/* 2. 치료사 종합 소견 (중간 모드 - 종결은 위에서 처리됨) */}
             {!isFinalMode && !isIepMode && reportSections && (() => {
-              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").trim();
+              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
               const growthClean = stripMarker(reportSections["이번 기간의 성장과 변화"]);
               if (!growthClean) return null;
               return (
@@ -11530,7 +11530,7 @@ cleanedHTML + '\n' +
             {/* ★ [v19 흐름 개선] 종결모드 문제행동 변화 — 성장과 변화 직후 (회고 흐름) */}
             {/* 중간모드는 위 차트 영역 끝에서 표시됨 */}
             {isFinalMode && (() => {
-              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").trim();
+              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
               const behaviorClean = stripMarker(info.finalBehaviorChange);
               if (!behaviorClean) return null;
               return (
@@ -11551,7 +11551,7 @@ cleanedHTML + '\n' +
 
             {/* 3. 가정에서 함께 하기 (종결모드는 finalHomeMaintenance, 아니면 reportSections) */}
             {isFinalMode ? (() => {
-              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").trim();
+              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
               const homeClean = stripMarker(info.finalHomeMaintenance);
               if (!homeClean) return null;
               return (
@@ -11563,7 +11563,7 @@ cleanedHTML + '\n' +
               );
             })() : (
               reportSections && (() => {
-                const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").trim();
+                const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
                 const homeCoop = stripMarker(reportSections["가정에서 함께 하기"]);
                 const fallback = stripMarker(reportSections["일반화 계획 및 가정 협력 방안"]);
                 if (homeCoop) {
@@ -11590,7 +11590,7 @@ cleanedHTML + '\n' +
 
             {/* 4. 다음 목표 (중간모드 전용) — 종결모드는 별도 권고사항 섹션 */}
             {!isFinalMode && reportSections && (() => {
-              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").trim();
+              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
               const nextGoal = stripMarker(reportSections["다음 목표"]);
               const fallback = stripMarker(reportSections["다음 목표 제안"]);
               if (nextGoal) {
@@ -11616,7 +11616,7 @@ cleanedHTML + '\n' +
 
             {/* ★ [v19 통합] 종결보고서 끝부분 — 앞으로의 방향 (권고사항 + 다음 기관 인계) */}
             {isFinalMode && (() => {
-              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").trim();
+              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
               const recClean = stripMarker(info.finalRecommendations);
               const handoverClean = stripMarker(info.finalHandover);
               if (!recClean && !handoverClean) return null;
@@ -17397,38 +17397,51 @@ function ReportGeneratorSection({
                 placeholderText = "다음 회기 목표 방향을 선택하세요.";
               }
 
+              // ★ [수정] 칩 자동 생성이 데이터 문단을 통째로 덮어쓰던 동작을 '덧붙이기'로 바꾼다.
+              //    기존엔 ✨를 누르면 목표 개수·영역 평균 같은 계산 결과가 사라지고
+              //    고정 문구만 남아서, 숫자를 지키려면 칩을 아예 못 쓰는 상태였다.
+              //    원본 데이터 문단을 AUTOBASE 마커에 보관해 두고, 칩 문단은 그 뒤에 잇는다.
               const MARKER_RE = /\n*<!--SELECTED:([^>]*)-->\s*$/;
-              const currentValue = reportSections[key] || "";
-              const markerMatch = currentValue.match(MARKER_RE);
+              const AUTOBASE_RE = /\n*<!--AUTOBASE:([\s\S]*?)-->\s*/;
+              const rawValue = reportSections[key] || "";
+              const markerMatch = rawValue.match(MARKER_RE);
               const selected = markerMatch ? markerMatch[1].split("|").filter(Boolean) : [];
-              const visibleText = currentValue.replace(MARKER_RE, "").trim();
+              const autoMatch = rawValue.match(AUTOBASE_RE);
+              const autoBase = autoMatch ? autoMatch[1] : "";
+              const visibleText = rawValue.replace(MARKER_RE, "").replace(AUTOBASE_RE, "").trim();
               const selectedSet = new Set(selected);
+
+              const packStored = (text, arr, base) =>
+                text
+                + (base ? `\n\n<!--AUTOBASE:${base}-->` : "")
+                + (arr.length > 0 ? `\n\n<!--SELECTED:${arr.join("|")}-->` : "");
 
               const toggle = (label) => {
                 const newSel = new Set(selectedSet);
                 if (newSel.has(label)) newSel.delete(label);
                 else newSel.add(label);
-                const arr = Array.from(newSel);
-                const marker = arr.length > 0 ? `\n\n<!--SELECTED:${arr.join("|")}-->` : "";
-                updateSection(key, visibleText + marker);
+                updateSection(key, packStored(visibleText, Array.from(newSel), autoBase));
               };
 
               const generate = () => {
                 const arr = Array.from(selectedSet);
                 if (arr.length === 0) return;
+                // 처음 누르는 경우엔 지금 화면의 데이터 문단이 곧 원본이다.
+                const base = (autoBase || visibleText).trim();
                 const para = buildFunc(arr, info);
-                const marker = `\n\n<!--SELECTED:${arr.join("|")}-->`;
-                updateSection(key, para + marker);
+                const merged = base ? `${base}\n\n${para}` : para;
+                updateSection(key, packStored(merged, arr, base));
               };
 
+              // 🗑 초기화 — 칩 문단만 걷어내고 데이터 문단은 되돌린다(전체 삭제 아님).
               const clear = () => {
-                updateSection(key, "");
+                updateSection(key, autoBase ? autoBase : "");
               };
 
               return (
                 <div key={key} style={{ marginBottom: 18 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 6 }}>
-                    {displayLabel(key)} <span style={{ fontSize: 10, fontWeight: 400, color: "#888" }}>(키워드 선택 후 [✨ 자동 생성])</span>
+                    {displayLabel(key)} <span style={{ fontSize: 10, fontWeight: 400, color: "#888" }}>(키워드 선택 후 [✨ 자동 생성] — 위 데이터 문단 뒤에 덧붙습니다)</span>
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
                     {CHIPS_DATA.map(([label], i) => {
@@ -17481,8 +17494,8 @@ function ReportGeneratorSection({
                   <AutoTextarea
                     value={visibleText}
                     onChange={e => {
-                      const marker = selected.length > 0 ? `\n\n<!--SELECTED:${selected.join("|")}-->` : "";
-                      updateSection(key, e.target.value + marker);
+                      // ★ [수정] 직접 편집할 때 AUTOBASE 마커가 날아가면 다음 ✨에서 데이터 문단이 사라진다.
+                      updateSection(key, packStored(e.target.value, selected, autoBase));
                     }}
                     rows={3}
                     placeholder={placeholderText}
