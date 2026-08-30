@@ -11018,7 +11018,7 @@ cleanedHTML + '\n' +
                 ? `${groupPhrases[0]}${josa을를(groupPhrases[0])}`
                 : groupPhrases.slice(0, -1).map(p => `${p}${josa을를(p)},`).join(" ") + " " + groupPhrases[groupPhrases.length - 1] + josa을를(groupPhrases[groupPhrases.length - 1]);
             return (
-              <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#444" }}>
+              <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#444" }}>
                 <p style={{ margin: "0 0 10px" }}>
                   각 세부 목표는 <b>80% 이상의 정확도로 2회 연속 수행 시 '달성'</b>으로 간주하며, 정확도뿐 아니라 <b>일관성·자발성·일반화</b> 여부를 함께 고려하여 판단합니다.
                 </p>
@@ -11071,7 +11071,7 @@ cleanedHTML + '\n' +
               }
               return (
                 <>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                     <tbody>
                       {categories.map(c => (
                         <tr key={c.key} style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
@@ -11143,15 +11143,15 @@ cleanedHTML + '\n' +
                       <span style={{ fontSize: 10, fontWeight: 500, color: meta.deep, opacity: 0.8 }}>{items.length}개 목표 · {Object.keys(grouped).length}개 영역</span>
                     </div>
                     {/* ★ [정밀화] 커리큘럼 단위 설명 단락 — 자동 생성 + 이름 자동 치환 */}
-                    <div style={{ fontSize: 10.5, lineHeight: 1.75, color: "#333", marginBottom: 10, padding: "0 4px" }}>
+                    <div style={{ fontSize: 12, lineHeight: 1.75, color: "#333", marginBottom: 10, padding: "0 4px" }}>
                       {personalizeText(generateCurriculumDescription(src, items), childName)}
                     </div>
                     {/* 영역별 작은 카드들 */}
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       {Object.entries(grouped).map(([cat, gItems]) => (
                         <div key={cat} style={{ background: "#fff", border: `1px solid ${meta.accent}`, borderRadius: 6, padding: "8px 12px", pageBreakInside: "avoid", breakInside: "avoid" }}>
-                          <div style={{ fontSize: 11, fontWeight: 600, color: meta.deep, marginBottom: 4 }}>{cat}</div>
-                          <div style={{ fontSize: 10.5, color: "#333", lineHeight: 1.85 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: meta.deep, marginBottom: 4 }}>{cat}</div>
+                          <div style={{ fontSize: 12, color: "#333", lineHeight: 1.85 }}>
                             {gItems.map((g, i) => (
                               <div key={g.id} style={{ marginBottom: i < gItems.length - 1 ? 4 : 0 }}>
                                 <span style={{ color: "#888", marginRight: 4 }}>-</span>
@@ -11219,7 +11219,7 @@ cleanedHTML + '\n' +
             {/* ★ [종결보고서 전용] 치료 개요 — 의뢰 사유, 종결 사유 */}
             {isFinalMode && (info.finalReferralReason || info.finalEndReason) && (
               <PrintSection num={nextSn()} title="치료 개요" accent>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, lineHeight: 1.7 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, lineHeight: 1.7 }}>
                   <tbody>
                     <tr>
                       <td style={{ padding: "8px 12px", background: "#f5f7f0", fontWeight: 600, color: "#3d6014", border: "1px solid #d4e5ba", width: "20%", verticalAlign: "top" }}>치료 기간</td>
@@ -11420,10 +11420,10 @@ cleanedHTML + '\n' +
                     pageBreakInside: "avoid",
                     breakInside: "avoid"
                   }}>
-                    <div style={{ fontSize: 10.5, color: "#7a6235", marginBottom: 14, lineHeight: 1.7, paddingBottom: 10, borderBottom: "1px dashed #e5d8a8" }}>
+                    <div style={{ fontSize: 11.5, color: "#7a6235", marginBottom: 14, lineHeight: 1.7, paddingBottom: 10, borderBottom: "1px dashed #e5d8a8" }}>
                       ⏸ 아래 목표는 임상적 판단에 따라 본 회기 중 중단되었습니다. 향후 회기에서 재구성 또는 우선순위 조정 후 재개 여부를 검토할 예정입니다.
                     </div>
-                    <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none", fontSize: 10.5, lineHeight: 1.7, color: "#333" }}>
+                    <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none", fontSize: 12, lineHeight: 1.7, color: "#333" }}>
                       {pausedItems.map((item, idx) => (
                         <li key={idx} style={{
                           marginBottom: idx === pausedItems.length - 1 ? 0 : 12,
@@ -11438,7 +11438,7 @@ cleanedHTML + '\n' +
                             )}
                           </div>
                           {item.softReason && (
-                            <div style={{ fontSize: 10.5, color: "#7a6235", marginTop: 4, paddingLeft: 14, lineHeight: 1.65 }}>
+                            <div style={{ fontSize: 11.5, color: "#7a6235", marginTop: 4, paddingLeft: 14, lineHeight: 1.65 }}>
                               └ <b style={{ color: "#c9a85a" }}>중단 사유:</b> {item.softReason}
                             </div>
                           )}
@@ -11656,7 +11656,7 @@ cleanedHTML + '\n' +
                   {/* 권고사항 - 가족·교육진을 위한 권고 (먼저) */}
                   {recClean && (
                     <div style={{ marginBottom: handoverClean ? 14 : 0 }}>
-                      <div style={{ fontSize: 10.5, fontWeight: 700, color: PKD, marginBottom: 6 }}>▸ 권고사항</div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 6 }}>▸ 권고사항</div>
                       <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333" }}>
                         {personalize(recClean).split("\n").map((line, i) => (
                           <p key={`r-${i}`} style={{ margin: line.trim() === "" ? "4px 0" : "0 0 6px 0" }}>
@@ -11669,7 +11669,7 @@ cleanedHTML + '\n' +
                   {/* 다른 기관 인계 정보 - 외부 이동 시 참고 (다음) */}
                   {handoverClean && (
                     <div style={{ paddingTop: recClean ? 10 : 0, borderTop: recClean ? "0.5pt solid #f0e0e5" : "none" }}>
-                      <div style={{ fontSize: 10.5, fontWeight: 700, color: PKD, marginBottom: 6 }}>▸ 다른 기관 이동 시 참고</div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 6 }}>▸ 다른 기관 이동 시 참고</div>
                       <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 8 }}>
                         ※ 유치원·학교·후속 치료 기관 등으로 이동 시 다음 정보가 도움이 됩니다.
                       </div>
@@ -11745,7 +11745,7 @@ cleanedHTML + '\n' +
            <div style={{ paddingTop: 4 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: PKD, marginBottom: 12, letterSpacing: "0.5px", textAlign: "center" }}>개별화 중재 계획안 작성 확인</div>
             {/* IEP 고유: 작성 확인 본문 */}
-            <div style={{ textAlign: "center", padding: "10px 0 16px", fontSize: 11, lineHeight: 1.85, color: "#555" }}>
+            <div style={{ textAlign: "center", padding: "10px 0 16px", fontSize: 12, lineHeight: 1.85, color: "#555" }}>
               <div style={{ fontWeight: 600, fontSize: 12, color: "#333" }}>{info.name || "본"} 아동의 {year}년 개별화 교육(IEP)에 대한 계획을 다음과 같이 확인합니다.</div>
               {(() => {
                 const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
@@ -11755,7 +11755,7 @@ cleanedHTML + '\n' +
               })()}
             </div>
             {/* 서명 표 (중간보고서와 동일 양식) */}
-            <table style={{ width: "75%", margin: "0 auto", borderCollapse: "collapse", fontSize: 11 }} className="signature-table">
+            <table style={{ width: "75%", margin: "0 auto", borderCollapse: "collapse", fontSize: 12 }} className="signature-table">
               <thead><tr>
                 {["구 분", "성 명", "서 명", "일 자"].map(h => <th key={h} style={{ padding: "7px 10px", background: PKL, border: "1px solid #e8d0d6", fontWeight: 600, color: PKD, fontSize: 10, textAlign: "center", letterSpacing: "1px" }}>{h}</th>)}
               </tr></thead>
@@ -11791,7 +11791,7 @@ cleanedHTML + '\n' +
           <div className="signature-section" style={{ pageBreakBefore: "always", breakBefore: "page", pageBreakInside: "avoid", breakInside: "avoid" }}>
            <div style={{ paddingTop: 4 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: PKD, marginBottom: 12, letterSpacing: "0.5px", textAlign: "center" }}>확인 및 서명</div>
-            <table style={{ width: "75%", margin: "0 auto", borderCollapse: "collapse", fontSize: 11 }} className="signature-table">
+            <table style={{ width: "75%", margin: "0 auto", borderCollapse: "collapse", fontSize: 12 }} className="signature-table">
               <thead><tr>
                 {["구 분", "성 명", "서 명", "일 자"].map(h => <th key={h} style={{ padding: "7px 10px", background: PKL, border: "1px solid #e8d0d6", fontWeight: 600, color: PKD, fontSize: 10, textAlign: "center", letterSpacing: "1px" }}>{h}</th>)}
               </tr></thead>
@@ -12317,7 +12317,7 @@ function PrintGoalTaskTable({ goals, listGroup, color, emptyMsg }) {
                 {unifiedMastery && <span>숙달: {unifiedMastery}</span>}
               </span>
             </div>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
                   <th style={{ ...thIep, width: "28%" }}>영역 목표 (LTO) · 커리큘럼 연계</th>
@@ -12407,7 +12407,7 @@ function StrategyConsolidatedTable({ goals }) {
   }
 
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
       <thead>
         <tr>
           <th style={{ ...thIep, width: "28%" }}>교수 방법 · 전략</th>
