@@ -4429,7 +4429,9 @@ export default function App() {
   const [childSearch, setChildSearch] = useState("");
   const [filterTherapist, setFilterTherapist] = useState("");  // 담당치료사
   const [filterStatus, setFilterStatus] = useState("all");  // all | active | terminated
-  const [filterSort, setFilterSort] = useState("name");  // name | recent | dataInput
+  const [filterSort, setFilterSort] = useState("startDate");  // startDate | name | recent | dataInput
+  // ★ [56-3] 기본값을 이름순 → 수업 시작일순으로. 대시보드가 info.startDate 오름차순이라
+  //    같은 아동 목록인데 두 화면 순서가 달랐다. 이름순으로 되돌리려면 위 기본값만 "name"으로 바꾸면 된다.
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   
   const [iepSearchQuery, setIepSearchQuery] = useState("");
@@ -6956,7 +6958,16 @@ export default function App() {
                   filtered = filtered.filter(c => c.info?.finalEndDate);
                 }
                 
-                if (filterSort === "name") {
+                if (filterSort === "startDate") {
+                  // ★ [56-3] 대시보드와 같은 규칙 — 수업 시작일 오름차순, 날짜 없으면 맨 아래.
+                  filtered = [...filtered].sort((a, b) => {
+                    const sa = a.info?.startDate || "", sb = b.info?.startDate || "";
+                    if (!sa && !sb) return (a.info?.name || "").localeCompare(b.info?.name || "");
+                    if (!sa) return 1;
+                    if (!sb) return -1;
+                    return sa.localeCompare(sb);
+                  });
+                } else if (filterSort === "name") {
                   filtered = [...filtered].sort((a, b) => (a.info?.name || "").localeCompare(b.info?.name || ""));
                 } else if (filterSort === "recent") {
                   filtered = [...filtered].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
@@ -6980,7 +6991,15 @@ export default function App() {
                   });
                 }
                 
+                // ★ [56-2] 목록 순서를 활동 중 → 종결 → 보관으로 묶는다.
+                //    이름순으로만 세우면 종결·보관 아동이 매일 쓰는 아동 사이에 끼어
+                //    찾는 데 시간이 걸렸다. 숨기지 않고 아래로 내리기만 한다(스크롤하면 그대로 있음).
+                //    sort는 안정 정렬이라 묶음 안에서는 위에서 고른 정렬(이름순·최근순 등)이 유지된다.
+                //    즐겨찾기는 묶음 안에서만 위로 — 보관된 아동이 고정돼 맨 위로 올라오지 않게.
+                const inactiveRank = (c) => (c.info?.archivedAt ? 2 : (c.info?.finalEndDate ? 1 : 0));
                 filtered = [...filtered].sort((a, b) => {
+                  const ra = inactiveRank(a), rb = inactiveRank(b);
+                  if (ra !== rb) return ra - rb;
                   if (a.info?.isPinned && !b.info?.isPinned) return -1;
                   if (!a.info?.isPinned && b.info?.isPinned) return 1;
                   return 0;
@@ -7110,6 +7129,7 @@ export default function App() {
                                   cursor: "pointer"
                                 }}
                               >
+                                <option value="startDate">수업 시작일순</option>
                                 <option value="name">이름순</option>
                                 <option value="recent">최근 추가순</option>
                                 <option value="dataInput">최근 데이터 입력순</option>
@@ -7141,7 +7161,7 @@ export default function App() {
                               onClick={() => {
                                 setFilterTherapist("");
                                 setFilterStatus("all");
-                                setFilterSort("name");
+                                setFilterSort("startDate");  // ★ [56-3] 초기화도 새 기본값으로
                               }}
                               style={{
                                 padding: "5px 8px",
@@ -7589,7 +7609,16 @@ export default function App() {
               <div>
                 <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, marginBottom: 12, color: PKD }}>👥 선생님별 현황</h3>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {Object.values(teacherStats).map((teacher, tIdx) => {
+                  {/* ★ [56-4] 선생님 순서: 본인 → 나머지 이름순 → (미할당) 맨 뒤.
+                      기존엔 정렬 없이 아동을 훑은 순서 그대로라 관리자 본인이 아래로 밀렸다.
+                      아동 드롭다운의 선생님 그룹 정렬과 같은 규칙을 쓴다. */}
+                  {Object.values(teacherStats).slice().sort((a, b) => {
+                    if (a.name === currentUser?.name) return -1;
+                    if (b.name === currentUser?.name) return 1;
+                    if (a.name === "(미할당)") return 1;
+                    if (b.name === "(미할당)") return -1;
+                    return (a.name || "").localeCompare(b.name || "");
+                  }).map((teacher, tIdx) => {
                     // ★ [신규] 선생님별 활동/종료 아동 카운트
                     const activeCount = teacher.children.filter(c => !c.info?.finalEndDate).length;
                     const terminatedCount = teacher.children.filter(c => c.info?.finalEndDate).length;
