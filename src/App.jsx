@@ -1013,23 +1013,21 @@ function buildSummary(stosForReport, info) {
   //    한 보고서 안에서 표지는 %를 말하고 종합 평가는 "산출하지 않았다"고 말하는 모순이 생겼다.
   //    목표(goal) 단위로 묶고, 시작·종결 값은 비교 섹션과 같은 창(compareEdgeSize)을 쓴다.
   //    개수(total/done)는 STO 단위 그대로 — '영역별 완료 현황'의 과제 수와 맞춘다.
-  const series = buildGoalSeries(active).filter(g => g.quotable && g.series.length > 0);
-  let lastSum = 0, lastCnt = 0, firstSum = 0, firstCnt = 0;
-  series.forEach(g => {
-    const n = compareEdgeSize(g.series.length);
-    const head = g.series.slice(0, n);
-    const tail = g.series.slice(-n);
-    firstSum += head.reduce((a, b) => a + b, 0) / head.length; firstCnt++;
-    lastSum += tail.reduce((a, b) => a + b, 0) / tail.length; lastCnt++;
-  });
-  const lastAvg = lastCnt > 0 ? Math.round(lastSum / lastCnt) : 0;
-  const firstAvg = firstCnt > 0 ? Math.round(firstSum / firstCnt) : 0;
+  // ★ [57-16] 시작·종결 값을 영역 단위 평균으로 낸다.
+  //    기존엔 목표(goal) 단위였는데, 곡선 문단·종합 평가는 영역 단위라
+  //    종결값은 71%로 같은데 시작값만 65% / 62%로 갈렸다.
+  //    영역마다 목표 수가 달라(학습능력 21개, 자기관리 5개) 가중치가 다른 게 원인.
+  //    개수(total/done)는 아래에서 STO 단위로 따로 센다.
+  const _cmp = buildStartEndCompare(stosForReport, []);
+  const _q = _cmp.quotableRows;
+  const lastAvg = _q.length > 0 ? Math.round(_q.reduce((a, r) => a + r.lastAvg, 0) / _q.length) : 0;
+  const firstAvg = _q.length > 0 ? Math.round(_q.reduce((a, r) => a + r.firstAvg, 0) / _q.length) : 0;
   const diff = lastAvg - firstAvg;
   // ★ [48-6 버그수정] % 기록이 하나도 없는 아동(전 목표가 O·X)일 때 rated가 비어
   //    lastAvg=firstAvg=0 → diff=0으로 떨어지면서
   //    "달성률 평균 0%를 유지했고, 9개 STO 중 6개에서 준거를 달성했습니다"라는
   //    자기모순 문장이 나갔다. 이 경우 %는 아예 말하지 않는다.
-  const hasRated = lastCnt > 0;
+  const hasRated = _q.length > 0;
   // ★ [57-7] %를 못 쓰는 이유가 두 가지다 — 전부 O·X인 경우와,
   //    한 목표 안에 O·X 단계와 % 단계가 섞여 제외된 경우.
   //    후자에 "모든 목표가 O·X 방식"이라고 적으면 사실과 다르다.
@@ -2428,7 +2426,9 @@ function buildFinalGrowth(goals, info, stos) {
       timeline = `학습 곡선 분석 결과, 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 점진적이고 일관된 향상이 확인되었습니다. ` +
                  `이는 단기적 향상이 아닌 치료 기간 전반에 걸친 학습 동기 유지와 능동적 참여의 결과로 해석됩니다. ` +
                  `초기 시도가 누적되어 안정적인 수행 수준으로 도달하는 단계적 진행이 확인되었습니다.`;
-    } else if (rise >= 10 && dip < 10) {
+    } else if (rise >= 5 && dip < 10) {
+      // ★ [57-16] 기준을 10 → 5로 내린다. 9%p일 때 표지는 "올랐습니다",
+      //    종합 평가는 "9%p 향상되어"인데 곡선만 "큰 기복 없이"라고 적어 톤이 어긋났다.
       timeline = `학습 곡선 분석 결과, 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%까지 안정적인 향상이 확인되었습니다. ` +
                  `회기 누적에 따른 점진적 변화 양상으로, 보호자의 지속적 지원이 학습 진행에 기여하였습니다.`;
     } else if (dip >= 10 && rise > 0) {
