@@ -2387,28 +2387,19 @@ function buildFinalGrowth(goals, info, stos) {
   //    중반은 그 사이 구간으로 잡는다.
   const curvePoints = (() => {
     if (!hasStos) return null;
-    const goalDomainById = {};
-    (goals || []).forEach(g => { if (g && g.id != null) goalDomainById[g.id] = reportDomainOf(g); });
-    const gs = buildGoalSeries(stos.map(s => (s ? { ...s, domain: goalDomainById[s.goalId] || reportDomainOf(s) } : s)))
-      .filter(g => g.quotable && g.series.length >= 3);
-    if (gs.length === 0) return null;
-    const mean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
-    const heads = [], mids = [], tails = [];
-    gs.forEach(g => {
-      const s = g.series;
-      const n = compareEdgeSize(s.length);
-      const h = mean(s.slice(0, n));
-      const t = mean(s.slice(-n));
-      const middle = s.slice(n, s.length - n);
-      heads.push(h);
-      tails.push(t);
-      // 가운데 구간이 없을 만큼 짧은 목표는 앞뒤의 중간값으로 둔다.
-      mids.push(middle.length > 0 ? mean(middle) : (h + t) / 2);
-    });
+    // ★ [57-14] 비교 섹션·막대와 같은 행에서 뽑는다.
+    //    57-13에서 목표(goal) 단위로 냈더니 가중치가 달랐다 —
+    //    비교 섹션은 영역 평균의 평균인데 곡선은 목표 평균이라,
+    //    목표 21개짜리 학습능력과 5개짜리 자기관리가 서로 다르게 반영됐다.
+    //    (성윤준: 곡선 66% / 비교 종결 열 평균 71%)
+    const cmp = buildStartEndCompare(stos, goals);
+    const rows = cmp.quotableRows.filter(r => r.midAvg !== null);
+    if (rows.length === 0) return null;
+    const mean = (pick) => Math.round(rows.reduce((a, r) => a + pick(r), 0) / rows.length);
     return {
-      earlyAvg: Math.round(mean(heads)),
-      midAvg: Math.round(mean(mids)),
-      lateAvg: Math.round(mean(tails))
+      earlyAvg: mean(r => r.firstAvg),
+      midAvg: mean(r => r.midAvg),
+      lateAvg: mean(r => r.lastAvg)
     };
   })();
 
@@ -2448,10 +2439,13 @@ function buildFinalGrowth(goals, info, stos) {
       timeline = `학습 곡선 분석 결과, 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 나타났습니다. ` +
                  `종결 시점 평균이 초기보다 낮으므로, 보고 기간 후반에 추가된 목표의 난이도와 목표별 개별 추이를 함께 확인해 주시기 바랍니다.`;
     } else if (lateAvg >= 75) {
-      timeline = `${fn}${josa은는(fn)} 치료 기간 전반에 걸쳐 평균 ${lateAvg}% 수준의 일관된 학습 수행을 유지하였습니다. ` +
+      timeline = `${fn}${josa은는(fn)} 초기 ${earlyAvg}% 수준에서 종결 시점 ${lateAvg}%로, 치료 기간 전반에 걸쳐 안정적인 학습 수행을 유지하였습니다. ` +
                  `이는 학습 환경 적응이 신속히 이루어지고 안정적인 학습 수행 양상이 형성되었음을 나타냅니다.`;
     } else {
-      timeline = `치료 기간 동안 평균 ${lateAvg}% 수준의 정반응률이 유지되었으며, 회기별 단계적 학습 진행이 확인되었습니다.`;
+      // ★ [57-14] 기존 문구는 종결 시점 값을 "치료 기간 동안 평균"이라고 불렀다.
+      //    같은 보고서의 막대·비교 종결 열과 같은 값인데 이름만 달라 어긋나 보였다.
+      timeline = `학습 곡선 분석 결과, 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 나타났으며, ` +
+                 `큰 기복 없이 회기별 단계적 학습 진행이 확인되었습니다.`;
     }
     paragraphs.push(timeline.replace(/\(가\)/g, i_ga));
   } else if (hasStos && totalMastered > 0) {
@@ -2744,7 +2738,7 @@ function buildStartEndCompare(stos, goals) {
   const bucket = (dom) => {
     const k = cleanDomainKey(dom || "") || "(영역 없음)";
     if (!byDomain[k]) byDomain[k] = {
-      domain: k, firsts: [], lasts: [],
+      domain: k, firsts: [], mids: [], lasts: [],
       total: 0, mastered: 0, paused: 0, ongoing: 0,
       quotableGoals: 0, excludedGoals: 0
     };
@@ -2758,8 +2752,14 @@ function buildStartEndCompare(stos, goals) {
     const n = compareEdgeSize(g.series.length);
     const head = g.series.slice(0, n);
     const tail = g.series.slice(-n);
-    b.firsts.push(head.reduce((a, c) => a + c, 0) / head.length);
-    b.lasts.push(tail.reduce((a, c) => a + c, 0) / tail.length);
+    const hv = head.reduce((a, c) => a + c, 0) / head.length;
+    const tv = tail.reduce((a, c) => a + c, 0) / tail.length;
+    b.firsts.push(hv);
+    b.lasts.push(tv);
+    // ★ [57-14] 가운데 구간 — 학습 곡선 문단이 초기·종결과 같은 가중치로 중반을 쓰게.
+    //    구간이 없을 만큼 짧은 목표는 앞뒤의 중간값으로 둔다.
+    const middle = g.series.slice(n, g.series.length - n);
+    b.mids.push(middle.length > 0 ? middle.reduce((a, c) => a + c, 0) / middle.length : (hv + tv) / 2);
     b.quotableGoals++;
   });
 
@@ -2779,9 +2779,10 @@ function buildStartEndCompare(stos, goals) {
   const rows = Object.values(byDomain).map(b => {
     const firstAvg = b.firsts.length > 0 ? Math.round(b.firsts.reduce((a, c) => a + c, 0) / b.firsts.length) : null;
     const lastAvg = b.lasts.length > 0 ? Math.round(b.lasts.reduce((a, c) => a + c, 0) / b.lasts.length) : null;
+    const midAvg = b.mids.length > 0 ? Math.round(b.mids.reduce((a, c) => a + c, 0) / b.mids.length) : null;
     return {
       domain: b.domain,
-      firstAvg, lastAvg,
+      firstAvg, midAvg, lastAvg,
       change: (firstAvg !== null && lastAvg !== null) ? lastAvg - firstAvg : null,
       total: b.total, mastered: b.mastered, paused: b.paused, ongoing: b.ongoing,
       quotableGoals: b.quotableGoals, excludedGoals: b.excludedGoals,
@@ -11870,94 +11871,13 @@ cleanedHTML + '\n' +
               </PrintSection>
             )}
 
-            {/* ★ [종결보고서 전용] 시작 vs 종결 비교 — 영역별 % 변화 + 마스터 진척 */}
-            {isFinalMode && (() => {
-              const cmp = buildStartEndCompare(stosForReport || [], goals || []);
-              if (!cmp.rows || cmp.rows.length === 0) return null;
-              // ★ [57-8] %로 말할 수 있는 목표가 하나도 없으면(전 목표 O·X 등)
-              //    이 표는 시작·종결 열이 전부 '—'이고 마스터 수만 남는다.
-              //    그 정보는 바로 앞 '영역별 완료 현황'이 이미 담고 있어, 빈 표가 한 장 더 붙을 뿐이다.
-              if (cmp.allNonQuotable) return null;
-
-              const barW = (v) => Math.max(0, Math.min(100, v || 0));
-              const changeColor = (c) => c === null ? "#999" : c > 0 ? "#3a6014" : c < 0 ? "#a8342a" : "#767676";
-              const changeText = (c) => c === null ? "—" : c > 0 ? `+${c}%p` : `${c}%p`;
-
-              return (
-                <PrintSection num={nextSn()} title="시작 vs 종결 비교" accent>
-                  <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                    ※ 각 영역의 학습 시작 무렵과 종결 시점을 나란히 놓고, 정반응률 변화와 과제 진척을 함께 봅니다.<br />
-                    ※ 시작·종결 값은 각 목표의 앞·뒤 구간 평균(최대 {COMPARE_EDGE_N}회기, 두 구간이 겹치지 않는 범위)을 영역에서 다시 평균한 값입니다.<br />
-                    ※ 회기당 1회 기록(O·X) 목표와 단계별 측정 방식이 섞인 목표는 %로 환산하지 않아 변화 열에서 제외되며, 마스터 수에는 포함됩니다.
-                  </div>
-
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
-                    <thead>
-                      <tr>
-                        <th style={{ padding: "6px 8px", background: "#f5f7f0", border: "1px solid #d4e5ba", color: "#3d6014", textAlign: "left", width: "22%" }}>영역</th>
-                        <th style={{ padding: "6px 8px", background: "#f5f7f0", border: "1px solid #d4e5ba", color: "#3d6014", width: "10%" }}>시작</th>
-                        <th style={{ padding: "6px 8px", background: "#f5f7f0", border: "1px solid #d4e5ba", color: "#3d6014", width: "10%" }}>종결</th>
-                        <th style={{ padding: "6px 8px", background: "#f5f7f0", border: "1px solid #d4e5ba", color: "#3d6014", width: "10%" }}>변화</th>
-                        <th style={{ padding: "6px 8px", background: "#f5f7f0", border: "1px solid #d4e5ba", color: "#3d6014", width: "34%" }}>시작 → 종결</th>
-                        <th style={{ padding: "6px 8px", background: "#f5f7f0", border: "1px solid #d4e5ba", color: "#3d6014", width: "14%" }}>마스터</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {cmp.rows.map((r, i) => (
-                        <tr key={i} style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
-                          <td style={{ padding: "6px 8px", border: "1px solid #d4e5ba", fontWeight: 600, color: "#333" }}>
-                            {r.domain}
-                          </td>
-                          <td style={{ padding: "6px 8px", border: "1px solid #d4e5ba", textAlign: "center", color: "#767676" }}>
-                            {r.quotable ? `${r.firstAvg}%` : "—"}
-                          </td>
-                          <td style={{ padding: "6px 8px", border: "1px solid #d4e5ba", textAlign: "center", fontWeight: 600, color: "#333" }}>
-                            {r.quotable ? `${r.lastAvg}%` : "—"}
-                          </td>
-                          <td style={{ padding: "6px 8px", border: "1px solid #d4e5ba", textAlign: "center", fontWeight: 700, color: changeColor(r.change) }}>
-                            {changeText(r.change)}
-                          </td>
-                          <td style={{ padding: "6px 8px", border: "1px solid #d4e5ba" }}>
-                            {r.quotable ? (
-                              <div>
-                                {/* 시작 막대 (연한 회색) → 종결 막대 (영역색) 두 줄 비교 */}
-                                <div style={{ height: 7, background: "#eee", borderRadius: 4, marginBottom: 3, overflow: "hidden" }}>
-                                  <div style={{ width: `${barW(r.firstAvg)}%`, height: "100%", background: "#c9c9c9" }} />
-                                </div>
-                                <div style={{ height: 7, background: "#eee", borderRadius: 4, overflow: "hidden" }}>
-                                  <div style={{ width: `${barW(r.lastAvg)}%`, height: "100%", background: r.lastAvg >= 80 ? "#5a8c1f" : r.lastAvg >= 60 ? "#4a7bb5" : "#d38b1e" }} />
-                                </div>
-                              </div>
-                            ) : (
-                              <span style={{ fontSize: 10, color: "#999" }}>
-                                {r.noRateReason}
-                              </span>
-                            )}
-                          </td>
-                          <td style={{ padding: "6px 8px", border: "1px solid #d4e5ba", textAlign: "center", color: "#3d6014" }}>
-                            {r.mastered} / {r.total}
-                            {r.paused > 0 && <span style={{ color: "#a87108", fontSize: 10 }}> · 중단 {r.paused}</span>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-
-                  <div style={{
-                    marginTop: 10, padding: "8px 12px",
-                    background: "#f5f7f0", border: "1px solid #d4e5ba", borderLeft: "4px solid #5a8c1f",
-                    borderRadius: 6, fontSize: 11.5, color: "#3d6014", lineHeight: 1.7
-                  }}>
-                    {cmp.allNonQuotable ? (
-                      <>전 목표가 회기당 1회 기록(O·X) 방식이라 정반응률 평균은 산출하지 않았습니다. 총 {cmp.totalTasks}개 과제 중 <b>{cmp.totalMastered}개</b>에서 준거를 달성했습니다.</>
-                    ) : (
-                      <>영역 평균 정반응률이 시작 대비 <b>{cmp.avgChange > 0 ? `+${cmp.avgChange}` : cmp.avgChange}%p</b> 변화했으며, 총 {cmp.totalTasks}개 과제 중 <b>{cmp.totalMastered}개</b>에서 준거를 달성했습니다.</>
-                    )}
-                    {cmp.totalPaused > 0 && <> {cmp.totalPaused}개 과제는 학습 경로 조정에 따라 중단·보류하였습니다.</>}
-                  </div>
-                </PrintSection>
-              );
-            })()}
+            {/* ★ [57-15] '시작 vs 종결 비교' 인쇄 섹션 제거.
+                영역별 완료 현황이 마스터 수를, 영역별 균형 분석이 종결 값을 이미 보여줘
+                이 표가 새로 더하는 건 시작 값뿐이었다. 그 내용은 종합 평가 문단이
+                "자기관리 43%에서 63%로 20%p 향상"처럼 이미 글로 서술한다.
+                게다가 O·X 아동은 %를 못 내 섹션이 통째로 사라져 아동마다 목차가 갈렸다.
+                계산 함수 buildStartEndCompare는 남긴다 — 표지 요약·영역별 균형 막대·
+                종합 평가·성장 곡선이 모두 이 계산을 공유하는 게 숫자 정합성의 근거다. */}
 
           </>
           );
@@ -11987,7 +11907,7 @@ cleanedHTML + '\n' +
               <PrintSection num={nextSn()} title="영역별 균형 분석">
                 <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                   ※ 영역별 학습 목표의 최종 달성률을 한눈에 비교한 그래프입니다. (초록: 80%↑ 숙달, 파랑: 60~79% 진전, 주황: 60%↓ 집중 지도)<br />
-                  ※ 최종 달성률은 각 목표의 최근 {COMPARE_EDGE_N}회기 평균이며, '시작 vs 종결 비교'의 종결 값과 같은 기준입니다.
+                  ※ 최종 달성률은 각 목표의 최근 {COMPARE_EDGE_N}회기 평균입니다. (한 회기 결과에 흔들리지 않도록 최근 구간을 평균한 값입니다)
                 </div>
                 <div style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                   <div style={{ fontSize: 11, color: "#666", marginBottom: 6, textAlign: "center", fontWeight: 500 }}>평균 달성률(%)</div>
@@ -16585,7 +16505,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
         </div>
       )}
 
-      {/* ★ [종결보고서 전용] 시작 vs 종결 비교 — 영역별 % 변화 + 마스터 진척 */}
+      {/* ★ [57-15] '시작 vs 종결 비교' 섹션은 만들지 않는다 (위 인쇄 쪽 주석 참고) */}
 
       {/* ★ [종결보고서 전용] 종합 평가 — 자동 생성 + 사용자 수정 */}
       {isFinalMode && (
