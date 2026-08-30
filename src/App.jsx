@@ -1179,7 +1179,10 @@ function buildInterimSummary(selected, info) {
     "공동주의 형성":          { cat: "social", desc: `다른 사람과 같은 대상을 바라보거나 손가락 가리키기에 반응하는 공동주의 행동이 나오고 있습니다` },
     "차례 지키기 습득":       { cat: "social", desc: `놀이나 활동에서 자기 차례를 기다리고 다른 사람의 차례를 인정하는 사회적 규칙을 익히고 있습니다` },
     "눈맞춤 안정":            { cat: "social", desc: `대화나 활동 중 눈맞춤을 주고받는 빈도가 안정적입니다` },
-    "도전 행동 감소":         { cat: "behav",  desc: `좌절·전환 상황에서 나타나던 떼쓰기·자해·공격 행동의 빈도와 강도가 줄고 있습니다` },
+    // ★ [수정] "떼쓰기·자해·공격 행동" 예시 나열 제거.
+    //    행동명을 앱에서 받지 않고 예시를 고정으로 적어, 아동에게 없던 행동(자해·공격)이 보고서에 적혔다.
+    //    실제 행동명은 문제행동 입력란에서 받아 자동 문단에 이미 들어간다.
+    "도전 행동 감소":         { cat: "behav",  desc: `좌절·전환 상황에서 나타나던 문제행동의 빈도와 강도가 줄고 있습니다` },
     "정서 안정":              { cat: "behav",  desc: `감정 변화의 폭이 안정되고, 좌절 상황에서도 적응적으로 대처하려는 모습이 관찰됩니다` },
     "전환 적응 향상":         { cat: "behav",  desc: `활동이나 환경 전환 시 거부 반응이 줄고, 사전 안내가 있으면 비교적 잘 받아들입니다` },
     "지시 따르기 안정":       { cat: "learn",  desc: `다양한 단계의 지시를 이해하고 따라하는 능력이 안정적입니다` },
@@ -1220,9 +1223,10 @@ function buildInterimSummary(selected, info) {
 
   const catParagraphs = cats.map(c => buildCatPara(c, byCategory[c]));
 
-  const closing = `이 발달 양상은 ${fn}${이가(fn)} 본 치료에 참여하면서 학습이 진행되고 있음을 나타내며, 다음 단계로 넘어갈 기반이 잡혀가고 있습니다.`;
+  // ★ [삭제] 마무리 문장 제거 — 칩을 하나만 골라도 무조건 붙던 상투구.
+  //    ("이 발달 양상은 … 다음 단계로 넘어갈 기반이 잡혀가고 있습니다")
 
-  return `${intro}\n\n${catParagraphs.join("\n\n")}\n\n${closing}`;
+  return `${intro}\n\n${catParagraphs.join("\n\n")}`;
 }
 
 function buildInterimGrowth(selected, info) {
@@ -1285,9 +1289,10 @@ function buildInterimGrowth(selected, info) {
 
   const catParagraphs = cats.map(c => buildCatPara(c, byCategory[c]));
 
-  const closing = `이 변화는 ${fn}의 학습 수행 능력이 단계적으로 늘고 있음을 나타내며, 다음 회기에서도 단계적으로 접근하겠습니다.`;
+  // ★ [삭제] 마무리 문장 제거 — 정보 없는 상투구.
+  //    ("이 변화는 … 다음 회기에서도 단계적으로 접근하겠습니다")
 
-  return `${intro}\n\n${catParagraphs.join("\n\n")}\n\n${closing}`;
+  return `${intro}\n\n${catParagraphs.join("\n\n")}`;
 }
 
 function buildInterimHomeCoop(selected, info) {
@@ -1304,17 +1309,20 @@ function buildInterimHomeCoop(selected, info) {
   const 이가 = (w) => has받침(w) ? "이" : "가";
   const 은는 = (w) => has받침(w) ? "은" : "는";
 
+  // ★ [수정] 어투를 자동 문단과 통일 — 칩 문단이 자동 문단 뒤에 붙게 되면서
+  //    한 섹션 안에 "주십시오/권해드립니다"(격식)와 "주세요/하시면 됩니다"(구어)가 섞였다.
+  //    보호자가 읽기 쉬운 쪽(자동 문단 어투)으로 맞춘다.
   const KEY_DESC = {
-    "센터 학습 기술 가정 적용": { cat: "reinforce", desc: `센터에서 학습한 기술을 가정에서도 활용할 수 있도록, 일상 대화 내에 학습 기회를 마련해 주시기를 권해드립니다` },
-    "긍정적 강화 일관성":        { cat: "reinforce", desc: `${fn}${이가(fn)} 적절한 행동을 보일 때 즉각적인 칭찬과 관심을 표현해 주십시오. 가정에서의 일관된 강화가 학습 효과 향상에 기여합니다` },
-    "일상 루틴 안에서 연습":      { cat: "routine",   desc: `식사·놀이·외출 등 일상 활동 내에서 학습 기술을 연습할 기회를 마련해 주십시오` },
-    "사진·시각 단서 활용":        { cat: "routine",   desc: `필요에 따라 시각적 일정표나 사진 단서를 활용하시면 ${fn}${이가(fn)} 다음 활동을 예측하고 적응하는 데 도움이 됩니다` },
-    "주간 진행 상황 공유":        { cat: "communication", desc: `주 1회 정도 가정에서 관찰된 ${fn}의 변화나 어려움을 본 센터와 공유해 주시면 회기 계획에 반영됩니다` },
-    "행동 일지 기록":             { cat: "communication", desc: `특정 도전 행동이나 신규 변화 관찰 시 간단한 메모를 기록해 주시기를 권해드립니다. 작은 기록도 다음 회기 진행에 도움이 됩니다` },
-    "구조화된 환경 제공":         { cat: "environment",   desc: `${fn}의 학습이 안정적으로 진행되도록, 가정에서도 예측 가능한 일과와 명확한 환경 구조를 유지해 주십시오` },
-    "또래 만남 기회 마련":        { cat: "environment",   desc: `놀이터나 또래 활동 등 사회적 상호작용 기회를 정기적으로 마련해 주시면 사회적 기술 발달에 도움이 됩니다` },
-    "도전 행동 시 차분한 대응":   { cat: "challenge", desc: `도전 행동 발생 시 즉각 반응을 자제하시고, 적절한 대체 행동이 나타날 때 즉시 관심과 칭찬을 표현해 주십시오` },
-    "전환 시 사전 예고":          { cat: "challenge", desc: `활동 전환이나 외출 등 환경 변화 시 사전 예고를 제공하시면 ${fn}${이가(fn)} 더 안정적으로 적응할 수 있습니다` }
+    "센터 학습 기술 가정 적용": { cat: "reinforce", desc: `센터에서 배운 기술을 가정에서도 쓸 수 있게, 일상 대화 안에 연습할 기회를 만들어 주세요` },
+    "긍정적 강화 일관성":        { cat: "reinforce", desc: `${fn}${이가(fn)} 적절한 행동을 보일 때 바로 칭찬해 주세요. 가정에서도 같은 기준으로 반응해 주시는 게 중요합니다` },
+    "일상 루틴 안에서 연습":      { cat: "routine",   desc: `식사·놀이·외출 같은 일상 활동 안에서 배운 기술을 연습할 기회를 만들어 주세요` },
+    "사진·시각 단서 활용":        { cat: "routine",   desc: `시각적 일정표나 사진 단서를 쓰시면 ${fn}${이가(fn)} 다음 활동을 예측하고 적응하는 데 도움이 됩니다` },
+    "주간 진행 상황 공유":        { cat: "communication", desc: `주 1회 정도 가정에서 보신 ${fn}의 변화나 어려운 점을 알려 주시면 회기 계획에 반영합니다` },
+    "행동 일지 기록":             { cat: "communication", desc: `문제행동이나 새로운 변화가 보이면 짧게 메모해 주세요. 간단한 기록도 다음 회기에 도움이 됩니다` },
+    "구조화된 환경 제공":         { cat: "environment",   desc: `가정에서도 일과를 예측할 수 있게 유지해 주시면 ${fn}의 학습이 더 안정적으로 진행됩니다` },
+    "또래 만남 기회 마련":        { cat: "environment",   desc: `놀이터나 또래 활동처럼 다른 아이들과 어울릴 기회를 정기적으로 만들어 주세요` },
+    "도전 행동 시 차분한 대응":   { cat: "challenge", desc: `문제행동이 나올 때는 바로 반응하지 마시고, 적절한 행동이 나올 때 바로 칭찬해 주세요` },
+    "전환 시 사전 예고":          { cat: "challenge", desc: `활동을 바꾸거나 외출하기 전에 미리 알려 주시면 ${fn}${이가(fn)} 더 안정적으로 넘어갑니다` }
   };
 
   const CAT_NAMES = {
@@ -1337,7 +1345,7 @@ function buildInterimHomeCoop(selected, info) {
   const cats = CAT_ORDER.filter(c => byCategory[c]);
   if (cats.length === 0) return "";
 
-  const intro = `${fn}${이가(fn)} 본 치료에서 습득하는 기술이 가정에서도 적용·확장될 수 있도록, 다음 협력 방안을 안내드립니다.`;
+  const intro = `${fn}${이가(fn)} 센터에서 배우는 기술을 가정에서도 이어갈 수 있도록, 아래 방법을 안내드립니다.`;
 
   const buildCatPara = (cat, descs) => {
     const heading = `▸ ${CAT_NAMES[cat]}`;
@@ -1350,9 +1358,10 @@ function buildInterimHomeCoop(selected, info) {
 
   const catParagraphs = cats.map(c => buildCatPara(c, byCategory[c]));
 
-  const closing = `위 방안은 ${fn}의 발달 상황과 가정 환경에 맞춰 유연하게 조정해 주시기 바라며, 가정과 센터가 같은 방식으로 가는 것이 학습 효과 유지에 중요합니다.`;
+  // ★ [삭제] 마무리 문장 제거 — 자동 문단의 마지막 줄("가정에서도 같은 방식으로 일관되게…")과
+  //    같은 말이라, 칩 문단이 뒤에 붙으면서 같은 내용이 연달아 두 번 나갔다.
 
-  return `${intro}\n\n${catParagraphs.join("\n\n")}\n\n${closing}`;
+  return `${intro}\n\n${catParagraphs.join("\n\n")}`;
 }
 
 function buildInterimNextGoal(selected, info) {
@@ -1418,9 +1427,9 @@ function buildInterimNextGoal(selected, info) {
 
   const catParagraphs = cats.map(c => buildCatPara(c, byCategory[c]));
 
-  const closing = `위 목표는 ${fn}의 현재 발달 수준과 학습 진행을 고려해서 단계적으로 접근할 예정이며, 회기 진행 상황을 보면서 조정해 가겠습니다.`;
+  // ★ [삭제] 마무리 문장 제거 — 정보 없는 상투구.
 
-  return `${intro}\n\n${catParagraphs.join("\n\n")}\n\n${closing}`;
+  return `${intro}\n\n${catParagraphs.join("\n\n")}`;
 }
 
 function buildInterimStrengths(domAvgs, stos, info) {
