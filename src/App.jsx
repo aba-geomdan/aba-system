@@ -2867,6 +2867,28 @@ function effectiveRecommendations(info, goals) {
   return buildRecommendations(keys, info) || "";
 }
 
+// ★ [57-17] 저장된 문장 안에 지금은 안 쓰는 옛 영역명이 남아 있는지 본다.
+//    55-3 재매핑 이후 '청자'가 '에코익'·'맨드'로, '화자'가 '택트'·'인트라버벌'로 바뀌었는데,
+//    그 전에 손으로 쓴 문장은 옛 이름 그대로다. 자동으로 고치지 않고 알려만 준다
+//    (선생님이 쓴 문장을 앱이 바꿔 쓰면 뜻이 달라질 수 있다).
+function staleDomainNamesIn(text, stos) {
+  if (!text) return [];
+  const reportNames = new Set();
+  const rawNames = new Set();
+  (stos || []).forEach(s => {
+    const r = cleanDomainKey(s.domain || "");
+    if (r) reportNames.add(r);
+    const w = cleanDomainKey(s.rawDomain || s.domain || "");
+    if (w) rawNames.add(w);
+  });
+  const out = [];
+  rawNames.forEach(n => {
+    if (reportNames.has(n)) return;   // 지금도 쓰는 이름
+    if (text.indexOf(n) >= 0) out.push(n);
+  });
+  return out;
+}
+
 function orderDateRange(a, b) {
   const sa = a || "", sb = b || "";
   if (sa && sb && sa > sb) return [sb, sa];
@@ -17917,7 +17939,51 @@ function ReportGeneratorSection({
         </div>
       </div>
 
-      {/* ═ [v19] 영역별 현황 5개 textarea 제거 — 4섹션 칩+✨ 자동생성으로 대체 */}
+      {/* ★ [57-17] v19에서 '영역별 현황 5개 textarea'를 제거하면서 입력 UI만 사라지고
+              저장된 값(reportFields)은 남았다. buildLocalReport는 지금도 이 값을
+              '종합 현황'·'성장과 변화' 맨 앞에 그대로 밀어 넣는다.
+              결과적으로 예전에 쓴 문장이 중간보고서에 계속 인쇄되는데
+              앱 어디에서도 보이지도 지워지지도 않았다.
+              값이 남아 있는 아동에게만 이 패널을 띄운다. 비어 있으면 안 보인다. */}
+      {(Array.isArray(reportFields) && reportFields.some(v => (v || "").trim())) && (
+        <div style={{ padding: 12, background: "#fffaf0", border: "1px solid #e5cf8a", borderRadius: 10, marginBottom: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: "#8a6a12", marginBottom: 4 }}>
+            예전에 입력한 '아동의 현행 상황' 문장이 남아 있습니다
+          </div>
+          <div style={{ fontSize: 10.5, color: "#7a6320", lineHeight: 1.7, marginBottom: 10 }}>
+            이 문장들은 중간보고서의 '종합 현황'·'치료사 종합 소견' 맨 앞에 그대로 들어갑니다
+            (종결보고서에는 나가지 않습니다). 그대로 쓰시려면 두시고, 안 쓰실 거면 비우세요.
+          </div>
+          {CUR_FIELDS.map((label, idx) => {
+            const val = (reportFields[idx] || "");
+            if (!val.trim()) return null;
+            const stale = staleDomainNamesIn(val, stos);
+            return (
+              <div key={idx} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 600, color: "#5a8c1f" }}>{label}</span>
+                  {stale.length > 0 && (
+                    <span style={{ fontSize: 9.5, color: "#a8342a", background: "#fdeceb", border: "1px solid #f0b8b3", borderRadius: 10, padding: "1px 7px" }}>
+                      옛 영역명 {stale.join("·")} — 지금은 다른 이름으로 나갑니다
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setReportField(idx, "")}
+                    style={{ marginLeft: "auto", padding: "2px 8px", fontSize: 9.5, border: "1px solid #ccc", borderRadius: 10, background: "#fff", color: "#666", cursor: "pointer", fontFamily: "inherit" }}>
+                    비우기
+                  </button>
+                </div>
+                <AutoTextarea
+                  value={val}
+                  onChange={e => setReportField(idx, e.target.value)}
+                  rows={2}
+                  style={{ width: "100%", padding: "8px 10px", border: "1px solid #e5cf8a", borderRadius: 6, fontSize: 11.5, fontFamily: "inherit", lineHeight: 1.75, resize: "vertical", boxSizing: "border-box", background: "#fff" }}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* ═ 도전적 행동 · 중재전략 · 강화제 ═ */}
       <div className="responsive-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
