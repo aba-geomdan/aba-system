@@ -1455,10 +1455,14 @@ function buildInterimStrengths(domAvgs, stos, info) {
       desc: `${names} 영역에서 일관되게 높은 수행이 나오고 있어, ${fn}${이가(fn)} 학습한 내용을 안정적으로 활용할 수 있는 기반이 있습니다.`
     });
   } else if (highDomains.length === 1) {
-    const dName = cleanDomainKey(highDomains[0].domain);
+    const d0 = highDomains[0];
+    const dName = cleanDomainKey(d0.domain);
+    // ★ [수정] "안정적인 수행이 나오고 있어 강점 영역으로 확인됩니다"는 근거 없이 결론만 반복하던 문장이었다.
+    //    평균값과 목표 수를 넣어 무엇을 보고 강점이라 했는지 알 수 있게 한다.
+    const cntTxt = d0.count ? `${d0.count}개 목표 평균 ` : "";
     strengths.push({
       title: `${dName} 영역의 안정적 수행`,
-      desc: `${dName} 영역에서 안정적인 수행이 나오고 있어, ${fn}의 강점 영역으로 확인됩니다.`
+      desc: `${dName} 영역은 ${cntTxt}${d0.avg}%로 숙달 기준(80%)에 도달해, ${fn}의 강점 영역으로 확인됩니다.`
     });
   }
 
@@ -1494,10 +1498,21 @@ function buildInterimStrengths(domAvgs, stos, info) {
       desc: `${withGrowth.length}개 단기 목표에서 초기 대비 향상이 보여, ${fn}의 학습 진행이 데이터로 확인됩니다.`
     });
   } else if (withGrowth.length >= 1) {
+    // ★ [버그수정] 개수를 셀 때는 단계(STO) 단위가 맞지만, 수치를 서술할 때는 목표 단위여야 한다.
+    //    단계를 올리면 값이 리셋되므로 task의 첫·마지막 값을 그대로 쓰면 끝난 단계의 수치가 '최근'으로 나간다.
     const exemplar = withGrowth[0];
-    const first = exemplar.points[0].value;
-    const last = exemplar.points[exemplar.points.length - 1].value;
-    // ★ [수정] task명 대신 카드 제목(goalName)을 쓴다 — task명은 길어서 28자에서 잘렸다.
+    const exKey = exemplar.goalName || exemplar.name;
+    const exDates = new Map();
+    activeStos.filter(s => (s.goalName || s.name) === exKey).forEach(s => {
+      (s.points || []).forEach(p => {
+        if (!p || !p.date || typeof p.value !== "number") return;
+        const prev = exDates.get(p.date);
+        if (prev == null || p.value > prev) exDates.set(p.date, p.value);
+      });
+    });
+    const exSeries = [...exDates.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(e => e[1]);
+    const first = exSeries.length > 0 ? exSeries[0] : exemplar.points[0].value;
+    const last = exSeries.length > 0 ? exSeries[exSeries.length - 1] : exemplar.points[exemplar.points.length - 1].value;
     strengths.push({
       title: "구체적 향상 사례",
       desc: `'${shortTaskName(exemplar.goalName || exemplar.name)}'에서 ${first}%에서 ${last}%로 향상돼, ${fn}의 학습 진행이 데이터로 확인됩니다.`
@@ -1546,26 +1561,41 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
   //    "회기당 1회 성공"인 목표를 "초기 0% → 최근 100%"로 적으면 8회 중 3회 성공이 완전한 성공처럼 읽힌다.
   const ratedStos = activeStos.filter(s => !s.isOX);
 
-  const withGrowth = ratedStos
-    .filter(s => {
-      const pts = s.points || [];
-      if (pts.length < 2) return false;
-      const first = pts[0]?.value;
-      const last = pts[pts.length - 1]?.value;
-      return typeof first === "number" && typeof last === "number" && (last - first) >= 25;
-    })
-    .map(s => {
-      const pts = s.points;
-      const first = pts[0].value;
-      const last = pts[pts.length - 1].value;
-      return { name: s.goalName || s.name, first, last, diff: last - first, domain: s.domain };
+  // ★ [버그수정] 향상 집계를 단계(task) 단위 → 목표(goal) 단위로 바꾼다.
+  //    단계를 올리면 값이 0부터 다시 시작하는데, task 단위로 보면 이미 끝난 단계의 상승폭(예: L3 0→100)이
+  //    가장 큰 값으로 뽑혀 "최근 100%"로 나갔다. 정작 카드의 마지막 점은 진행 중인 단계의 값(화폐 L4 40%)이라
+  //    글과 그래프가 어긋났다. 목표 전체의 첫 값 → 가장 최근 값으로 본다.
+  const growthByGoal = (() => {
+    const m = {};
+    ratedStos.forEach(s => {
+      const key = shortTaskName(s.goalName || s.name);
+      if (!m[key]) m[key] = { name: key, domain: s.domain, dates: new Map() };
+      (s.points || []).forEach(p => {
+        if (!p || !p.date || typeof p.value !== "number") return;
+        const prev = m[key].dates.get(p.date);
+        // 같은 날 여러 단계를 기록했으면 그날의 최고값으로 본다
+        if (prev == null || p.value > prev) m[key].dates.set(p.date, p.value);
+      });
+    });
+    return Object.values(m).map(g => {
+      const series = [...g.dates.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(e => e[1]);
+      return { name: g.name, domain: g.domain, series };
+    });
+  })();
+
+  const withGrowth = growthByGoal
+    .filter(g => g.series.length >= 2 && (g.series[g.series.length - 1] - g.series[0]) >= 25)
+    .map(g => {
+      const first = g.series[0];
+      const last = g.series[g.series.length - 1];
+      return { name: g.name, first, last, diff: last - first, domain: g.domain };
     })
     .sort((a, b) => b.diff - a.diff);
 
   if (withGrowth.length > 0) {
     const top = withGrowth[0];
     highlights.push({
-      title: `'${shortTaskName(top.name)}'의 향상`,
+      title: `'${top.name}'의 향상`,
       desc: `초기 ${top.first}%에서 최근 ${top.last}%까지 올라가, ${fn}${이가(fn)} 단계적 연습으로 수행 능력이 늘고 있음이 확인됩니다.`
     });
   }
@@ -14478,9 +14508,11 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   const lgD = Object.entries(growthMap).filter(([, v]) => langK.some(k => (v.domain||"").includes(k))).map(([,v]) => v).sort((a,b) => b.diff - a.diff);
   const lgDone = done.filter(s => match(s, langK));
   const lgProg = prog.filter(s => match(s, langK));
-  // ★ [수정] "…달성하였으며,"로 끝나 문장이 마무리되지 않았다. 완결형으로 바꿈.
-  const langCountText = langStos.length > 0 && langDoneCount > 0
-    ? `언어 영역에서는 ${langStos.length}개 단기 목표 중 ${langDoneCount}개에서 준거를 달성했습니다.`
+  // ★ [수정] "언어 영역"은 영역별 균형 그래프에 없는 이름이라 독자가 어느 영역인지 못 찾았다.
+  //    실제 영역명(청자·언어행동기초 등)을 그대로 쓴다.
+  const langDomNames = [...new Set(langStos.map(s => cleanDomainKey(s.domain)).filter(Boolean))].join("·");
+  const langCountText = langStos.length > 0 && langDoneCount > 0 && langDomNames
+    ? `${langDomNames} 영역에서는 ${langStos.length}개 단기 목표 중 ${langDoneCount}개에서 준거를 달성했습니다.`
     : "";
   if (curFields[0] && curFields[0].trim()) {
     sec1Parts.push(curFields[0]);
@@ -14506,8 +14538,9 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
 
   const scD = Object.entries(growthMap).filter(([, v]) => socK.some(k => (v.domain||"").includes(k))).map(([,v]) => v).sort((a,b) => b.diff - a.diff);
   const scDone = done.filter(s => match(s, socK));
-  const socCountText = socStos.length > 0 && socDoneCount > 0
-    ? `사회성 영역에서는 ${socStos.length}개 단기 목표 중 ${socDoneCount}개에서 준거를 달성했습니다.`
+  const socDomNames = [...new Set(socStos.map(s => cleanDomainKey(s.domain)).filter(Boolean))].join("·");
+  const socCountText = socStos.length > 0 && socDoneCount > 0 && socDomNames
+    ? `${socDomNames} 영역에서는 ${socStos.length}개 단기 목표 중 ${socDoneCount}개에서 준거를 달성했습니다.`
     : "";
   if (curFields[1] && curFields[1].trim()) {
     sec1Parts.push(curFields[1]);
@@ -14537,11 +14570,19 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
       const nm = b.name.trim();
       const fTxt = REPORT_FUNCS.filter(f => (b.funcs || []).includes(f.k)).map(f => f.l).join(", ");
       const iv = b.intervention === "__custom__" ? (b.interventionCustom || "") : (b.intervention || "");
+      // ★ [수정] 기능·중재기법·강도를 짧은 문장 세 개로 끊지 않고 한 문장으로 잇는다.
+      //    마지막 조각만 종결형으로 만들고 앞은 연결형으로 둔다.
+      const seg = [];
+      if (fTxt) seg.push({ mid: `행동 기능은 ${fTxt}${josa으로(fTxt)} 확인되었고`, end: `행동 기능은 ${fTxt}${josa으로(fTxt)} 확인되었습니다` });
+      if (iv && iv.trim()) seg.push({ mid: `${iv.trim()}${josa을를(iv.trim())} 적용하고 있으며`, end: `${iv.trim()}${josa을를(iv.trim())} 적용하고 있습니다` });
+      if (b.severity) seg.push({ mid: `현재 빈도·강도는 '${b.severity}' 수준이며`, end: `현재 빈도·강도는 '${b.severity}' 수준입니다` });
       const bParts = [];
-      if (fTxt) bParts.push(`'${nm}'의 행동 기능은 ${fTxt}${josa으로(fTxt)} 확인되었습니다.`);
-      else bParts.push(`'${nm}' 행동에 대한 중재를 진행하고 있습니다.`);
-      if (iv && iv.trim()) bParts.push(`${iv.trim()}${josa을를(iv.trim())} 적용하고 있습니다.`);
-      if (b.severity) bParts.push(`현재 빈도·강도는 '${b.severity}' 수준입니다.`);
+      if (seg.length > 0) {
+        const body = seg.map((x, i) => (i === seg.length - 1 ? x.end : x.mid)).join(", ");
+        bParts.push(`'${nm}'의 ${body}.`);
+      } else {
+        bParts.push(`'${nm}' 행동에 대한 중재를 진행하고 있습니다.`);
+      }
       if (TREND_TEXT[b.trend]) bParts.push(TREND_TEXT[b.trend]);
       sec1Parts.push(bParts.join(" "));
     });
@@ -14756,40 +14797,64 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   //    다음 기간 계획은 키워드 다중선택으로 이관하고, 여기서는 데이터로 확인되는 사실만 적는다.
 
   // 숙달 도달 영역 → 일반화 시점 (80% 이상, 데이터 근거 있음)
+  // ★ [수정] % 표기 제거 — 같은 숫자가 영역별 균형 그래프와 종합 현황에 이미 두 번 나온다.
+  //    다음 목표는 점수가 아니라 계획을 적는 자리다.
   if (best.domain !== "—" && best.avg >= 80) {
-    sentences.push(`'${cleanDomainKey(best.domain)}' 영역(${best.avg}%)은 숙달 기준에 도달했습니다.`);
+    sentences.push(`'${cleanDomainKey(best.domain)}' 영역은 숙달 기준에 도달했습니다.`);
   }
 
   // ★ [수정] worst.avg !== 0 가드 제거 — 8회 전부 0%처럼 '기록된 0'까지 빠져
   //    정작 가장 지원이 필요한 영역이 다음 목표에서 통째로 누락됐다.
   //    데이터가 없는 영역만 걸러낸다.
+  // ★ [수정] % 표기 제거 — 종합 현황이 40% 미만 영역의 숫자를 일부러 숨기는데
+  //    여기서 '자기관리 0%'로 그대로 찍어 한 보고서 안에서 표기가 어긋났다.
   const lowDomains = (domAvgs || [])
     .filter(d => d.avg < 60 && (d.count == null || d.count > 0))
     .sort((a, b) => a.avg - b.avg)
     .slice(0, 3);
   if (lowDomains.length > 0) {
-    const txt = lowDomains.map(d => `${cleanDomainKey(d.domain)} ${d.avg}%`).join(", ");
-    sentences.push(`다음 보고 기간에 집중 지도가 필요한 영역은 ${txt}입니다.`);
+    const txt = lowDomains.map(d => `'${cleanDomainKey(d.domain)}'`).join(", ");
+    sentences.push(`다음 보고 기간에는 ${txt} 영역을 집중 지도하겠습니다.`);
   }
 
-  // 진행 예정(기록 없는) 목표 — 다음 기간에 실제로 시작할 것
-  const upcoming = stos.filter(s => s.status !== "중단" && (!s.points || s.points.length === 0));
+  // ★ [버그수정] 진행 예정·정체 판정을 task 단위 → 목표(goal) 단위로 바꾼다.
+  //    task 단위로 보면 (1) 이미 진행 중인 목표에 새 단계(L3 등)를 추가했을 뿐인데
+  //    "다음 기간부터 지도를 시작합니다"로 나갔고(예: TEACCH),
+  //    (2) 회기 수도 단계 하나치만 세어 카드에 보이는 칸 수와 어긋났다(받아쓰기 27칸인데 14회기).
+  const goalBuckets = (() => {
+    const m = {};
+    stos.filter(s => s.status !== "중단").forEach(s => {
+      const key = shortTaskName(s.goalName || s.name);
+      if (!m[key]) m[key] = { name: key, dates: new Map(), hasProgress: false };
+      (s.points || []).forEach(p => {
+        if (!p || !p.date) return;
+        const prev = m[key].dates.get(p.date);
+        // 같은 날 여러 단계를 기록했으면 그날의 최고값으로 본다 (O·X 스트립과 같은 규칙)
+        if (prev == null || p.value > prev) m[key].dates.set(p.date, p.value);
+      });
+      if (s.status === "진행중") m[key].hasProgress = true;
+    });
+    return Object.values(m).map(g => ({
+      name: g.name,
+      hasProgress: g.hasProgress,
+      series: [...g.dates.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(e => e[1])
+    }));
+  })();
+
+  // 진행 예정 — 목표 전체에 기록이 하나도 없는 것만
+  const upcoming = goalBuckets.filter(g => g.series.length === 0);
   if (upcoming.length > 0) {
-    const names = upcoming.slice(0, 3).map(s => `'${shortTaskName(s.goalName || s.name)}'`).join(", ");
+    const names = upcoming.slice(0, 3).map(g => `'${g.name}'`).join(", ");
     sentences.push(`${names}${upcoming.length > 3 ? ` 등 ${upcoming.length}개 목표` : ""}는 다음 보고 기간부터 지도를 시작합니다.`);
   }
 
-  // 장기 정체 목표 — 회기가 쌓였는데 준거에 못 닿은 목표를 짚어준다
-  const stalled = stos.filter(s => {
-    if (s.status !== "진행중") return false;
-    const pts = s.points || [];
-    if (pts.length < 8) return false;
-    const recent = pts.slice(-8);
-    return recent.every(p => p.value < 80);
-  }).sort((a, b) => (b.points || []).length - (a.points || []).length);
+  // 장기 정체 — 목표 단위 회기 수(중복 날짜 제거)로 센다
+  const stalled = goalBuckets
+    .filter(g => g.hasProgress && g.series.length >= 8 && g.series.slice(-8).every(v => v < 80))
+    .sort((a, b) => b.series.length - a.series.length);
   if (stalled.length > 0) {
     const s0 = stalled[0];
-    sentences.push(`'${shortTaskName(s0.goalName || s0.name)}'${josa은는(shortTaskName(s0.goalName || s0.name))} ${(s0.points || []).length}회기 동안 준거에 닿지 않아, 과제 난이도와 지도 방법을 다시 점검하겠습니다.`);
+    sentences.push(`'${s0.name}'${josa은는(s0.name)} ${s0.series.length}회기 동안 준거에 닿지 않아, 과제 난이도와 지도 방법을 다시 점검하겠습니다.`);
   }
 
   if (paused.length > 0) {
