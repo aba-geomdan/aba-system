@@ -2569,11 +2569,21 @@ function isValidTaskName(name) {
 // ★ [신규] 보고서 문장에 넣을 과제명 축약.
 //    "'…질문하기 (5번 이상 / 1:30분)'" 처럼 괄호 안 수행 조건이 붙으면 문장이 길어져 읽히지 않는다.
 //    괄호 부분을 떼고, 그래도 길면 잘라낸다.
-function shortTaskName(name, maxLen = 28) {
+// ★ [56-5] 28자는 너무 짧아 "~할 수 있다" 꼴로 적은 목표가 대부분 「…」으로 잘렸다.
+//    (예: '하민이에게 일상적인 질문을 제시했을 때, 질문을 듣고 적절히 답할 수 있다')
+//    ① 한도를 42자로 올리고
+//    ② 자를 때 글자 중간이 아니라 띄어쓰기·쉼표·슬래시 단위로 끊고
+//    ③ 끝의 마침표를 떼서 "…있다.…"처럼 겹치지 않게 한다.
+function shortTaskName(name, maxLen = 42) {
   let t = String(name || "").replace(/\s*[（(][^)）]*[)）]\s*/g, " ").replace(/\s+/g, " ").trim();
   if (!t) t = String(name || "").trim();
-  if (t.length > maxLen) t = t.slice(0, maxLen).trim() + "…";
-  return t;
+  t = t.replace(/[.\s]+$/, "");
+  if (t.length <= maxLen) return t;
+  const head = t.slice(0, maxLen);
+  const cut = Math.max(head.lastIndexOf(" "), head.lastIndexOf(","), head.lastIndexOf("/"));
+  // 너무 앞에서 끊기면(=토막만 남으면) 그냥 한도에서 자른다.
+  const body = (cut >= Math.floor(maxLen * 0.6)) ? head.slice(0, cut) : head;
+  return body.replace(/[,\s/]+$/, "") + "…";
 }
 
 // ★ [48-1] 목표(goal) 병합 키 — id 우선.
