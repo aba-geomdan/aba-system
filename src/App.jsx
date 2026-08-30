@@ -419,6 +419,41 @@ const CUR_FIELDS = ["언어","사회성","문제행동 / 주의 집중","교수 
 
 const IS = { width: "100%", border: "1px solid #e8d0d6", borderRadius: 8, padding: "7px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" };
 const LS = { display: "block", fontSize: 12, color: "#767676", marginBottom: 4 };
+
+// ★ [56-1] 회당 N분 선택 상자.
+//    기존엔 이 컴포넌트를 '회당 N분' 칸을 그리는 즉시실행함수 안에서 정의했다.
+//    그러면 부모가 다시 그려질 때마다 컴포넌트 '종류'가 매번 새로 만들어져,
+//    React가 같은 자리를 갱신하지 않고 통째로 떼었다 다시 붙인다.
+//    → 값을 고르는 순간 select가 새로 마운트되면서 선택이 반영되지 않았다.
+//    모듈 최상위로 올려 한 번만 정의한다.
+//    ★ 값 비교도 문자열로 통일 — 저장된 값이 숫자 50이면 value === "50"이 거짓이 돼
+//      '직접입력' 상태로 잘못 잡히고, 상자가 64px로 좁아진 채 빈칸처럼 보였다.
+function SessionMinSelect({ value, onChange, label }) {
+  const v = (value == null) ? "" : String(value);
+  const isPreset = v === "50" || v === "100";
+  const isCustom = v !== "" && !isPreset;
+  const selectValue = isPreset ? v : (isCustom ? "custom" : "");
+  return (
+    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+      {label && <span style={{ fontSize: 10, color: "#888", whiteSpace: "nowrap", minWidth: 34 }}>{label}</span>}
+      <select
+        style={{ ...IS, padding: "5px 6px", fontSize: 11.5, flex: isCustom ? "0 0 74px" : 1, minWidth: 68 }}
+        value={selectValue}
+        onChange={e => onChange(e.target.value === "custom" ? "" : e.target.value)}>
+        <option value="">선택</option>
+        <option value="50">50분</option>
+        <option value="100">100분</option>
+        <option value="custom">직접입력</option>
+      </select>
+      {isCustom && (
+        <input type="text" inputMode="numeric" placeholder="예: 40"
+          style={{ ...IS, padding: "5px 8px", fontSize: 11.5, flex: 1 }}
+          value={v}
+          onChange={e => onChange(e.target.value)} />
+      )}
+    </div>
+  );
+}
 const CS = { background: "#fff", border: "1px solid #f0e0e5", borderRadius: 14, padding: "1.25rem", marginBottom: "1rem" };
 const BS = { border: `1px solid ${PK}`, borderRadius: 8, padding: "8px 18px", fontSize: 13, background: "transparent", color: PKD, cursor: "pointer", fontFamily: "inherit" };
 const BP = { ...BS, background: PK, color: "#fff" };
@@ -17370,41 +17405,20 @@ function ReportGeneratorSection({
               const list = Array.isArray(info.sMinList) ? info.sMinList : [];
               const perSession = weekN > 1 && (info.sMinPerSession === true || list.some(x => x && x !== list[0]));
 
+              // ★ [56-1] 갱신은 prev 기준으로 — 이전엔 렌더 시점에 잡아 둔 list/info.sMin을 써서
+              //    빠르게 두 번 고르면 앞 선택이 덮였다.
               const setOne = (idx, val) => {
-                const next = Array.from({ length: weekN }, (_, i) => (i === idx ? val : (list[i] || info.sMin || "")));
-                setInfo(prev => ({ ...prev, sMinList: next, sMin: next[0] || "" }));
-              };
-
-              const MinSelect = ({ value, onChange, label }) => {
-                const isPreset = value === "50" || value === "100";
-                const isCustom = value !== "" && !isPreset;
-                const selectValue = isPreset ? value : (isCustom ? "custom" : "");
-                return (
-                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                    {label && <span style={{ fontSize: 10, color: "#888", whiteSpace: "nowrap", minWidth: 34 }}>{label}</span>}
-                    <select
-                      style={{ ...IS, padding: "5px 6px", fontSize: 11.5, flex: isCustom ? "0 0 64px" : 1 }}
-                      value={selectValue}
-                      onChange={e => onChange(e.target.value === "custom" ? "" : e.target.value)}>
-                      <option value="">선택</option>
-                      <option value="50">50분</option>
-                      <option value="100">100분</option>
-                      <option value="custom">직접입력</option>
-                    </select>
-                    {(isCustom || selectValue === "custom") && (
-                      <input type="text" placeholder="예: 40"
-                        style={{ ...IS, padding: "5px 8px", fontSize: 11.5, flex: 1 }}
-                        value={value}
-                        onChange={e => onChange(e.target.value)} />
-                    )}
-                  </div>
-                );
+                setInfo(prev => {
+                  const cur = Array.isArray(prev.sMinList) ? prev.sMinList : [];
+                  const next = Array.from({ length: weekN }, (_, i) => (i === idx ? val : (cur[i] || prev.sMin || "")));
+                  return { ...prev, sMinPerSession: true, sMinList: next, sMin: next[0] || "" };
+                });
               };
 
               if (!perSession) {
                 return (
                   <div>
-                    <MinSelect
+                    <SessionMinSelect
                       value={info.sMin || ""}
                       onChange={val => setInfo(prev => ({ ...prev, sMin: val, sMinList: [] }))}
                     />
@@ -17426,7 +17440,7 @@ function ReportGeneratorSection({
               return (
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {Array.from({ length: weekN }, (_, i) => (
-                    <MinSelect key={i}
+                    <SessionMinSelect key={i}
                       label={`${i + 1}회차`}
                       value={list[i] || ""}
                       onChange={val => setOne(i, val)}
