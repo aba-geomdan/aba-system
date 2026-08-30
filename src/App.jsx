@@ -14327,12 +14327,31 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
 
   const sec1Parts = [];
 
+  // ★ [신규] 종합 현황 맨 앞에 전체 요약 한 문장 + 영역별 정리 한 문장.
+  //    기존엔 언어 영역 하나만 다뤘어 "종합 현황"이라기에 부족했다.
+  //    낮은 구간은 숫자 대신 상태로 적어 "0%" 같은 표기를 피한다.
+  if (total > 0) {
+    sec1Parts.push(`${fn}${jEunNeun(fn)} 본 보고 기간에 ${total}개 단기 목표를 진행했고, 그중 ${done.length}개에서 준거를 달성했습니다.`);
+  }
+  if (Array.isArray(domAvgs) && domAvgs.length > 0) {
+    const sorted = [...domAvgs].sort((a, b) => b.avg - a.avg);
+    const named = sorted.filter(d => d.avg >= 40).map(d => `${cleanDomainKey(d.domain)} ${d.avg}%`);
+    const lowNames = sorted.filter(d => d.avg < 40).map(d => `'${cleanDomainKey(d.domain)}'`);
+    const parts = [];
+    if (named.length > 0) parts.push(`영역별로는 ${named.join(", ")}로 나타났습니다.`);
+    if (lowNames.length > 0) {
+      parts.push(`${lowNames.join(", ")} 영역은 집중 지도가 필요한 영역입니다.`);
+    }
+    if (parts.length > 0) sec1Parts.push(parts.join(" "));
+  }
+
   // ★ [수정] growthMap의 키는 과제 이름이라 영역 판정에 쓰면 안 된다 — v.domain으로 판정.
   const lgD = Object.entries(growthMap).filter(([, v]) => langK.some(k => (v.domain||"").includes(k))).map(([,v]) => v).sort((a,b) => b.diff - a.diff);
   const lgDone = done.filter(s => match(s, langK));
   const lgProg = prog.filter(s => match(s, langK));
+  // ★ [수정] "…달성하였으며,"로 끝나 문장이 마무리되지 않았다. 완결형으로 바꿈.
   const langCountText = langStos.length > 0 && langDoneCount > 0
-    ? ` 언어 영역 ${langStos.length}개 단기 목표 중 ${langDoneCount}개에서 준거를 달성하였으며,`
+    ? `언어 영역에서는 ${langStos.length}개 단기 목표 중 ${langDoneCount}개에서 준거를 달성했습니다.`
     : "";
   if (curFields[0] && curFields[0].trim()) {
     sec1Parts.push(curFields[0]);
@@ -14346,13 +14365,12 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     //    측정한 적 없는 내용이고 영역만 맞으면 무조건 붙던 고정 문구였다.
     //    또한 g는 '과제' 단위라 그 수치를 "영역 점수"로 부를 수 없다 → 과제 수치 표기 자체를 뻐다.
     // ★ [수정] langCountText와 개별 문장이 "N개에서 준거 달성"을 두 번 말하던 중복 제거.
-    const lgEx = lgDone.length > 0 && isValidTaskName(lgDone[0].name) ? ` (예: '${shortTaskName(lgDone[0].name)}')` : "";
-    sec1Parts.push(langCountText
-      ? `${fn}${jEunNeun(fn)}${langCountText.replace(/,$/, "")}${lgEx}.`
-      : `${fn}${jEunNeun(fn)} 언어 영역에서 학습을 진행했습니다.`);
+    // ★ [수정] "~하였으며 (예: '…')." 로 끝나 문장이 마무리되지 않았고,
+    //    긴 과제명이 잘려 들어가 무슨 목표인지도 알 수 없었다. 과제명을 뺀다.
+    if (langCountText) sec1Parts.push(langCountText);
   } else if (lgDone.length > 0) {
     // ★ [수정] "따라말하기 정확도 / 택트·인트라버벌 기초" 꼬리 제거 — 데이터 근거 없는 상투구.
-    sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역에서 ${isValidTaskName(lgDone[0].name) ? `'${shortTaskName(lgDone[0].name)}'의 준거를` : "핵심 목표의 준거를"} 달성했습니다.${langCountText}`);
+    if (langCountText) sec1Parts.push(langCountText);
   } else if (total > 0) {
     sec1Parts.push(`${fn}${jEunNeun(fn)} 지금은 언어 기능의 초기 평가 단계입니다.`);
   }
@@ -14360,17 +14378,17 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   const scD = Object.entries(growthMap).filter(([, v]) => socK.some(k => (v.domain||"").includes(k))).map(([,v]) => v).sort((a,b) => b.diff - a.diff);
   const scDone = done.filter(s => match(s, socK));
   const socCountText = socStos.length > 0 && socDoneCount > 0
-    ? ` 사회성 영역 ${socStos.length}개 단기 목표 중 ${socDoneCount}개를 달성하여,`
+    ? `사회성 영역에서는 ${socStos.length}개 단기 목표 중 ${socDoneCount}개에서 준거를 달성했습니다.`
     : "";
   if (curFields[1] && curFields[1].trim()) {
     sec1Parts.push(curFields[1]);
   } else if (scD.length > 0) {
     const g = scD[0];
     // ★ [수정] 해석형 문구(또래 공동주의·눈맞춤, 일반화 판단) 제거 + 과제 수치를 영역 점수로 부르던 문제 제거.
-    if (socCountText) sec1Parts.push(`사회성 영역에서 학습을 진행했습니다.${socCountText}`.replace(/,$/, "."));
+    if (socCountText) sec1Parts.push(socCountText);
   } else if (scDone.length > 0) {
     // ★ [수정] "자유놀이 차례 지키기·공유 행동" 꼬리 제거 — 측정 근거 없음.
-    sec1Parts.push(`사회성 영역에서 ${isValidTaskName(scDone[0].name) ? `'${shortTaskName(scDone[0].name)}'의 준거를` : "핵심 목표의 준거를"} 달성했습니다.${socCountText}`.replace(/,$/, "."));
+    if (socCountText) sec1Parts.push(socCountText);
   }
 
   if (curFields[2] && curFields[2].trim()) {
@@ -17619,44 +17637,23 @@ function GoalDashboard({ stos }) {
     const OX_GREEN = "#38680F", OX_GREEN_BG = "#E4F0D6";
     const OX_RED = "#9C9A94", OX_RED_BG = "#F1F1F0";
     const fmt = (d) => { const a = (d || "").split("-"); return a.length >= 3 ? `${Number(a[1])}.${Number(a[2])}` : d; };
-    // ★ [신규] 단계(L1, L2…)별로 묶어서 표시.
-    //    기존엔 여러 단계가 한 줄로 이어져, 같은 날 다른 단계를 기록한 경우
-    //    날짜가 중복되어 보이고 어느 단계의 기록인지 구분이 안 됐다.
-    const segs = [];
-    points.forEach((p) => {
-      const key = p.taskListNum != null ? String(p.taskListNum) : "_";
-      const cur = segs[segs.length - 1];
-      if (!cur || cur.key !== key) segs.push({ key, listNum: p.taskListNum, pts: [p] });
-      else cur.pts.push(p);
-    });
-    const multi = segs.length > 1;
     return (
       <div>
-        {segs.map((seg, si) => (
-          <div key={"seg" + si} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: multi && si < segs.length - 1 ? 9 : 0 }}>
-            {multi && (
-              <span style={{
-                flexShrink: 0, marginTop: 5, fontSize: 9.5, fontWeight: 700, color: "#993556",
-                border: "1px solid #E9C4D2", borderRadius: 9, padding: "1px 8px", background: "#fff"
-              }}>{seg.listNum != null ? `L${seg.listNum}` : "—"}</span>
-            )}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-              {seg.pts.map((p, i) => {
-                const ok = p.value >= 100;
-                return (
-                  <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-                    <div style={{
-                      width: 28, height: 28, borderRadius: 6, display: "flex", alignItems: "center",
-                      justifyContent: "center", fontSize: 13, fontWeight: 700,
-                      background: ok ? OX_GREEN_BG : OX_RED_BG, color: ok ? OX_GREEN : OX_RED
-                    }}>{ok ? "O" : "X"}</div>
-                    <span style={{ fontSize: 8.5, color: "#aaa" }}>{fmt(p.date)}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+          {points.map((p, i) => {
+            const ok = p.value >= 100;
+            return (
+              <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                <div style={{
+                  width: 28, height: 28, borderRadius: 6, display: "flex", alignItems: "center",
+                  justifyContent: "center", fontSize: 13, fontWeight: 700,
+                  background: ok ? OX_GREEN_BG : OX_RED_BG, color: ok ? OX_GREEN : OX_RED
+                }}>{ok ? "O" : "X"}</div>
+                <span style={{ fontSize: 8.5, color: "#aaa" }}>{fmt(p.date)}</span>
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   };
@@ -17832,10 +17829,13 @@ function GoalDashboard({ stos }) {
               {domains.map((dom, di) => (
                 <div key={di} className="dashboard-domain" style={{ marginBottom: 10 }}>
                   {currGroups[curr][dom].map((s, si) => {
-                    const status = s.status || "진행중";
-                  const statusColor = SC_DASH[status] || "#888";
+                    const points = s.points || [];
+                  // ★ [신규] 기록이 한 건도 없으면 '진행중'이 아니라 '진행 예정'.
+                  //    목표만 설정되고 아직 지도가 시작되지 않은 상태를 정확히 표기한다.
+                  const noData = points.length === 0 && (s.status || "진행중") === "진행중";
+                  const status = noData ? "진행 예정" : (s.status || "진행중");
+                  const statusColor = noData ? "#8A857D" : (SC_DASH[status] || "#888");
                   const isCompleted = status === "완료";
-                  const points = s.points || [];
                   let growthInfo = null;
                   if (points.length >= 1) {
                     const first = points[0].value;
@@ -17916,6 +17916,13 @@ function GoalDashboard({ stos }) {
                           {s.isOX
                             ? <OXStrip points={points} />
                             : <BigChart points={points} color={meta.chartLine} listBoundaries={s.listBoundaries} pdf={true} />}
+                        </div>
+                      )}
+                      {/* ★ [신규] 기록이 없는 목표 — 빈 카드로 두면 오류처럼 보이므로 사유를 밝힌다 */}
+                      {noData && (
+                        <div style={{ background: "#FAFAFA", borderRadius: 10, padding: "18px 12px", marginBottom: 10, textAlign: "center" }}>
+                          <div style={{ fontSize: 11.5, color: "#7A736A", fontWeight: 600 }}>본 보고 기간에 기록된 데이터가 없습니다</div>
+                          <div style={{ fontSize: 10, color: "#a8a39c", marginTop: 5 }}>다음 보고 기간부터 지도가 시작될 예정입니다</div>
                         </div>
                       )}
                       {/* ★ [제거] 시작/현재 % 박스 — 차트에 % 축·날짜가 들어가 중복이므로 삭제 */}
