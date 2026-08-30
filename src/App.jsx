@@ -7295,9 +7295,22 @@ export default function App() {
                           //    등록순은 그대로 유지하고 종결만 분리한다.
                           const shown = teacher.children
                             .filter(child => dashFilter === "all" ? true : dashFilter === "active" ? !child.info?.finalEndDate : !!child.info?.finalEndDate);
-                          const activeKids = shown.filter(c => !c.info?.finalEndDate);
-                          const endedKids = shown.filter(c => !!c.info?.finalEndDate);
-                          const endedOpen = !!endedOpenMap[teacher.name];
+                          // ★ [신규] 수업 시작일(info.startDate) 오름차순 — 먼저 등록한 아동이 위로.
+                          //    날짜가 비어 있으면 맨 아래로 보낸다.
+                          const byStart = (a, b) => {
+                            const sa = a.info?.startDate || "";
+                            const sb = b.info?.startDate || "";
+                            if (!sa && !sb) return 0;
+                            if (!sa) return 1;
+                            if (!sb) return -1;
+                            return sa.localeCompare(sb);
+                          };
+                          const activeKids = shown.filter(c => !c.info?.finalEndDate).sort(byStart);
+                          const endedKids = shown.filter(c => !!c.info?.finalEndDate).sort(byStart);
+                          // ★ 필터가 '종결'일 때는 접기 없이 바로 보여준다.
+                          //    (그렇지 않으면 목록이 통째로 비고 버튼만 남는다)
+                          const endedCollapsible = dashFilter !== "terminated";
+                          const endedOpen = !endedCollapsible || !!endedOpenMap[teacher.name];
                           const ordered = endedOpen ? [...activeKids, ...endedKids] : activeKids;
                           return (<>
                         {ordered
@@ -7400,7 +7413,7 @@ export default function App() {
                             </div>
                           );
                         })}
-                        {endedKids.length > 0 && (
+                        {endedCollapsible && endedKids.length > 0 && (
                           <button
                             onClick={() => setEndedOpenMap(m => ({ ...m, [teacher.name]: !m[teacher.name] }))}
                             style={{
