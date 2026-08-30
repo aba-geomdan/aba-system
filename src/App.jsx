@@ -1175,10 +1175,8 @@ function buildInterimSummary(selected, info) {
     "수용 언어 안정":         { cat: "lang",   desc: `간단한 지시나 일상 대화 내용을 이해하고 적절히 반응하는 능력이 안정적입니다` },
     "발성 다양화":            { cat: "lang",   desc: `단어 수준의 발성에서 짧은 구·문장 수준으로 발화 길이와 다양성이 늘고 있습니다` },
     "비구어 → 구어 전환":     { cat: "lang",   desc: `이전에 행동이나 몸짓으로만 표현하던 의사가 점차 음성 언어로 바뀌고 있습니다` },
-    "또래 관심 증가":         { cat: "social", desc: `또래의 활동에 관심을 보이고 가까이 가려는 시도가 늘고 있습니다` },
-    "공동주의 형성":          { cat: "social", desc: `다른 사람과 같은 대상을 바라보거나 손가락 가리키기에 반응하는 공동주의 행동이 나오고 있습니다` },
-    "차례 지키기 습득":       { cat: "social", desc: `놀이나 활동에서 자기 차례를 기다리고 다른 사람의 차례를 인정하는 사회적 규칙을 익히고 있습니다` },
-    "눈맞춤 안정":            { cat: "social", desc: `대화나 활동 중 눈맞춤을 주고받는 빈도가 안정적입니다` },
+    // ★ [삭제] 사회성 4개(또래 관심 증가·공동주의 형성·차례 지키기 습득·눈맞춤 안정) 제거 —
+    //    개별 보고서 전용 앱이라 또래·공동주의를 측정하는 목표 자체가 없다.
     // ★ [수정] "떼쓰기·자해·공격 행동" 예시 나열 제거.
     //    행동명을 앱에서 받지 않고 예시를 고정으로 적어, 아동에게 없던 행동(자해·공격)이 보고서에 적혔다.
     //    실제 행동명은 도전적 행동 입력란에서 받아 자동 문단에 이미 들어간다.
@@ -1193,11 +1191,10 @@ function buildInterimSummary(selected, info) {
 
   const CAT_NAMES = {
     lang:   "의사소통",
-    social: "사회적 상호작용",
     behav:  "행동 조절",
     learn:  "학습 참여"
   };
-  const CAT_ORDER = ["lang", "social", "behav", "learn"];
+  const CAT_ORDER = ["lang", "behav", "learn"];
 
   const byCategory = {};
   selected.forEach(label => {
@@ -1253,8 +1250,8 @@ function buildInterimGrowth(selected, info) {
     "도전 영역 진전":            { cat: "challenge",   desc: `초기에 어려워했던 영역에서도 진전이 보여, 다양한 학습 상황에서 적응력이 늘고 있습니다` },
     "변화·전환 적응 향상":       { cat: "challenge",   desc: `이전에 어려워했던 환경 변화나 일과 전환 상황에 적응력이 늘었고, 일상의 다양한 상황에서 더 안정적입니다` },
     "정서·행동 자기조절 향상":  { cat: "challenge",   desc: `좌절이나 불안 상황에서 스스로 감정과 행동을 조절하는 능력이 늘었고, 회복 시간이 짧아지고 있습니다` },
-    "가정·기관 연계 강화":       { cat: "context",     desc: `센터에서 익힌 기술이 가정과 기관 등 다양한 환경에서도 나오기 시작했고, 일반화가 잡혀가고 있습니다` },
-    "또래 관계 발전":            { cat: "context",     desc: `또래와의 상호작용 빈도와 질이 늘었고, 사회적 환경에서의 적응력이 자리잡고 있습니다` }
+    "가정·기관 연계 강화":       { cat: "context",     desc: `센터에서 익힌 기술이 가정과 기관 등 다양한 환경에서도 나오기 시작했고, 일반화가 잡혀가고 있습니다` }
+    // ★ [삭제] "또래 관계 발전" 제거 — 개별 보고서에는 또래 상호작용 데이터가 없다.
   };
 
   const CAT_NAMES = {
@@ -1381,27 +1378,25 @@ function buildInterimNextGoal(selected, info) {
   const KEY_DESC = {
     "표현 언어 확장":      { cat: "lang",    desc: `현재 형성된 표현 언어 기반을 바탕으로, 단어에서 짧은 구·문장 수준으로 발화 길이와 다양성을 늘려가는 것을 다음 목표로 합니다` },
     "수용 언어 정교화":    { cat: "lang",    desc: `복잡한 지시 따르기, 다단계 요구 이해 등 수용 언어의 정교한 발달을 다음 단계로 진행합니다` },
-    "사회적 상호작용 확장": { cat: "social",  desc: `또래·소그룹 환경에서의 상호작용 빈도와 질을 늘리는 것을 다음 목표로 합니다` },
-    "공동 활동 참여 향상":  { cat: "social",  desc: `또래나 가족과 함께하는 협동 활동·놀이에 능동적으로 참여하는 능력을 단계적으로 확장합니다` },
+    // ★ [삭제] 사회성 2개(사회적 상호작용 확장·공동 활동 참여 향상) 제거 — 개별 보고서에는 근거 데이터가 없다.
     "다양한 환경 일반화":   { cat: "general", desc: `센터에서 익힌 기술이 가정·기관·외부 환경 등 다양한 맥락에서도 안정적으로 나오도록 일반화 목표를 잡습니다` },
     "다른 사람과의 일반화": { cat: "general", desc: `학습한 기술을 치료사 외의 다른 사람(보호자, 또래, 교사 등)과의 상호작용에서도 나오도록 일반화 단계로 확장합니다` },
     "자발적 시도 강화":     { cat: "autonomy", desc: `촉구에 의존하지 않고 스스로 시도하는 자발적 행동의 빈도와 다양성을 늘려가는 것을 다음 목표로 합니다` },
     "선택·결정 기회 확대":   { cat: "autonomy", desc: `${fn}${이가(fn)} 스스로 선택하고 결정할 기회를 늘려, 자기결정 능력의 기초를 만듭니다` },
     "도전 행동 안정화":     { cat: "challenge", desc: `현재 진행 중인 도전적 행동 중재의 결과를 유지하고 잔존 빈도를 더 줄이는 것을 다음 목표로 합니다` },
     "전환·변화 적응 강화":  { cat: "challenge", desc: `다양한 환경·일과 변화 상황에 대한 적응력을 더 강화해서, 일상의 여러 상황에서 안정적으로 기능할 수 있도록 지원합니다` },
-    "학습 준비 기술 강화":  { cat: "school",  desc: `유치원·학교 환경 적응을 위한 학습 준비 기술(착석, 집단 지시 따르기, 차례 기다리기 등)을 단계적으로 강화합니다` },
-    "또래 환경 적응":       { cat: "school",  desc: `또래 집단 환경에서의 적응과 참여 능력 향상을 다음 단계의 목표로 잡습니다` }
+    "학습 준비 기술 강화":  { cat: "school",  desc: `유치원·학교 환경 적응을 위한 학습 준비 기술(착석, 집단 지시 따르기, 차례 기다리기 등)을 단계적으로 강화합니다` }
+    // ★ [삭제] "또래 환경 적응" 제거 — 같은 이유.
   };
 
   const CAT_NAMES = {
     lang:      "의사소통 영역",
-    social:    "사회적 상호작용 영역",
     general:   "기술의 일반화",
     autonomy:  "자발성과 자기결정",
     challenge: "도전 영역의 안정화",
     school:    "학교·기관 환경 준비"
   };
-  const CAT_ORDER = ["lang", "social", "challenge", "general", "autonomy", "school"];
+  const CAT_ORDER = ["lang", "challenge", "general", "autonomy", "school"];
 
   const byCategory = {};
   selected.forEach(label => {
@@ -13582,9 +13577,6 @@ function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask
             </button>
             {showMastered && (
               <div style={{ marginTop: 5, padding: "6px 8px", background: "#fbfdf8", border: "1px solid #e0ebd2", borderRadius: 6 }}>
-                <div style={{ fontSize: 9.5, color: "#8a9a78", marginBottom: 5 }}>
-                  📌을 켜면 위 진행 과제 아래에 이름만 한 줄로 남습니다 (기록칸 없음).
-                </div>
                 {list2.map(t => (
                   <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "2px 0" }}>
                     <button
@@ -17428,70 +17420,47 @@ function ReportGeneratorSection({
               let placeholderText = "";
 
               if (key === "종합 현황") {
+                // ★ [수정] 칩을 그룹으로 묶어 소제목을 붙인다 — 15개가 한 줄로 뒤섞여 있어
+                //    아동 발달 수준에 안 맞는 칩(초기 단계용)이 구분되지 않았다.
+                // ★ [삭제] 사회성 칩 4개 제거 — 이 앱은 개별 보고서 전용이라 또래·공동주의 데이터가 없다.
                 CHIPS_DATA = [
-                  ["표현 언어 향상", "lang"],
-                  ["수용 언어 안정", "lang"],
-                  ["발성 다양화", "lang"],
-                  ["비구어 → 구어 전환", "lang"],
-                  ["또래 관심 증가", "social"],
-                  ["공동주의 형성", "social"],
-                  ["차례 지키기 습득", "social"],
-                  ["눈맞춤 안정", "social"],
-                  ["도전 행동 감소", "behav"],
-                  ["정서 안정", "behav"],
-                  ["전환 적응 향상", "behav"],
-                  ["지시 따르기 안정", "learn"],
-                  ["학습 참여 시간 증가", "learn"],
-                  ["선호 활동 다양화", "learn"],
-                  ["촉구 단계 감소", "learn"]
+                  { g: "의사소통", items: [["표현 언어 향상", "lang"], ["수용 언어 안정", "lang"]] },
+                  { g: "의사소통 · 초기 단계", items: [["발성 다양화", "lang"], ["비구어 → 구어 전환", "lang"]] },
+                  { g: "행동 조절", items: [["도전 행동 감소", "behav"], ["정서 안정", "behav"], ["전환 적응 향상", "behav"]] },
+                  { g: "학습 참여", items: [["지시 따르기 안정", "learn"], ["학습 참여 시간 증가", "learn"], ["선호 활동 다양화", "learn"], ["촉구 단계 감소", "learn"]] }
                 ];
                 buildFunc = buildInterimSummary;
                 placeholderText = "키워드 선택 후 [✨ 자동 생성]을 누르면 자연스러운 단락이 들어갑니다.";
               } else if (key === "이번 기간의 성장과 변화") {
+                // ★ [삭제] "또래 관계 발전" 제거 — 개별 보고서에는 또래 상호작용 데이터가 없다.
                 CHIPS_DATA = [
-                  ["초기 대비 큰 폭 향상", "achievement"],
-                  ["마일스톤 달성", "achievement"],
-                  ["꾸준한 점진적 성장", "achievement"],
-                  ["강점 영역 확장", "strength"],
-                  ["새로운 관심사 등장", "strength"],
-                  ["자발적 시도 증가", "strength"],
-                  ["도전 영역 진전", "challenge"],
-                  ["변화·전환 적응 향상", "challenge"],
-                  ["정서·행동 자기조절 향상", "challenge"],
-                  ["가정·기관 연계 강화", "context"],
-                  ["또래 관계 발전", "context"]
+                  { g: "주요 성취", items: [["초기 대비 큰 폭 향상", "achievement"], ["마일스톤 달성", "achievement"], ["꾸준한 점진적 성장", "achievement"]] },
+                  { g: "강점의 발전", items: [["강점 영역 확장", "strength"], ["새로운 관심사 등장", "strength"], ["자발적 시도 증가", "strength"]] },
+                  { g: "도전 영역의 진전", items: [["도전 영역 진전", "challenge"], ["변화·전환 적응 향상", "challenge"], ["정서·행동 자기조절 향상", "challenge"]] },
+                  { g: "맥락 확장과 일반화", items: [["가정·기관 연계 강화", "context"]] }
                 ];
                 buildFunc = buildInterimGrowth;
                 placeholderText = "변화 양상을 선택하고 [✨ 자동 생성]을 누르세요.";
               } else if (key === "가정에서 함께 하기") {
+                // ※ "또래 만남 기회 마련"은 남긴다 — 센터가 측정하는 항목이 아니라
+                //    가정에서 하실 일을 권하는 내용이라 성격이 다르다.
                 CHIPS_DATA = [
-                  ["센터 학습 기술 가정 적용", "reinforce"],
-                  ["긍정적 강화 일관성", "reinforce"],
-                  ["일상 루틴 안에서 연습", "routine"],
-                  ["사진·시각 단서 활용", "routine"],
-                  ["주간 진행 상황 공유", "communication"],
-                  ["행동 일지 기록", "communication"],
-                  ["구조화된 환경 제공", "environment"],
-                  ["또래 만남 기회 마련", "environment"],
-                  ["도전 행동 시 차분한 대응", "challenge"],
-                  ["전환 시 사전 예고", "challenge"]
+                  { g: "일관된 강화와 동기", items: [["센터 학습 기술 가정 적용", "reinforce"], ["긍정적 강화 일관성", "reinforce"]] },
+                  { g: "일상 루틴 안에서의 학습", items: [["일상 루틴 안에서 연습", "routine"], ["사진·시각 단서 활용", "routine"]] },
+                  { g: "센터-가정 소통", items: [["주간 진행 상황 공유", "communication"], ["행동 일지 기록", "communication"]] },
+                  { g: "환경 구조화와 기회", items: [["구조화된 환경 제공", "environment"], ["또래 만남 기회 마련", "environment"]] },
+                  { g: "도전적 행동 대응", items: [["도전 행동 시 차분한 대응", "challenge"], ["전환 시 사전 예고", "challenge"]] }
                 ];
                 buildFunc = buildInterimHomeCoop;
                 placeholderText = "가정에서 함께 진행할 협력 방안 키워드를 선택하세요.";
               } else if (key === "다음 목표") {
+                // ★ [삭제] 사회성 칩 3개 제거 (사회적 상호작용 확장 / 공동 활동 참여 향상 / 또래 환경 적응)
                 CHIPS_DATA = [
-                  ["표현 언어 확장", "lang"],
-                  ["수용 언어 정교화", "lang"],
-                  ["사회적 상호작용 확장", "social"],
-                  ["공동 활동 참여 향상", "social"],
-                  ["다양한 환경 일반화", "general"],
-                  ["다른 사람과의 일반화", "general"],
-                  ["자발적 시도 강화", "autonomy"],
-                  ["선택·결정 기회 확대", "autonomy"],
-                  ["도전 행동 안정화", "challenge"],
-                  ["전환·변화 적응 강화", "challenge"],
-                  ["학습 준비 기술 강화", "school"],
-                  ["또래 환경 적응", "school"]
+                  { g: "의사소통", items: [["표현 언어 확장", "lang"], ["수용 언어 정교화", "lang"]] },
+                  { g: "기술의 일반화", items: [["다양한 환경 일반화", "general"], ["다른 사람과의 일반화", "general"]] },
+                  { g: "자발성과 자기결정", items: [["자발적 시도 강화", "autonomy"], ["선택·결정 기회 확대", "autonomy"]] },
+                  { g: "도전 영역의 안정화", items: [["도전 행동 안정화", "challenge"], ["전환·변화 적응 강화", "challenge"]] },
+                  { g: "학교·기관 환경 준비", items: [["학습 준비 기술 강화", "school"]] }
                 ];
                 buildFunc = buildInterimNextGoal;
                 placeholderText = "다음 회기 목표 방향을 선택하세요.";
@@ -17543,26 +17512,33 @@ function ReportGeneratorSection({
                   <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 6 }}>
                     {displayLabel(key)} <span style={{ fontSize: 10, fontWeight: 400, color: "#888" }}>(키워드 선택 후 [✨ 자동 생성] — 위 데이터 문단 뒤에 덧붙습니다)</span>
                   </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
-                    {CHIPS_DATA.map(([label], i) => {
-                      const isSel = selectedSet.has(label);
-                      // ★ [표기] 저장 식별자는 그대로, 화면 표기만 '도전적 행동'으로 통일
-                      const shownLabel = label.replace(/도전 행동/g, "도전적 행동");
-                      return (
-                        <button key={i}
-                          onClick={() => toggle(label)}
-                          style={{
-                            padding: "3px 9px", fontSize: 10,
-                            border: isSel ? `1px solid ${PKD}` : `1px solid ${PK}`,
-                            borderRadius: 12,
-                            background: isSel ? PKD : PKL,
-                            color: isSel ? "#fff" : PKD,
-                            cursor: "pointer", fontFamily: "inherit", fontWeight: 500
-                          }}>
-                          {isSel ? "✓" : "+"} {shownLabel}
-                        </button>
-                      );
-                    })}
+                  <div style={{ marginBottom: 8 }}>
+                    {CHIPS_DATA.map((grp, gi) => (
+                      <div key={gi} style={{ marginBottom: 6 }}>
+                        <div style={{ fontSize: 9.5, color: "#999", fontWeight: 600, marginBottom: 3, paddingLeft: 1 }}>{grp.g}</div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                          {grp.items.map(([label], i) => {
+                            const isSel = selectedSet.has(label);
+                            // ★ [표기] 저장 식별자는 그대로, 화면 표기만 '도전적 행동'으로 통일
+                            const shownLabel = label.replace(/도전 행동/g, "도전적 행동");
+                            return (
+                              <button key={i}
+                                onClick={() => toggle(label)}
+                                style={{
+                                  padding: "3px 9px", fontSize: 10,
+                                  border: isSel ? `1px solid ${PKD}` : `1px solid ${PK}`,
+                                  borderRadius: 12,
+                                  background: isSel ? PKD : PKL,
+                                  color: isSel ? "#fff" : PKD,
+                                  cursor: "pointer", fontFamily: "inherit", fontWeight: 500
+                                }}>
+                                {isSel ? "✓" : "+"} {shownLabel}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                   <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
                     <button
