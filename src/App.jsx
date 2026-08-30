@@ -17342,7 +17342,11 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
 
       {/* ═ W-35: 보관된 이전 보고서 (IEP 보관본 제외 — IEP 보관함은 별도) ═ */}
       <ArchiveListCard
-        list={(visibleArchiveList || []).filter(a => !a.isIep)}
+        /* ★ [58-4] 중간 보관본은 중간 탭에서만, 종결 보관본은 종결 탭에서만 보인다.
+           기존엔 두 모드가 같은 목록을 통째로 보여줘, 지금 보고서에 영향을 주지 않는
+           보관본까지 같이 떠서 어느 게 기준인지 구분이 안 됐다. */
+        list={(visibleArchiveList || []).filter(a => !a.isIep && (isFinalMode ? a.isFinal : !a.isFinal))}
+        isFinalMode={isFinalMode}
         onSave={onArchiveSave}
         onDelete={onArchiveDelete}
         onView={onArchiveView}
@@ -17369,13 +17373,23 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
   );
 }
 
-function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCutoffDisabled }) {
+// ★ [58-4] 보관본 표시 제목 — 저장된 title은 보관 시점에 굳어서
+//    중간은 "2026.05~2026.08 - 1차", 종결은 "🎓 종결보고서 (…)"로 형식이 달랐다.
+//    옛 보관본까지 같은 형식으로 보이도록, 저장값 대신 조각으로 매번 만든다.
+function archiveDisplayTitle(item) {
+  if (!item) return "";
+  const period = item.period || "";
+  if (!period) return item.title || "보고서";
+  if (item.isFinal) return `종결보고서 (${period})`;
+  return `중간보고서 (${period})` + (item.order ? ` · ${item.order}차` : "");
+}
+
+function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCutoffDisabled, isFinalMode }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [confirmSave, setConfirmSave] = useState(false);  // ★ 보관 확인 모드
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState("all");  // "all" / "interim" / "final" / "auto" / "manual"
   const [sortMode, setSortMode] = useState("recent");  // "recent" / "old" / "order"
   // ★ [버그수정] 이 상태를 ReportTab에 선언해 두는 바람에 ArchiveListCard 렌더링이 터졌다
   //    (다른 컴포넌트의 변수를 참조 → 보관함을 펼치면 화면이 비었음). 쓰는 곳으로 옮긴다.
@@ -17450,10 +17464,6 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
           ) : (() => {
             const q = search.trim().toLowerCase();
             let filtered = (list || []).filter(item => {
-              if (filter === "interim" && item.isFinal) return false;
-              if (filter === "final" && !item.isFinal) return false;
-              if (filter === "auto" && !item.auto) return false;
-              if (filter === "manual" && item.auto) return false;
               if (q) {
                 const titleMatch = (item.title || "").toLowerCase().includes(q);
                 const periodMatch = (item.period || "").toLowerCase().includes(q);
@@ -17486,24 +17496,16 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
                         boxSizing: "border-box"
                       }}
                     />
-                    <select value={filter} onChange={e => setFilter(e.target.value)}
-                      style={{ padding: "5px 8px", border: "1px solid #e8d0d6", borderRadius: 6, fontSize: 10.5, fontFamily: "inherit", outline: "none", background: "#fff", cursor: "pointer" }}>
-                      <option value="all">전체</option>
-                      <option value="interim">중간만</option>
-                      <option value="final">종결만</option>
-                      <option value="auto">자동만</option>
-                      <option value="manual">수동만</option>
-                    </select>
                     <select value={sortMode} onChange={e => setSortMode(e.target.value)}
                       style={{ padding: "5px 8px", border: "1px solid #e8d0d6", borderRadius: 6, fontSize: 10.5, fontFamily: "inherit", outline: "none", background: "#fff", cursor: "pointer" }}>
                       <option value="recent">최신순</option>
                       <option value="old">오래된순</option>
                       <option value="order">차수순</option>
                     </select>
-                    {(search || filter !== "all" || sortMode !== "recent") && (
+                    {(search || sortMode !== "recent") && (
                       <button
-                        onClick={() => { setSearch(""); setFilter("all"); setSortMode("recent"); }}
-                        title="검색·필터·정렬 초기화"
+                        onClick={() => { setSearch(""); setSortMode("recent"); }}
+                        title="검색·정렬 초기화"
                         style={{ padding: "5px 10px", border: "1px solid #ccc", borderRadius: 6, fontSize: 10, fontFamily: "inherit", background: "#fff", cursor: "pointer", color: "#666" }}>
                         ↺ 초기화
                       </button>
@@ -17530,7 +17532,7 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
                     <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: item.isFinal ? "#fdf6ed" : "#fdf8f9", border: `1px solid ${item.isFinal ? "#f0e0c0" : "#f0e0e5"}`, borderRadius: 8, marginBottom: 6 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: "#333", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                          <span>{item.title || `${item.period} - ${item.order}차`}</span>
+                          <span>{archiveDisplayTitle(item)}</span>
                           {item.isFinal && <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "#fef3e0", color: "#a06010", fontWeight: 600 }}>🎓 종결</span>}
                           {item.auto && <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "#e6f1fb", color: "#185fa5", fontWeight: 500 }}>자동</span>}
                         </div>
@@ -17544,7 +17546,9 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
                         </>
                       ) : isLatest ? (
                         <>
-                          {setCutoffDisabled && (
+                          {/* ★ [58-4] 종결보고서는 전체 기간을 다뤄 컷오프를 걸지 않는다.
+                              눌러도 그래프가 안 바뀌는 버튼이라 종결 모드에선 감춘다. */}
+                          {!isFinalMode && setCutoffDisabled && (
                             cutoffDisabled ? (
                               <button onClick={() => setCutoffDisabled(false)} style={{ ...BS, fontSize: 10, padding: "4px 10px", color: "#1d4d80", borderColor: "#9bc4e8", background: "#eff5fc", fontWeight: 600 }} title="컷오프를 다시 적용해 그래프를 보관 이후 데이터만 표시">🔒 컷오프 적용</button>
                             ) : (
