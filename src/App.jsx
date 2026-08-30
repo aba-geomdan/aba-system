@@ -2155,21 +2155,65 @@ function buildEndReason(selected, info) {
     .replace(/하고$/, "했습니다")
     .replace(/고$/, "습니다");
 
+  // ★ [58-2] 마지막 사유 뒤 마침표. closeClause는 연결어미를 종결어미로 바꾸기만 해서
+  //    "…도달하였습니다 이러한 진행에 따라…"처럼 두 문장이 마침표 없이 붙어 나갔다.
+  //    (하민·유찬 종결보고서 '종결 사유' 칸에 그대로 인쇄됨)
+  const endStop = (s) => {
+    const t = String(s || "").trim();
+    if (!t) return t;
+    return /[.!?…]$/.test(t) ? t : t + ".";
+  };
+
   const intro = `${fn}${은는(fn)} 본 치료의 종결에 이르기까지 다음과 같은 진행 사항이 확인되었습니다.`;
 
   let body;
   if (descs.length === 1) {
-    body = `${closeClause(descs[0])} 이러한 진행에 따라 본 치료를 종결하게 되었습니다.`;
+    body = `${endStop(closeClause(descs[0]))} 이러한 진행에 따라 본 치료를 종결하게 되었습니다.`;
   } else if (descs.length === 2) {
-    body = `${descs[0]}, ${closeClause(descs[1])} 이러한 진행에 따라 본 치료를 종결하게 되었습니다.`;
+    body = `${descs[0]}, ${endStop(closeClause(descs[1]))} 이러한 진행에 따라 본 치료를 종결하게 되었습니다.`;
   } else {
     const front = descs.slice(0, -1).join(", ");
-    body = `${front}, 그리고 ${closeClause(descs[descs.length - 1])} 이러한 진행에 따라 본 치료를 종결하게 되었습니다.`;
+    body = `${front}, 그리고 ${endStop(closeClause(descs[descs.length - 1]))} 이러한 진행에 따라 본 치료를 종결하게 되었습니다.`;
   }
 
   const closing = `본 종결은 ${fn}의 다음 발달 단계로의 이행 시점에 해당하며, 본 치료 기간 동안의 협력에 감사드립니다.`;
 
   return `${intro} ${body} ${closing}`;
+}
+
+// ★ [58-3] 앱 도입 전 치료 구간 — 치료기간과 데이터 분석 기간이 크게 어긋나는 아동.
+//    유찬: 표지 치료기간 2024-02-29~2026-08-30(2년 6개월)인데 실제 기록은 2026-05-11~08-28(넉 달).
+//    앞 차수 IEP가 앱에 없어서 '초기 34%'의 초기가 2024년이 아니라 2026년 5월인데,
+//    보고서 어디에도 그 말이 없어 2년 반을 분석한 문서처럼 읽힌다.
+//    앞 구간 기록을 되살릴 방법은 없으니, 분석 대상 기간을 표에 따로 밝히고
+//    앞 경과는 선생님이 직접 적는 칸을 둔다. 두 줄 모두 아래 기준을 넘을 때만 인쇄된다.
+const PRIOR_GAP_MIN_MONTHS = 6;
+function monthsBetweenDates(a, b) {
+  if (!a || !b) return null;
+  const s = new Date(a), e = new Date(b);
+  if (isNaN(s.getTime()) || isNaN(e.getTime())) return null;
+  return Math.round((e - s) / (1000 * 60 * 60 * 24 * 30));
+}
+function spanLabelOf(months) {
+  if (months === null) return "";
+  if (months >= 12) {
+    const y = Math.floor(months / 12), m = months % 12;
+    return m > 0 ? `약 ${y}년 ${m}개월` : `약 ${y}년`;
+  }
+  if (months >= 1) return `약 ${months}개월`;
+  return "약 1개월 미만";
+}
+function priorGapInfo(treatStart, firstDataDate, lastDataDate) {
+  const gapMonths = monthsBetweenDates(treatStart, firstDataDate);
+  const hasGap = gapMonths !== null && gapMonths >= PRIOR_GAP_MIN_MONTHS;
+  const spanMonths = monthsBetweenDates(firstDataDate, lastDataDate);
+  return {
+    hasGap,
+    gapMonths,
+    gapLabel: spanLabelOf(gapMonths),
+    spanLabel: spanLabelOf(spanMonths),
+    analysisRange: (firstDataDate && lastDataDate) ? `${firstDataDate} ~ ${lastDataDate}` : ""
+  };
 }
 
 // ★ [57-2] periodEnd — 표지·치료 개요 표와 같은 값(reportPeriodEnd)을 넘겨받는다.
@@ -2617,6 +2661,41 @@ const DOMAIN_CONTEXT = {
 function cleanDomainKey(domain) {
   if (!domain) return "";
   return domain.replace(/^[Ⅰ-Ⅺ\dIVX]+\s*[·.]?\s*/, "").trim();
+}
+
+// ★ [58-1] 영역명 유사 알림 — '기타 영역 추가' 창 전용.
+//    기타 목표의 영역 이름은 자유 입력이라 아동마다 갈렸다.
+//    (성준우: '학습능력' 2/8과 '학습' 0/3이 보고서에서 따로 잡힘 /
+//     김유찬: 막대 그래프에 '화자'와 '화자 언어 작동', '학습능력'과 '학습영역'이 따로)
+//    영역별 균형 분석·완료 현황·종합 평가가 전부 이 문자열로 묶이므로,
+//    한 글자 차이가 그대로 두 개의 영역이 된다.
+//    입력칸은 자유 입력 그대로 둔다(커리큘럼에 없는 이름을 쓰려고 만든 창이라
+//    드롭다운·칩으로 가두면 창의 목적이 사라진다). 대신 비슷한 이름이 이미 있으면
+//    한 줄만 알린다 — 저장을 막지도, 값을 고쳐 넣지도 않는다.
+//    비교 규칙: 공백 제거 + 꼬리 '영역' 제거 후 완전일치 또는 앞부분 일치.
+//    (앞부분 일치만 본다. 아무 데나 포함으로 보면 '청자'가 '초기 화자'에 걸린다)
+function domainMatchKey(name) {
+  const s = String(name || "").replace(/\s+/g, "");
+  if (!s) return "";
+  return s.replace(/영역$/, "") || s;  // '영역'만 입력한 경우엔 원문을 남긴다
+}
+function findSimilarDomains(input, existingDomains) {
+  const raw = String(input || "").trim();
+  const key = domainMatchKey(raw);
+  if (key.length < 2) return [];  // 한 글자는 오탐이 너무 많다
+  const out = [];
+  const seen = {};
+  const list = Array.isArray(existingDomains) ? existingDomains : [];
+  for (let i = 0; i < list.length; i++) {
+    const n = String(list[i] || "").trim();
+    if (!n || seen[n]) continue;
+    seen[n] = 1;
+    if (n === raw) return [];  // 이미 쓰는 이름을 그대로 친 것 → 정상 입력, 알리지 않는다
+    const k = domainMatchKey(n);
+    if (k.length < 2) continue;
+    if (k === key || k.indexOf(key) === 0 || key.indexOf(k) === 0) out.push(n);
+  }
+  return out;
 }
 
 // ★ [55-3] 보고서 집계용 영역 재매핑.
@@ -3926,6 +4005,7 @@ const blankChild = () => ({
     finalReferralReason: "",  // 의뢰 사유 (치료 시작 시 주호소)
     finalEndReason: "",    // 종결 사유 (목표 달성 / 가족 사정 / 다음 단계 이행)
     finalSummary: "",      // 종합 평가 (자동 생성 + 수정 가능)
+    priorProgress: "",     // ★ [58-3] 앱 기록 이전 구간의 경과 (자유 입력 · 6개월 이상 벌어진 아동만 인쇄)
     finalGrowth: "",       // 치료 기간 중 성장과 변화 (자동 생성 + 수정 가능)
     finalHomeMaintenance: "",  // 가정에서의 유지 방안 (수동 + 빠른 칩)
     finalRecommendations: "",  // 권고사항 (수동 + 빠른 칩)
@@ -9563,6 +9643,9 @@ export default function App() {
         <ExternalGoalModal
           extForm={extForm}
           setExtForm={setExtForm}
+          /* ★ [58-1] 비교 대상은 보고서에 실제로 찍히는 이름(reportDomainOf → cleanDomainKey).
+             저장된 raw domain으로 비교하면 'Ⅹ 학습능력'과 '학습능력'이 매번 걸려 오탐이 된다. */
+          existingDomains={goals.map(g => cleanDomainKey(reportDomainOf(g))).filter(Boolean)}
           onClose={() => setShowExtForm(false)}
           onSubmit={() => {
             addExternalGoal(extForm);
@@ -9963,8 +10046,14 @@ function AddChildModal({ name, setName, onClose, onSubmit }) {
   );
 }
 
-function ExternalGoalModal({ extForm, setExtForm, onClose, onSubmit, onSubmitAndClose }) {
+function ExternalGoalModal({ extForm, setExtForm, onClose, onSubmit, onSubmitAndClose, existingDomains }) {
   const canSubmit = extForm.item.trim() && extForm.domain.trim();
+
+  // ★ [58-1] 이미 쓰고 있는 영역명과 비슷하면 한 줄 알림. 저장은 그대로 허용한다.
+  const similarDomains = useMemo(
+    () => findSimilarDomains(extForm.domain, existingDomains),
+    [extForm.domain, existingDomains]
+  );
 
   useEffect(() => {
     const handler = (e) => { if (e.key === "Escape") onClose(); };
@@ -10036,6 +10125,11 @@ function ExternalGoalModal({ extForm, setExtForm, onClose, onSubmit, onSubmitAnd
                 value={extForm.domain}
                 onChange={e => setExtForm(f => ({ ...f, domain: e.target.value }))}
                 placeholder="예: 언어 영역, 사회성 영역" />
+              {similarDomains.length > 0 && (
+                <div style={{ fontSize: 10, color: "#a86400", background: "#fff8e8", border: "1px solid #f0dcb0", borderRadius: 5, padding: "5px 7px", marginTop: 5, lineHeight: 1.5 }}>
+                  ⚠ 이미 <b>{similarDomains.slice(0, 2).join(" · ")}</b>{similarDomains.length > 2 ? ` 외 ${similarDomains.length - 2}개` : ""} 영역을 쓰고 있어요. 같은 영역으로 묶으려면 이름을 똑같이 맞춰 주세요.
+                </div>
+              )}
             </div>
             <div>
               <label htmlFor="extgoal-subdomain" style={{ ...LS, fontSize: 11, fontWeight: 600, color: "#555" }}>세부영역 (선택)</label>
@@ -11849,7 +11943,11 @@ cleanedHTML + '\n' +
           return (
           <>
             {/* ★ [종결보고서 전용] 치료 개요 — 의뢰 사유, 종결 사유 */}
-            {isFinalMode && (effectiveReferralReason(info) || info.finalEndReason) && (
+            {isFinalMode && (() => {
+              /* ★ [58-3] 앞 구간 기록이 없는 아동은 분석 기간 행만으로도 표를 띄운다. */
+              const pg = priorGapInfo(reportPeriodStart || info.evalStart, firstDataDate, lastDataDate);
+              return effectiveReferralReason(info) || info.finalEndReason || (pg.hasGap && (pg.analysisRange || (info.priorProgress || "").trim()));
+            })() && (
               <PrintSection num={nextSn()} title="치료 개요" accent>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, lineHeight: 1.7 }}>
                   <tbody>
@@ -11863,6 +11961,36 @@ cleanedHTML + '\n' +
                         {reportPeriodStart || info.evalStart || "—"} ~ {reportPeriodEnd || info.finalEndDate || info.evalEnd || "—"}
                       </td>
                     </tr>
+                    {/* ★ [58-3] 치료 시작일과 데이터 첫날이 6개월 이상 벌어진 아동만.
+                        위 '치료 기간'은 실제 치료 전체, 아래가 이 보고서의 수치가 나온 구간이다. */}
+                    {(() => {
+                      const pg = priorGapInfo(reportPeriodStart || info.evalStart, firstDataDate, lastDataDate);
+                      if (!pg.hasGap) return null;
+                      const prior = (info.priorProgress || "").trim();
+                      return (
+                        <>
+                          {pg.analysisRange && (
+                            <tr>
+                              <td style={{ padding: "8px 12px", background: "#f5f7f0", fontWeight: 600, color: "#3d6014", border: "1px solid #d4e5ba", verticalAlign: "top" }}>데이터 분석 기간</td>
+                              <td style={{ padding: "8px 12px", border: "1px solid #d4e5ba" }}>
+                                {pg.analysisRange}{pg.spanLabel ? ` (${pg.spanLabel})` : ""}
+                                <div style={{ fontSize: 11, color: "#767676", marginTop: 3, lineHeight: 1.6 }}>
+                                  ※ 본 보고서의 정반응률·성장 추이 분석은 위 기간의 기록을 대상으로 합니다. 그 이전 구간의 경과는 아래에 별도로 기술하였습니다.
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                          {prior && (
+                            <tr>
+                              <td style={{ padding: "8px 12px", background: "#f5f7f0", fontWeight: 600, color: "#3d6014", border: "1px solid #d4e5ba", verticalAlign: "top" }}>이전 구간 경과</td>
+                              <td style={{ padding: "8px 12px", border: "1px solid #d4e5ba", whiteSpace: "pre-line" }}>
+                                {personalize(prior)}
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      );
+                    })()}
                     {(() => {
                       const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
                       const refClean = stripMarker(effectiveReferralReason(info));
@@ -16526,6 +16654,38 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
           </div>
         </div>
       )}
+
+      {/* ★ [58-3] 앱 기록 이전 구간 경과 — 치료 시작일과 데이터 첫날이 6개월 이상 벌어진 아동만 뜬다.
+          앞 차수 IEP가 앱에 없어 분석이 최근 구간만 반영되는 아동에게, 그 앞을 문장으로 채우는 칸. */}
+      {isFinalMode && (() => {
+        const pg = priorGapInfo(reportPeriodStart || info.evalStart, firstDataDate, lastDataDate);
+        if (!pg.hasGap) return null;
+        return (
+          <div style={{ ...CS, marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: "#3d6014", flex: 1 }}>
+                🗂 이전 구간 경과
+                <span style={{ fontSize: 10, fontWeight: 500, color: "#767676", marginLeft: 8 }}>
+                  (앱 기록 이전 · 선택 입력)
+                </span>
+              </h3>
+            </div>
+            <div style={{ fontSize: 11, color: "#7a5a00", background: "#fff8e8", border: "1px solid #f0dcb0", borderRadius: 6, padding: "8px 10px", marginBottom: 8, lineHeight: 1.65 }}>
+              치료 기간은 <b>{reportPeriodStart || info.evalStart || "—"}</b>부터인데 앱 기록은 <b>{firstDataDate || "—"}</b>부터입니다
+              {pg.gapLabel ? ` (${pg.gapLabel} 차이)` : ""}.
+              보고서의 정반응률·성장 추이는 <b>{pg.analysisRange || "—"}</b>{pg.spanLabel ? ` (${pg.spanLabel})` : ""} 기록만 반영합니다.
+              인쇄본 치료 개요에 이 분석 기간이 따로 표기되며, 아래에 적으신 내용이 그 앞 구간 설명으로 들어갑니다.
+            </div>
+            <AutoTextarea
+              value={info.priorProgress || ""}
+              onChange={e => setInfo(prev => ({ ...prev, priorProgress: e.target.value }))}
+              placeholder="앞 차수 IEP에서 다룬 목표와 도달 수준을 두세 줄로 적어주세요. 비워두면 인쇄본에 나오지 않습니다."
+              rows={3}
+              style={{ width: "100%", padding: "10px 12px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 12, fontFamily: "inherit", lineHeight: 1.8, resize: "vertical", boxSizing: "border-box" }}
+            />
+          </div>
+        );
+      })()}
 
       {/* ★ [57-15] '시작 vs 종결 비교' 섹션은 만들지 않는다 (위 인쇄 쪽 주석 참고) */}
 
