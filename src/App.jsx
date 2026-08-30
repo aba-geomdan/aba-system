@@ -2378,15 +2378,54 @@ function buildFinalGrowth(goals, info, stos) {
     paragraphs.push(intro);
   }
 
-  if (allRates.length >= 6) {
-    allRates.sort((a, b) => a.date.localeCompare(b.date));
-    const third = Math.floor(allRates.length / 3);
-    const earlyRates = allRates.slice(0, third);
-    const midRates = allRates.slice(third, third * 2);
-    const lateRates = allRates.slice(third * 2);
-    const earlyAvg = Math.round(earlyRates.reduce((a, b) => a + b.rate, 0) / earlyRates.length);
-    const midAvg = Math.round(midRates.reduce((a, b) => a + b.rate, 0) / midRates.length);
-    const lateAvg = Math.round(lateRates.reduce((a, b) => a + b.rate, 0) / lateRates.length);
+  // ★ [57-13] 학습 곡선의 세 값을 목표(goal) 단위로 낸다.
+  //    기존엔 전 목표의 모든 점을 한 통에 넣고 3등분해서, 목표를 많이 추가한 시기의
+  //    낮은 출발값이 그대로 평균을 끌어내렸다. 성윤준 보고서가
+  //    "평균 57% 수준이 유지되었으며"인데 같은 보고서의 막대·비교 종결 열은 63~92%였다.
+  //    (틀린 계산은 아니지만 "종결 시점"이라는 말과 다른 것을 재고 있었다.)
+  //    초기·종결은 비교 섹션과 같은 창(compareEdgeSize)을 써서 세 섹션의 숫자를 맞추고,
+  //    중반은 그 사이 구간으로 잡는다.
+  const curvePoints = (() => {
+    if (!hasStos) return null;
+    const goalDomainById = {};
+    (goals || []).forEach(g => { if (g && g.id != null) goalDomainById[g.id] = reportDomainOf(g); });
+    const gs = buildGoalSeries(stos.map(s => (s ? { ...s, domain: goalDomainById[s.goalId] || reportDomainOf(s) } : s)))
+      .filter(g => g.quotable && g.series.length >= 3);
+    if (gs.length === 0) return null;
+    const mean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+    const heads = [], mids = [], tails = [];
+    gs.forEach(g => {
+      const s = g.series;
+      const n = compareEdgeSize(s.length);
+      const h = mean(s.slice(0, n));
+      const t = mean(s.slice(-n));
+      const middle = s.slice(n, s.length - n);
+      heads.push(h);
+      tails.push(t);
+      // 가운데 구간이 없을 만큼 짧은 목표는 앞뒤의 중간값으로 둔다.
+      mids.push(middle.length > 0 ? mean(middle) : (h + t) / 2);
+    });
+    return {
+      earlyAvg: Math.round(mean(heads)),
+      midAvg: Math.round(mean(mids)),
+      lateAvg: Math.round(mean(tails))
+    };
+  })();
+
+  if (curvePoints || allRates.length >= 6) {
+    let earlyAvg, midAvg, lateAvg;
+    if (curvePoints) {
+      earlyAvg = curvePoints.earlyAvg; midAvg = curvePoints.midAvg; lateAvg = curvePoints.lateAvg;
+    } else {
+      allRates.sort((a, b) => a.date.localeCompare(b.date));
+      const third = Math.floor(allRates.length / 3);
+      const earlyRates = allRates.slice(0, third);
+      const midRates = allRates.slice(third, third * 2);
+      const lateRates = allRates.slice(third * 2);
+      earlyAvg = Math.round(earlyRates.reduce((a, b) => a + b.rate, 0) / earlyRates.length);
+      midAvg = Math.round(midRates.reduce((a, b) => a + b.rate, 0) / midRates.length);
+      lateAvg = Math.round(lateRates.reduce((a, b) => a + b.rate, 0) / lateRates.length);
+    }
 
     let timeline = "";
     // ★ [57-5] 기존엔 종결값과 초기값만 비교해서, 중반이 정점이고 종결이 내려간 경우도
