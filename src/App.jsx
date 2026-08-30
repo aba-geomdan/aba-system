@@ -1485,7 +1485,10 @@ function buildInterimStrengths(domAvgs, stos, info) {
 
   const strengths = [];
 
-  const highDomains = domList.filter(d => d.avg >= 80);
+  // ★ [53-2] 종합 소견과 같은 가드를 적용한다.
+  //    기존엔 평균만 보고 "청자 영역은 2개 목표 평균 80%로 숙달 기준에 도달해 강점 영역"이라
+  //    적었지만, 그 2개 중 하나는 3회기·60%로 진행 중이었다.
+  const highDomains = masteredDomainsOf(domList, (stos || []).filter(s => s.status !== "중단"));
   if (highDomains.length >= 2) {
     const names = highDomains.slice(0, 3).map(d => cleanDomainKey(d.domain)).join("·");
     strengths.push({
@@ -2543,11 +2546,17 @@ function buildGoalSeries(stos) {
     if (!key) return;
     if (!m[key]) m[key] = {
       key, name: shortTaskName(s.goalName || s.name), domain: s.domain,
-      dates: new Map(), topOrder: -1, currentIsOX: false, hasProgress: false, anyPoints: false
+      dates: new Map(), topOrder: -1, currentIsOX: false, hasOXStage: false,
+      hasProgress: false, anyPoints: false
     };
     const g = m[key];
     if (order >= g.topOrder) { g.topOrder = order; g.currentIsOX = !!s.isOX; }
     if (s.status === "진행중") g.hasProgress = true;
+    // ★ [53-3] 한 목표 안에 O·X 단계와 % 단계가 섞여 있으면, %만 이어 붙인 시계열은
+    //    실제 수행 흐름이 아니다. ('구강 움직임 모방' — L1이 O·X, L2가 % 기록이라
+    //     카드 첫 점은 0%인데 문장은 O·X 구간을 건너뛴 L2 첫 값을 "초기 40%"로 적었다)
+    //    이런 목표는 %로 서술하지 않는다(quotable=false). 카드 그래프는 그대로 둔다.
+    if (s.isOX && (s.points || []).length > 0) g.hasOXStage = true;
     (s.points || []).forEach(p => {
       if (!p || !p.date || typeof p.value !== "number") return;
       g.anyPoints = true;
@@ -2561,14 +2570,43 @@ function buildGoalSeries(stos) {
     const series = entries.map(e => e[1].value);
     return {
       key: g.key, name: g.name, domain: g.domain,
-      hasProgress: g.hasProgress, currentIsOX: g.currentIsOX, anyPoints: g.anyPoints,
+      hasProgress: g.hasProgress, currentIsOX: g.currentIsOX, hasOXStage: g.hasOXStage,
+      anyPoints: g.anyPoints,
       dates: entries.map(e => e[0]),
       series,
       first: series.length > 0 ? series[0] : null,
       last: series.length > 0 ? series[series.length - 1] : null,
-      // %로 서술해도 되는 목표인가 — 현재 단계가 O·X면 안 된다.
-      quotable: series.length > 0 && !g.currentIsOX
+      // %로 서술해도 되는 목표인가 —
+      //   · 현재 단계가 O·X거나
+      //   · 단계별 측정 방식이 섞여 있으면(hasOXStage) %로 말하지 않는다.
+      quotable: series.length > 0 && !g.currentIsOX && !g.hasOXStage
     };
+  });
+}
+
+// ★ [53-2] 숙달(일반화 권고) 영역 판정 — 한 곳에서만 계산한다.
+//    기존엔 종합 소견·강점·다음 목표가 각자 domAvgs.filter(avg >= 80)을 다시 해서,
+//    종합 소견에만 최소 데이터 가드가 걸리고 나머지 둘은 목표 1개·3회기짜리 영역도
+//    "숙달 기준에 도달", "강점 영역으로 확인"이라고 적었다.
+//    조건: ① 목표 2개 이상 ② 각 목표 3회기 이상 ③ 80% 미만 목표가 하나도 없을 것.
+const MASTERY_MIN_GOALS = 2;
+const MASTERY_MIN_SESSIONS = 3;
+function masteredDomainsOf(domAvgs, stos) {
+  const gs = buildGoalSeries(stos);
+  const byDomain = {};
+  gs.forEach(g => {
+    if (!g.quotable) return;
+    const k = cleanDomainKey(g.domain || "");
+    if (!k) return;
+    (byDomain[k] = byDomain[k] || []).push(g);
+  });
+  return (domAvgs || []).filter(d => {
+    if (!d || d.avg < 80) return false;
+    const arr = byDomain[cleanDomainKey(d.domain)] || [];
+    if (arr.length < MASTERY_MIN_GOALS) return false;
+    if (arr.some(g => g.series.length < MASTERY_MIN_SESSIONS)) return false;
+    if (arr.some(g => g.last < 80)) return false;
+    return true;
   });
 }
 
@@ -10580,7 +10618,7 @@ function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSectio
                 }
                 if (svg.classList.contains("dashboard-bigchart")) {
                   svg.style.setProperty("width", "560px", "important");
-                  svg.style.setProperty("height", "180px", "important");
+                  svg.style.setProperty("height", "150px", "important");  // ★ [54-B] BigChart H와 일치
                   svg.style.setProperty("max-width", "560px", "important");
                   svg.style.setProperty("min-width", "560px", "important");
                   svg.style.setProperty("display", "block", "important");
@@ -10733,7 +10771,7 @@ function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSectio
 '/* 미니 스파크라인 */\n' +
 'svg.dashboard-sparkline{width:72px!important;height:22px!important;max-width:72px!important;min-width:72px!important;max-height:22px!important;display:inline-block!important;flex-shrink:0!important;margin:0!important}\n' +
 '/* 세부 학습 목표 라인 차트 - 560x180 고정 (영역별 세부 학습 목표) */\n' +
-'svg.dashboard-bigchart{width:560px!important;height:180px!important;max-width:560px!important;min-width:560px!important;display:block!important;margin:0 auto!important}\n' +
+'svg.dashboard-bigchart{width:560px!important;height:150px!important;max-width:560px!important;min-width:560px!important;display:block!important;margin:0 auto!important}\n' +
 '/* Info 표 */\n' +
 '.info-table-main{font-size:12pt!important;margin-bottom:12pt!important;border:1px solid ' + PKL + '!important}\n' +
 '.info-table-main td{padding:9pt 12pt!important;line-height:1.6!important;font-size:11pt!important;border:1px solid ' + PKL + '!important;vertical-align:middle!important}\n' +
@@ -11430,6 +11468,14 @@ cleanedHTML + '\n' +
               });
               const allDates = [...dateSet].sort();
               if (allDates.length < 2) return null;
+              // ★ [53-4] O·X 목표만 있는 아동은 그릴 선이 없어 안내문 3줄 + "데이터 없음"만 남았다.
+              //    (GrowthLineChart가 goalIsOX 목표를 전부 걸러내므로 points가 빈다)
+              //    영역별 균형 분석처럼 섹션 자체를 내보내지 않는다.
+              const hasRatedGoal = (goals || []).some(g => !goalIsOX(g) && (
+                (g.tasks || []).some(t => Object.keys(t.daily || {}).some(d => (!cutoffDate || d >= cutoffDate) && inPeriod(d)))
+                || Object.keys(g.daily || {}).some(d => (!cutoffDate || d >= cutoffDate) && inPeriod(d))
+              ));
+              if (!hasRatedGoal) return null;
               return (
                 <PrintSection num={nextSn()} title="성장 추이 (전체 목표 평균)">
                   <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
@@ -12084,7 +12130,7 @@ cleanedHTML + '\n' +
           /* 미니 스파크라인 - USER_APP 4190줄 (flex-shrink 보강) */
           svg.dashboard-sparkline { width: 72px !important; height: 22px !important; max-width: 72px !important; min-width: 72px !important; max-height: 22px !important; display: inline-block !important; flex-shrink: 0 !important; }
           /* 세부 학습 목표 라인 차트 - 560x180 고정 (영역별 세부 학습 목표) */
-          svg.dashboard-bigchart { width: 560px !important; height: 180px !important; max-width: 560px !important; min-width: 560px !important; display: block !important; margin: 0 auto !important; }
+          svg.dashboard-bigchart { width: 560px !important; height: 150px !important; max-width: 560px !important; min-width: 560px !important; display: block !important; margin: 0 auto !important; }
           /* dashboard-card 새 페이지 - USER_APP 4199줄 */
           .dashboard-card.pdf-card-break { page-break-before: always !important; break-before: page !important; }
           .dashboard-curriculum.pdf-curr-break { page-break-before: always !important; break-before: page !important; }
@@ -14616,31 +14662,8 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     const lastTwo = pts.slice(-2);
     return lastTwo.every(p => p.value >= 80);
   });
-  // ★ [49-3] 숙달·일반화 판정에 최소 데이터 가드를 건다.
-  //    기존엔 영역 평균 80% 하나만 보고 "숙달 수준이라 일반화 단계로 넘어갈 차례"라고 단정했다.
-  //      · 도겸 화자 — 목표 1개, 데이터 2점(8.19·8.21), 보고 종료 5일 전 시작인데 영역 숙달 선언
-  //      · 지환 청자 — 2개 평균 80%지만 한쪽은 8.24 시작·3회기·60%로 진행 중
-  //    이제 ① 목표 2개 이상 ② 각 목표 3회기 이상 ③ 80% 미만 목표가 하나도 없을 때만 숙달로 본다.
-  const MASTERY_MIN_GOALS = 2;
-  const MASTERY_MIN_SESSIONS = 3;
-  const goalsByDomain = (() => {
-    const m = {};
-    domGrowthGoals.forEach(g => {
-      if (!g.quotable) return;
-      const key = cleanDomainKey(g.domain || "");
-      if (!key) return;
-      (m[key] = m[key] || []).push(g);
-    });
-    return m;
-  })();
-  const masteredDomains = (domAvgs || []).filter(d => {
-    if (d.avg < 80) return false;
-    const gs = goalsByDomain[cleanDomainKey(d.domain)] || [];
-    if (gs.length < MASTERY_MIN_GOALS) return false;
-    if (gs.some(g => g.series.length < MASTERY_MIN_SESSIONS)) return false;
-    if (gs.some(g => g.last < 80)) return false;
-    return true;
-  });
+  // ★ [53-2] 공용 masteredDomainsOf로 일원화 — 강점·다음 목표와 같은 기준을 쓴다.
+  const masteredDomains = masteredDomainsOf(domAvgs, active);
 
   // ★ [수정] 가속 판정을 목표 단위 .some() → 전체 추이의 최근 구간 기울기로 교체.
   //    기존엔 목표가 20개면 그 중 하나만 최근 3점에서 +10을 넘어도 참이 돼,
@@ -15006,7 +15029,21 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
       : "";
     sec2Parts.push(`${fn}${jEunNeun(fn)} 이번 기간에 평균 점수가 ${firstAvg}%에서 ${lastAvg}%로 +${overallDiff}%p 올랐습니다.${done.length > 0 ? ` ${done.length}개 목표에서 준거를 달성했습니다.` : ""}${masteredTail}`);
   } else if (recentMastery.length > 0) {
-    sec2Parts.push(`최근 ${isValidTaskName(recentMastery[0].name) ? `'${recentMastery[0].name}'에서` : "핵심 목표에서"} 준거를 달성했습니다. 전체 ${total}개 STO 중 ${done.length}개가 완료되었습니다.`);
+    // ★ [53-5] ① 목표명이 아니라 단계의 학습 내용(s.name)을 찍어
+    //    "최근 '일상 루틴과 관련된 간단한 질문에 반응할 수 있다.'에서 준거를 달성"처럼 나갔다.
+    //    보고서 카드 제목과 같은 goalName을 쓴다.
+    //    ② 준거 달성일이 두 달 전이어도 "최근"이라고 적었다. 6주 이내일 때만 '최근'을 붙인다.
+    const rm0 = recentMastery[0];
+    const rmName = shortTaskName(rm0.goalName || rm0.name || "");
+    const rmRecent = (() => {
+      if (!rm0.masteryDate) return false;
+      const end = (allDates && allDates.length > 0) ? allDates[allDates.length - 1] : null;
+      if (!end) return false;
+      const gap = (new Date(end) - new Date(rm0.masteryDate)) / (1000 * 60 * 60 * 24);
+      return !isNaN(gap) && gap <= 42;
+    })();
+    const rmLead = rmRecent ? "최근 " : "";
+    sec2Parts.push(`${rmLead}${isValidTaskName(rmName) ? `'${rmName}'에서` : "핵심 목표에서"} 준거를 달성했습니다. 전체 ${total}개 STO 중 ${done.length}개가 완료되었습니다.`);
   } else if (total > 0) {
     sec2Parts.push(`현재 ${total}개 단기 목표 중 ${prog.length}개가 진행 중입니다.`);
   } else {
@@ -15051,7 +15088,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
         // ★ [50-3] 뒷문장의 예시가 템플릿 그대로라 실제 행동과 어긋났다.
         //    ('장난감 위아래로 흔들기'인데 "손으로 두드리는 행동이면…"이 붙었다)
         //    행동별로 다른 감각을 채워야 하므로, 예시를 특정하지 않고 원리와 상담 안내로 바꾼다.
-        cautions.push(`'${bn}' 행동이 자기자극(감각) 기능일 때는 못 하게 막는 것보다 같은 감각을 채워줄 수 있는 대체 활동을 주는 게 효과적입니다. '${bn}'이 어떤 감각을 채워 주는지(촉각·전정·고유수용 등)에 따라 맞는 활동이 달라지므로, 일과 중에 넣을 대체 활동은 담당 치료사와 함께 정해 주세요.`);
+        cautions.push(`'${bn}' 행동이 자기자극(감각) 기능일 때는 못 하게 막는 것보다 같은 감각을 채워줄 수 있는 대체 활동을 주는 게 효과적입니다. '${bn}'${josa이가(bn)} 어떤 감각을 채워 주는지(촉각·전정·고유수용 등)에 따라 맞는 활동이 달라지므로, 일과 중에 넣을 대체 활동은 담당 치료사와 함께 정해 주세요.`);
       }
       if (bf.includes("access")) {
         cautions.push(`${fn}${josa이가(fn)} 원하는 걸 얻으려고 '${bn}' 행동을 할 때 그걸 들어주시면 그 행동이 의사소통 수단으로 학습됩니다. 적절한 표현(가리키기, 사인, 그림 카드, 단어 등)을 사용할 때 바로 원하는 걸 주시면 됩니다.`);
@@ -15094,9 +15131,13 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   // 숙달 도달 영역 → 일반화 시점 (80% 이상, 데이터 근거 있음)
   // ★ [수정] % 표기 제거 — 같은 숫자가 영역별 균형 그래프와 종합 현황에 이미 두 번 나온다.
   //    다음 목표는 점수가 아니라 계획을 적는 자리다.
-  if (best.domain !== "—" && best.avg >= 80) {
-    const bCnt = best.count === 1 ? "(목표 1개)" : "";
-    sentences.push(`'${cleanDomainKey(best.domain)}' 영역${bCnt}은 숙달 기준에 도달했습니다.`);
+  // ★ [53-2] 종합 소견·강점과 같은 가드를 적용한다.
+  //    기존엔 best.avg >= 80만 보고, 목표 1개·2회기짜리 영역도 "숙달 기준에 도달"이라고 적었다.
+  const nextMastered = masteredDomainsOf(domAvgs, (stos || []).filter(s => s.status !== "중단"));
+  if (nextMastered.length > 0) {
+    const bd = nextMastered[0];
+    const bCnt = bd.count === 1 ? "(목표 1개)" : "";
+    sentences.push(`'${cleanDomainKey(bd.domain)}' 영역${bCnt}은 숙달 기준에 도달했습니다.`);
   }
 
   // ★ [수정] worst.avg !== 0 가드 제거 — 8회 전부 0%처럼 '기록된 0'까지 빠져
@@ -18395,7 +18436,10 @@ function GoalDashboard({ stos }) {
                       fontSize: 10, fontWeight: 800, color: col,
                       background: "#fff", border: `1px solid ${col}`
                     }}>{`L${ln}`}</div>
-                    <span style={{ fontSize: 8.5, color: "transparent" }}>.</span>
+                    {/* ★ [53-1] 날짜 라벨과 높이를 맞추는 스페이서.
+                        기존엔 투명색 마침표를 넣었는데, 화면엔 안 보여도 PDF 텍스트에는
+                        "L1 . X X O"처럼 그대로 추출됐다. 문자 없이 높이만 확보한다. */}
+                    <span aria-hidden="true" style={{ fontSize: 8.5, lineHeight: 1, height: "1em", display: "block" }} />
                   </div>
                 )}
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
@@ -18419,7 +18463,12 @@ function GoalDashboard({ stos }) {
     const STAGE_COLORS = ["#e34948", "#eb6834", "#eda100", "#1baf7a", "#2a78d6", "#3f51b5", "#8e44ad"];
     const stageColorOf = (n) => STAGE_COLORS[((Number(n) || 1) - 1) % STAGE_COLORS.length];
     const safeColor = (typeof color === "string" && color) ? color : "#D4728A";
-    const W = pdf ? 560 : 320, H = 180, padL = 34, padR = 14, padTop = 22, padBottom = 30;
+    // ★ [54-B] 카드 높이를 낮춰 페이지당 카드 수를 늘린다.
+    //    카드는 page-break-inside:avoid라 남은 자리에 안 들어가면 통째로 다음 장으로 넘어가는데,
+    //    차트 카드 2개(약 690px)가 들어가면 A4 콘텐츠 높이(약 965px)에 3개째가 못 들어가
+    //    매번 270px 정도가 비었다. 글자 크기는 그대로 두고 그래프 높이만 줄인다.
+    //    (180 → 150. y축 0~100 눈금 간격이 좁아지지만 숙달선·단계 구분은 그대로 읽힌다)
+    const W = pdf ? 560 : 320, H = 150, padL = 34, padR = 14, padTop = 20, padBottom = 28;
     const innerW = W - padL - padR;
     const innerH = H - padTop - padBottom;
     const yOf = v => padTop + (1 - v / 100) * innerH;
@@ -18594,7 +18643,15 @@ function GoalDashboard({ stos }) {
           if (domains.length === 0) return null;
           const meta = CURR_COLOR[curr] || CURR_COLOR.other || { accent: "#D4728A", bg: "#FFF0F3", label: "평가", chartLine: "#D4728A", deep: "#A64B63" };
           let pdfCardIdx = 0;
-          const isPdfCurrBreak = renderedCurrCount > 0;
+          // ★ [54-A] 평가도구가 바뀔 때마다 무조건 새 페이지에서 시작하던 규칙을 조건부로 바꾼다.
+          //    남은 공간과 무관하게 개행해서, 카드 1~2개짜리 평가도구가 페이지를 통째로 차지했다.
+          //    (도겸 ESDM '신체 부위 명명' 1개 → p.11 전체, '기타 목표' 1개 → p.12 전체)
+          //    카드가 CURR_BREAK_MIN_CARDS개 이상인 그룹만 새 페이지에서 시작하고,
+          //    그보다 작은 그룹은 앞 페이지의 남은 자리에 흘려 넣는다.
+          //    (그룹 박스 자체에는 break-inside 제한이 없어 페이지를 걸쳐도 카드는 안 잘린다)
+          const CURR_BREAK_MIN_CARDS = 3;
+          const currCardCount = domains.reduce((n, dom) => n + (currGroups[curr][dom] || []).length, 0);
+          const isPdfCurrBreak = renderedCurrCount > 0 && currCardCount >= CURR_BREAK_MIN_CARDS;
           renderedCurrCount++;
           const currBreakStyle = isPdfCurrBreak ? { pageBreakBefore: "always", breakBefore: "page" } : {};
           return (
