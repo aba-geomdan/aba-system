@@ -4857,19 +4857,44 @@ export default function App() {
   // ★ [신규] 등록된 선생님 목록 (App 컴포넌트에서도 필요 — 담당자 드롭다운/모달용)
   const [teachers, setTeachers] = useState([]);
   useEffect(() => {
+    // ★ [58-9] 삭제한 선생님이 담당 선택 목록에 계속 뜨던 문제.
+    //    선생님 관리 화면은 Supabase 계정(admin_list_users)을 읽고 삭제도 거기서 하는데,
+    //    담당 선생님 드롭다운·선택 모달만 옛 저장 키(gd-aba-teachers)를 읽고 있었다.
+    //    두 목록이 이어져 있지 않아, 계정을 지워도 옛 키에 남은 이름이 계속 나왔다
+    //    (새로고침해도 그대로 — 옛 키를 지우는 코드가 어디에도 없다).
+    //    실제 계정 목록을 우선으로 쓰고, 못 받아올 때만 옛 키로 물러난다.
+    const loadFromLegacyKey = async () => {
+      let raw = null;
+      if (typeof window !== "undefined" && window.storage) {
+        try {
+          const res = await window.storage.get(AUTH_TEACHERS_KEY, true);
+          raw = res?.value;
+        } catch (e) {}
+      }
+      if (!raw && typeof localStorage !== "undefined") {
+        raw = localStorage.getItem(AUTH_TEACHERS_KEY);
+      }
+      return raw ? JSON.parse(raw) : [];
+    };
     const loadTeachers = async () => {
       try {
-        let raw = null;
-        if (typeof window !== "undefined" && window.storage) {
-          try {
-            const res = await window.storage.get(AUTH_TEACHERS_KEY, true);
-            raw = res?.value;
-          } catch (e) {}
-        }
-        if (!raw && typeof localStorage !== "undefined") {
-          raw = localStorage.getItem(AUTH_TEACHERS_KEY);
-        }
-        setTeachers(raw ? JSON.parse(raw) : []);
+        // ① 실제 로그인 계정 — 관리자 화면에서 삭제하면 여기서도 즉시 빠진다.
+        let accounts = [];
+        try { accounts = await abaAdminListUsers(); } catch (e) { accounts = []; }
+        const mapped = (accounts || [])
+          .filter(u => u && (u.role || "therapist") !== "admin")
+          .map(u => ({
+            // id — 드롭다운·모달이 key={t.id}로 쓴다. 빠지면 React 키가 전부 undefined가 된다.
+            id: u.user_id || u.email || u.display_name || "",
+            name: u.display_name || "",
+            email: u.email || "",
+            user_id: u.user_id || ""
+          }))
+          .filter(t => t.name);
+        if (mapped.length > 0) { setTeachers(mapped); return; }
+        // ② 계정 목록을 못 받았을 때(권한 없음·네트워크 실패)만 옛 키.
+        //    이 경로에서는 삭제된 이름이 남아 있을 수 있다.
+        setTeachers(await loadFromLegacyKey());
       } catch (e) {
         setTeachers([]);
       }
