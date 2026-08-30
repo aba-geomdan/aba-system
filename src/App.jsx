@@ -10883,7 +10883,7 @@ cleanedHTML + '\n' +
           const personalize = (text) => personalizeText(text || "", childName);
           return (
             <PrintSection num={nextSn()} title="의뢰 사유" accent>
-              <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333" }}>
+              <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333" }}>
                 {personalize(referralClean).split("\n").map((line, i) => (
                   <p key={i} style={{ margin: "0 0 6px 0" }}>{line}</p>
                 ))}
@@ -11093,7 +11093,7 @@ cleanedHTML + '\n' +
                       : personalizeText(generateObservationSummary(obs, levels), childName);
                     if (!summary) return null;
                     return (
-                      <div style={{ marginTop: 12, padding: "10px 14px", background: "#fdf8f9", border: `1px solid ${PK}`, borderRadius: 4, fontSize: 10.5, lineHeight: 1.85, color: "#333", pageBreakInside: "avoid", breakInside: "avoid" }}>
+                      <div style={{ marginTop: 12, padding: "10px 14px", background: "#fdf8f9", border: `1px solid ${PK}`, borderRadius: 4, fontSize: 12.5, lineHeight: 1.85, color: "#333", pageBreakInside: "avoid", breakInside: "avoid" }}>
                         <div style={{ fontSize: 10, fontWeight: 700, color: PKD, marginBottom: 4, pageBreakAfter: "avoid", breakAfter: "avoid" }}>● 종합 요약</div>
                         {summary}
                       </div>
@@ -11183,7 +11183,7 @@ cleanedHTML + '\n' +
           const personalize = (text) => personalizeText(text || "", childName);
           return (
             <PrintSection num={nextSn()} title="보호자 협력 방안" accent>
-              <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333" }}>
+              <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333" }}>
                 {personalize(collabClean).split("\n").map((line, i) => (
                   <p key={i} style={{ margin: "0 0 6px 0" }}>{line}</p>
                 ))}
@@ -11201,7 +11201,7 @@ cleanedHTML + '\n' +
           const personalize = (text) => personalizeText(text || "", childName);
           return (
             <PrintSection num={nextSn()} title="권고사항" accent>
-              <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333" }}>
+              <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333" }}>
                 {personalize(recsClean).split("\n").map((line, i) => (
                   <p key={i} style={{ margin: "0 0 6px 0" }}>{line}</p>
                 ))}
@@ -11273,7 +11273,7 @@ cleanedHTML + '\n' +
               if (!hasVbmapp) return null;
               return (
                 <PrintSection num={nextSn()} title="VB-MAPP 마일스톤 현황">
-                  <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
+                  <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                     ※ VB-MAPP은 자폐 아동의 언어/사회성 발달을 16개 영역, 3단계(Level 1~3)로 평가하는 표준 도구입니다.<br />
                     ※ 각 영역의 색깔이 채워진 동그라미(●)는 해당 마일스톤이 달성되었음을 의미합니다.
                   </div>
@@ -11285,7 +11285,7 @@ cleanedHTML + '\n' +
             {/* PDF-10: 영역별 균형 분석 (= 레이더 + 막대) (PDF 5페이지) */}
             {domainAvgs.length > 0 && (
               <PrintSection num={nextSn()} title="영역별 균형 분석">
-                <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
+                <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                   ※ 영역별 학습 목표의 최종 달성률을 한눈에 비교한 그래프입니다. (초록: 80%↑ 숙달, 파랑: 60~79% 진전, 주황: 60%↓ 집중 지도)
                 </div>
                 <div style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
@@ -11325,7 +11325,7 @@ cleanedHTML + '\n' +
               if (allDates.length < 2) return null;
               return (
                 <PrintSection num={nextSn()} title="성장 추이 (전체 목표 평균)">
-                  <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
+                  <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                     ※ 보고 기간 동안 날짜별 전체 목표의 평균 정반응률 추이입니다.<br/>
                     ※ 우상향 = 전반적 성장, 평탄 = 숙달 안정기. 새로 시작한 목표는 낮은 값에서 출발하므로, 목표를 추가한 시점에는 전체 평균이 일시적으로 내려갈 수 있습니다.
                   </div>
@@ -11346,7 +11346,7 @@ cleanedHTML + '\n' +
             {isFinalMode ? (
               goals && goals.length > 0 && (
                 <PrintSection num={nextSn()} title="영역별 완료 현황">
-                  <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
+                  <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                     ※ 종결 시점에 각 영역에서 마스터된 과제 수와 진행 상황을 한눈에 보여줍니다.
                   </div>
                   <DomainCompletionSection goals={goals} />
@@ -11355,7 +11355,7 @@ cleanedHTML + '\n' +
             ) : (
               goalsForReport && goalsForReport.length > 0 && (
                 <PrintSection num={nextSn()} title="영역별 세부 학습 목표">
-                  <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
+                  <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                     ※ 각 목표는 영역별로 그룹화되어 있으며, 진행률과 최근 데이터 추이를 함께 표시합니다.<br />
                     ※ 미니 추이선은 학습 시작부터 현재까지의 평가 데이터 흐름을 보여줍니다.<br />
                     ※ 회기당 1회만 시도하는 목표는 O(성공) · X(실패)로 표시됩니다.
@@ -11377,10 +11377,10 @@ cleanedHTML + '\n' +
               const personalize = (text) => personalizeText(text || "", childName);
               return (
                 <PrintSection num={nextSn()} title="도전적 행동 변화">
-                  <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
+                  <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                     ※ 본 보고 기간 동안 관찰된 도전적 행동 변화 양상입니다.
                   </div>
-                  <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333" }}>
+                  <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333" }}>
                     {personalize(behaviorClean).split("\n").map((line, i) => (
                       <p key={i} style={{ margin: line.trim() === "" ? "4px 0" : "0 0 6px 0" }}>
                         {line || "\u00A0"}
@@ -11462,7 +11462,7 @@ cleanedHTML + '\n' +
             {/* ★ [종결보고서 흐름 개선] 치료 기간 중 성장과 변화 — 종합 평가 앞으로 (회고 → 평가 → 정리) */}
             {isFinalMode && info.finalGrowth && info.finalGrowth.trim() && (
               <PrintSection num={nextSn()} title="치료 기간 중 성장과 변화" accent>
-                <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
+                <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
                   {personalize(info.finalGrowth)}
                 </div>
               </PrintSection>
@@ -11471,7 +11471,7 @@ cleanedHTML + '\n' +
             {/* ★ [종결보고서 전용] 종합 평가 — 자동 생성 + 사용자 수정 */}
             {isFinalMode && info.finalSummary && info.finalSummary.trim() && (
               <PrintSection num={nextSn()} title="종합 평가" accent>
-                <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
+                <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
                   {personalize(info.finalSummary)}
                 </div>
               </PrintSection>
@@ -11487,7 +11487,7 @@ cleanedHTML + '\n' +
               if (overviewClean) {
                 return (
                   <PrintSection num={nextSn()} title="종합 현황" accent>
-                    <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
+                    <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
                       {personalize(overviewClean)}
                     </div>
                   </PrintSection>
@@ -11496,7 +11496,7 @@ cleanedHTML + '\n' +
               if (summaryClean) {
                 return (
                   <PrintSection num={nextSn()} title="총괄 요약 및 권고사항" accent>
-                    <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
+                    <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
                       {personalize(summaryClean)}
                     </div>
                   </PrintSection>
@@ -11512,7 +11512,7 @@ cleanedHTML + '\n' +
               if (!strengthsText && !highlightsText) return null;
               return (
                 <PrintSection num={nextSn()} title="이번 기간의 강점과 주요 변화" accent>
-                  <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333" }}>
+                  <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333" }}>
                     {/* 강점 (전반적 패턴) - 먼저 큰 그림 */}
                     {strengthsText && (
                       <div style={{ marginBottom: highlightsText ? 14 : 0 }}>
@@ -11549,7 +11549,7 @@ cleanedHTML + '\n' +
               if (!growthClean) return null;
               return (
                 <PrintSection num={nextSn()} title="치료사 종합 소견" accent>
-                  <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
+                  <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
                     {personalize(growthClean)}
                   </div>
                 </PrintSection>
@@ -11566,10 +11566,10 @@ cleanedHTML + '\n' +
               if (!behaviorClean) return null;
               return (
                 <PrintSection num={nextSn()} title="도전적 행동 변화">
-                  <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
+                  <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                     ※ 치료 시작 시점부터 종결까지의 도전적 행동 변화 양상입니다.
                   </div>
-                  <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333" }}>
+                  <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333" }}>
                     {personalize(behaviorClean).split("\n").map((line, i) => (
                       <p key={i} style={{ margin: line.trim() === "" ? "4px 0" : "0 0 6px 0" }}>
                         {line || "\u00A0"}
@@ -11587,7 +11587,7 @@ cleanedHTML + '\n' +
               if (!homeClean) return null;
               return (
                 <PrintSection num={nextSn()} title="가정에서의 유지 방안" accent>
-                  <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
+                  <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
                     {personalize(homeClean)}
                   </div>
                 </PrintSection>
@@ -11600,7 +11600,7 @@ cleanedHTML + '\n' +
                 if (homeCoop) {
                   return (
                     <PrintSection num={nextSn()} title="가정에서 함께 하기" accent>
-                      <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
+                      <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
                         {personalize(homeCoop)}
                       </div>
                     </PrintSection>
@@ -11609,7 +11609,7 @@ cleanedHTML + '\n' +
                 if (fallback) {
                   return (
                     <PrintSection num={nextSn()} title="일반화 계획 및 가정 협력 방안" accent>
-                      <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
+                      <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
                         {personalize(fallback)}
                       </div>
                     </PrintSection>
@@ -11627,7 +11627,7 @@ cleanedHTML + '\n' +
               if (nextGoal) {
                 return (
                   <PrintSection num={nextSn()} title="다음 목표" accent>
-                    <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
+                    <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
                       {personalize(nextGoal)}
                     </div>
                   </PrintSection>
@@ -11636,7 +11636,7 @@ cleanedHTML + '\n' +
               if (fallback) {
                 return (
                   <PrintSection num={nextSn()} title="다음 목표 제안" accent>
-                    <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
+                    <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
                       {personalize(fallback)}
                     </div>
                   </PrintSection>
@@ -11657,7 +11657,7 @@ cleanedHTML + '\n' +
                   {recClean && (
                     <div style={{ marginBottom: handoverClean ? 14 : 0 }}>
                       <div style={{ fontSize: 10.5, fontWeight: 700, color: PKD, marginBottom: 6 }}>▸ 권고사항</div>
-                      <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333" }}>
+                      <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333" }}>
                         {personalize(recClean).split("\n").map((line, i) => (
                           <p key={`r-${i}`} style={{ margin: line.trim() === "" ? "4px 0" : "0 0 6px 0" }}>
                             {line || "\u00A0"}
@@ -11670,10 +11670,10 @@ cleanedHTML + '\n' +
                   {handoverClean && (
                     <div style={{ paddingTop: recClean ? 10 : 0, borderTop: recClean ? "0.5pt solid #f0e0e5" : "none" }}>
                       <div style={{ fontSize: 10.5, fontWeight: 700, color: PKD, marginBottom: 6 }}>▸ 다른 기관 이동 시 참고</div>
-                      <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 8 }}>
+                      <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 8 }}>
                         ※ 유치원·학교·후속 치료 기관 등으로 이동 시 다음 정보가 도움이 됩니다.
                       </div>
-                      <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333" }}>
+                      <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333" }}>
                         {personalize(handoverClean).split("\n").map((line, i) => (
                           <p key={`h-${i}`} style={{ margin: line.trim() === "" ? "4px 0" : "0 0 6px 0" }}>
                             {line || "\u00A0"}
@@ -11849,7 +11849,7 @@ cleanedHTML + '\n' +
       <style>{`
         @media print {
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; box-shadow: none !important; }
-          html, body { margin: 0 !important; padding: 0 !important; font-size: 10.5pt !important; line-height: 1.65 !important; font-family: 'Pretendard','Noto Sans KR','Malgun Gothic',sans-serif !important; background: #fff !important; orphans: 3 !important; widows: 3 !important; }
+          html, body { margin: 0 !important; padding: 0 !important; font-size: 11.5pt !important; line-height: 1.7 !important; font-family: 'Pretendard','Noto Sans KR','Malgun Gothic',sans-serif !important; background: #fff !important; orphans: 3 !important; widows: 3 !important; }
           /* ★ [브랜딩] @page에 헤더 + 푸터 자동 추가 */
           @page {
             size: A4 portrait;
@@ -11914,9 +11914,9 @@ cleanedHTML + '\n' +
           .info-table-main td:nth-child(even) { color: #222 !important; background: #fff !important; }
           /* 보고서 섹션 컨테이너 — borderTop 있는 div = 본문 4섹션 */
           #printable-report > div[style*="borderTop"], #printable-report > .print-section-accent { border-top: 0.75pt solid #e0c8d0 !important; padding-top: 7pt !important; margin-top: 7pt !important; }
-          #printable-report > div[style*="borderTop"] > div:first-child, .print-section-accent-title { font-size: 10.5pt !important; font-weight: 700 !important; color: #8B3A5E !important; margin-bottom: 3pt !important; padding-left: 6pt !important; border-left: 3pt solid #F5A0B1 !important; page-break-after: avoid !important; break-after: avoid !important; }
+          #printable-report > div[style*="borderTop"] > div:first-child, .print-section-accent-title { font-size: 12pt !important; font-weight: 700 !important; color: #8B3A5E !important; margin-bottom: 3pt !important; padding-left: 6pt !important; border-left: 3pt solid #F5A0B1 !important; page-break-after: avoid !important; break-after: avoid !important; }
           /* ★ [페이지 분리 수정] 본문 박스 - 외곽 테두리 제거 + 왼쪽 핑크 라인만 + 페이지 분리 허용 (USER_APP과 동일) */
-          #printable-report > div[style*="borderTop"] > div:last-child, .print-section-accent-body { font-size: 9.5pt !important; line-height: 1.8 !important; padding: 7pt 9pt !important; background: #fdf8f9 !important; color: #333 !important; border: none !important; border-left: 3pt solid #F5A0B1 !important; border-radius: 3pt !important; page-break-inside: avoid !important; break-inside: avoid !important; }
+          #printable-report > div[style*="borderTop"] > div:last-child, .print-section-accent-body { font-size: 11pt !important; line-height: 1.85 !important; padding: 7pt 9pt !important; background: #fdf8f9 !important; color: #333 !important; border: none !important; border-left: 3pt solid #F5A0B1 !important; border-radius: 3pt !important; page-break-inside: avoid !important; break-inside: avoid !important; }
           /* SVG */
           svg { max-width: 100% !important; width: auto !important; height: auto !important; max-height: 300pt !important; page-break-inside: avoid !important; break-inside: avoid !important; margin: 0 auto !important; }
           .pdf-chart-section svg { max-height: 280pt !important; width: 100% !important; }
@@ -12155,7 +12155,7 @@ function PrintSection({ num, title, children, boxed, accent, allowSplit }) {
         pageBreakInside: "auto",
         breakInside: "auto"
       }}>
-        <div className="print-section-title" style={{ fontSize: 14, fontWeight: 700, color: PKD, marginBottom: 10, letterSpacing: "-0.3px", pageBreakAfter: "avoid", breakAfter: "avoid" }}>
+        <div className="print-section-title" style={{ fontSize: 16, fontWeight: 700, color: PKD, marginBottom: 10, letterSpacing: "-0.3px", pageBreakAfter: "avoid", breakAfter: "avoid" }}>
           {title}
         </div>
         <div style={{ pageBreakBefore: "avoid", breakBefore: "avoid" }}>{children}</div>
@@ -12176,7 +12176,7 @@ function PrintSection({ num, title, children, boxed, accent, allowSplit }) {
   }
   return (
     <div className={`print-section-block${allowSplit ? " allow-split" : ""}`} style={{ marginBottom: 26 }}>
-      <div className="print-section-title" style={{ fontSize: 14, fontWeight: 700, color: "#222", marginBottom: 10, paddingBottom: 5, borderBottom: `2px solid ${PK}`, letterSpacing: "-0.3px", pageBreakAfter: "avoid", breakAfter: "avoid" }}>
+      <div className="print-section-title" style={{ fontSize: 16, fontWeight: 700, color: "#222", marginBottom: 10, paddingBottom: 5, borderBottom: `2px solid ${PK}`, letterSpacing: "-0.3px", pageBreakAfter: "avoid", breakAfter: "avoid" }}>
         {title}
       </div>
       {/* 제목 + 첫 자식이 절대 분리되지 않게 wrap. 본문이 너무 크면 본문 안에서만 분리됨 */}
