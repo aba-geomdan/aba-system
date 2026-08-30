@@ -870,15 +870,29 @@ function findMapping(elcarText) {
   return { vbmapp, esdm };
 }
 
-function withParticle(word, withFinal, withoutFinal) {
-  if (!word) return withoutFinal;
+// ★ [50-1] 영문 약어·숫자로 끝나는 말의 받침 판정.
+//    기존엔 한글이 아니면 무조건 '받침 없음'으로 처리해서 "NCR를", "DRL를"처럼 나갔다.
+//    (NCR = 엔시'알' → 받침 ㄹ → "NCR을")
+//    한글 음독의 마지막 소리에 받침이 있는 글자만 모은다.
+const LATIN_FINAL = new Set(["L", "M", "N", "R", "S", "X", "F"]);          // 엘·엠·엔·알·에스·엑스·에프
+const DIGIT_FINAL = new Set(["0", "1", "3", "6", "7", "8"]);              // 영·일·삼·육·칠·팔
+// ㄹ 받침 — '으로/로' 판정에서 "로"를 쓰는 경우
+const RIEUL_FINAL = new Set(["L", "R", "1", "7", "8"]);                   // 엘·알·일·칠·팔
+
+function hasFinalConsonant(word) {
+  if (!word) return false;
   const last = word.charAt(word.length - 1);
   const code = last.charCodeAt(0);
-  if (code < 0xAC00 || code > 0xD7A3) {
-    return withoutFinal;  // 한글이 아니면 기본 (받침 없음)
-  }
-  const hasFinal = ((code - 0xAC00) % 28) !== 0;
-  return hasFinal ? withFinal : withoutFinal;
+  if (code >= 0xAC00 && code <= 0xD7A3) return ((code - 0xAC00) % 28) !== 0;
+  const up = last.toUpperCase();
+  if (LATIN_FINAL.has(up)) return true;
+  if (DIGIT_FINAL.has(last)) return true;
+  return false;  // 그 외(A·E·O 등, 기호)는 받침 없음으로 본다
+}
+
+function withParticle(word, withFinal, withoutFinal) {
+  if (!word) return withoutFinal;
+  return hasFinalConsonant(word) ? withFinal : withoutFinal;
 }
 const josa은는 = (w) => withParticle(w, "은", "는");
 const josa을를 = (w) => withParticle(w, "을", "를");
@@ -889,9 +903,14 @@ const josa으로 = (w) => {
   if (!w) return "로";
   const last = w.charAt(w.length - 1);
   const code = last.charCodeAt(0);
-  if (code < 0xAC00 || code > 0xD7A3) return "로";
-  const jong = (code - 0xAC00) % 28;
-  return (jong === 0 || jong === 8) ? "로" : "으로";
+  if (code >= 0xAC00 && code <= 0xD7A3) {
+    const jong = (code - 0xAC00) % 28;
+    return (jong === 0 || jong === 8) ? "로" : "으로";
+  }
+  // ★ [50-1] 영문 약어·숫자 — ㄹ 받침이거나 받침이 없으면 "로", 그 외 받침은 "으로"
+  const up = last.toUpperCase();
+  if (RIEUL_FINAL.has(up) || RIEUL_FINAL.has(last)) return "로";
+  return hasFinalConsonant(w) ? "으로" : "로";
 };
 
 function personalizeText(text, childName) {
@@ -2666,8 +2685,11 @@ function getCombinedDailySeries(goal) {
 //    (예: 소근육 모방 L1~L3은 %, L4만 O·X → 마지막 날 L4의 X가 0%로 잡혀 영역 평균이 내려감.
 //     같은 목표를 문장 쪽은 O·X를 빼고 계산해 "최근 100%"라고 적어 차트와 어긋났다.)
 //    이제 차트·문장이 같은 집합(=%단계만)을 본다.
+//    ★ [49-4] 중단(paused) 단계도 뺀다. 중단된 단계만 남은 목표는 시계열이 비어 영역 평균에서 빠지고,
+//    따라서 "'인지' 영역은 집중 지도가 필요" → "다음 보고 기간에 인지 영역을 집중 지도하겠습니다"처럼
+//    이미 중단한 영역을 지도 대상으로 올리던 문제도 함께 없어진다.
 function getRatedGoalSeries(goal) {
-  const ratedTasks = (goal?.tasks || []).filter(t => !taskIsOX(t));
+  const ratedTasks = (goal?.tasks || []).filter(t => !taskIsOX(t) && t.listGroup !== "paused");
   if (ratedTasks.length === 0) return [];
   return getCombinedDailySeries({ ...goal, tasks: ratedTasks });
 }
@@ -5759,7 +5781,7 @@ export default function App() {
       const status = g.status === "mastered" ? "완료"
         : _hasActive ? "진행중"
         : (_tg.length > 0 && _tg.every(x => x === "2")) ? "완료"
-        : _tg.some(x => x === "paused") ? "일시대기"
+        : _tg.some(x => x === "paused") ? "중단"
         : "진행중";
       const masteryDate = g.masteredAt || null;
       const latestPoint = allPoints.length > 0 ? allPoints[allPoints.length - 1] : null;
@@ -10903,7 +10925,14 @@ cleanedHTML + '\n' +
                     const [s0, e0] = orderDateRange(reportPeriodStart, reportPeriodEnd);
                     return (s0 && e0) ? `${s0} ~ ${e0}` : (s0 || e0 || "—");
                   })(), "프로그램", (() => {
-                    const sources = [...new Set((goals || []).map(g => g.source || "ELCAR"))];
+                    // ★ [50-4] 전체 goals의 source를 그대로 찍어서, 보고서에 목표가 하나도 없는
+                    //    평가도구까지 표지에 나갔다(지환 표지에 ESDM 표기 — 실제 ESDM 섹션 없음,
+                    //    영훈 표지에 '기타' 표기 — 실제 기타 섹션 없음).
+                    //    '영역별 세부 학습 목표'에 실제로 실리는 집합(stosForReport)과 같은 기준으로 맞춘다.
+                    const used = (stosForReport && stosForReport.length > 0)
+                      ? stosForReport.map(x => x.source || "ELCAR")
+                      : (goals || []).map(g => g.source || "ELCAR");
+                    const sources = [...new Set(used)];
                     return sources.join(", ") || "—";
                   })()],
                   ["주 횟수", (info.sWeek || info.weeklyFreq) ? `주 ${info.sWeek || info.weeklyFreq}회` : "—", "회기 시간", sessionCellContent]
@@ -11405,7 +11434,10 @@ cleanedHTML + '\n' +
                 <PrintSection num={nextSn()} title="성장 추이 (전체 목표 평균)">
                   <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                     ※ 보고 기간 동안 날짜별 전체 목표의 평균 정반응률 추이입니다.<br/>
-                    ※ 우상향 = 전반적 성장, 평탄 = 숙달 안정기. 새로 시작한 목표는 낮은 값에서 출발하므로, 목표를 추가한 시점에는 전체 평균이 일시적으로 내려갈 수 있습니다.
+                    ※ 우상향 = 전반적 성장, 평탄 = 숙달 안정기. 새로 시작한 목표는 낮은 값에서 출발하므로, 목표를 추가한 시점에는 전체 평균이 일시적으로 내려갈 수 있습니다.<br/>
+                    {/* ★ [50-5] 선은 모든 회기를 잇지만 날짜·수치 라벨은 겹침 방지를 위해 일부만 표시된다.
+                        라벨 개수를 회기 수로 오해해 "회기가 빠졌다"고 읽히던 문제. */}
+                    ※ 날짜와 수치 라벨은 겹침 방지를 위해 일부만 표시되며, 선은 보고 기간의 모든 평가 회기를 잇습니다.
                   </div>
                   <div style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                     <GrowthLineChart goals={goals} dates={allDates} getTimeline={null} />
@@ -11474,11 +11506,22 @@ cleanedHTML + '\n' +
               const pausedItems = [];
               const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
               (goals || []).forEach(g => {
+                // ★ [49-4] 목표 중단과 단계 중단을 구분한다.
+                //    기존엔 단계 하나만 중단해도 "중단된 목표"에 올라가서, 배지가 '진행중'이고
+                //    다음 단계가 돌아가고 있는 목표(공간/장소 M/T/IV — L1만 중단, L2 진행 중)까지
+                //    중단 목록에 실렸다.
+                const stillActive = (g.tasks || []).some(t => (t.listGroup || "1") !== "paused");
                 (g.tasks || []).forEach(t => {
                   if (t.listGroup === "paused") {
                     pausedItems.push({
-                      name: t.name || "(이름 없음)",
-                      domain: g.domain || "",
+                      // ★ [49-4] 목록에 단계 내용(t.name)만 찍어서 어떤 목표인지 알 수 없었다.
+                      //    ('왼쪽-오른쪽 / 있다-없다 / …' 는 '반대어 이해' L2의 학습 내용이다)
+                      goalName: shortTaskName(g.item || "") || "(이름 없음)",
+                      stepName: t.name || "",
+                      partial: stillActive,
+                      // ★ [49-4] 다른 곳은 모두 cleanDomainKey를 거치는데 여기만 원문을 찍어
+                      //    "(Ⅹ 학습능력)"처럼 로마숫자 접두어가 그대로 나갔다.
+                      domain: cleanDomainKey(g.domain || ""),
                       rawReason: t.pauseReason || "",
                       softReason: personalizeText(softenPauseReason(t.pauseReason || ""), childName)
                     });
@@ -11486,8 +11529,15 @@ cleanedHTML + '\n' +
                 });
               });
               if (pausedItems.length === 0) return null;
+              const pausedGoalCount = pausedItems.filter(x => !x.partial).length;
+              const pausedStepCount = pausedItems.filter(x => x.partial).length;
+              const pausedTitle = pausedStepCount === 0
+                ? `중단된 목표 (${pausedGoalCount}개)`
+                : (pausedGoalCount === 0
+                    ? `중단된 단계 (${pausedStepCount}개)`
+                    : `중단된 목표 ${pausedGoalCount}개 · 단계 ${pausedStepCount}개`);
               return (
-                <PrintSection num="" title={`중단된 목표 (${pausedItems.length}개)`}>
+                <PrintSection num="" title={pausedTitle}>
                   {/* ★ 연한 베이지 파스텔 박스 — 묶어서 시각적 구분 */}
                   <div style={{
                     background: "#fbf6e8",
@@ -11499,7 +11549,7 @@ cleanedHTML + '\n' +
                     breakInside: "avoid"
                   }}>
                     <div style={{ fontSize: 11.5, color: "#7a6235", marginBottom: 14, lineHeight: 1.7, paddingBottom: 10, borderBottom: "1px dashed #e5d8a8" }}>
-                      ⏸ 아래 목표는 임상적 판단에 따라 본 회기 중 중단되었습니다. 향후 회기에서 재구성 또는 우선순위 조정 후 재개 여부를 검토할 예정입니다.
+                      ⏸ 아래 항목은 임상적 판단에 따라 본 회기 중 중단되었습니다. 향후 회기에서 재구성 또는 우선순위 조정 후 재개 여부를 검토할 예정입니다.{pausedStepCount > 0 ? " '해당 단계만 중단'으로 표시된 항목은 같은 목표의 다른 단계가 계속 진행되고 있습니다." : ""}
                     </div>
                     <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none", fontSize: 12, lineHeight: 1.7, color: "#333" }}>
                       {pausedItems.map((item, idx) => (
@@ -11510,9 +11560,15 @@ cleanedHTML + '\n' +
                         }}>
                           <div>
                             <span style={{ position: "absolute", left: 0, color: "#c9a85a", fontWeight: 700 }}>•</span>
-                            <b style={{ color: "#7a6235" }}>{item.name}</b>
+                            <b style={{ color: "#7a6235" }}>{item.goalName}</b>
+                            {item.stepName && (
+                              <span style={{ color: "#7a6235", marginLeft: 6, fontSize: 11 }}>— {item.stepName}</span>
+                            )}
                             {item.domain && (
                               <span style={{ color: "#a89570", marginLeft: 6, fontSize: 10 }}>({item.domain})</span>
+                            )}
+                            {item.partial && (
+                              <span style={{ color: "#a89570", marginLeft: 6, fontSize: 10 }}>· 해당 단계만 중단 (목표는 진행 중)</span>
                             )}
                           </div>
                           {item.softReason && (
@@ -14533,13 +14589,58 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   const firstAvg = firstCnt > 0 ? Math.round(firstSum / firstCnt) : 0;
   const overallDiff = lastAvg - firstAvg;
 
+  // ★ [49-2] 실제 리스트 상향(단계 승급) 집계 — 목표 안에서 완료된 단계 뒤에 다음 단계가 있는 건수.
+  const listAdvance = (() => {
+    const byGoal = {};
+    active.forEach((s, order) => {
+      const key = goalKeyOf(s);
+      if (!key) return;
+      if (!byGoal[key]) byGoal[key] = { name: shortTaskName(s.goalName || s.name), items: [] };
+      byGoal[key].items.push({ order, status: s.status });
+    });
+    let steps = 0;
+    const advanced = [];
+    Object.values(byGoal).forEach(g => {
+      const sorted = g.items.slice().sort((a, b) => a.order - b.order);
+      let n = 0;
+      sorted.forEach((it, i) => { if (it.status === "완료" && i < sorted.length - 1) n++; });
+      if (n > 0) { steps += n; advanced.push({ name: g.name, n }); }
+    });
+    advanced.sort((a, b) => b.n - a.n);
+    return { steps, goals: advanced.length, exemplar: advanced.length > 0 ? advanced[0].name : "주요 목표" };
+  })();
+
   const highRate = active.filter(s => {
     const pts = s.points || [];
     if (pts.length < 2) return false;
     const lastTwo = pts.slice(-2);
     return lastTwo.every(p => p.value >= 80);
   });
-  const masteredDomains = (domAvgs || []).filter(d => d.avg >= 80);
+  // ★ [49-3] 숙달·일반화 판정에 최소 데이터 가드를 건다.
+  //    기존엔 영역 평균 80% 하나만 보고 "숙달 수준이라 일반화 단계로 넘어갈 차례"라고 단정했다.
+  //      · 도겸 화자 — 목표 1개, 데이터 2점(8.19·8.21), 보고 종료 5일 전 시작인데 영역 숙달 선언
+  //      · 지환 청자 — 2개 평균 80%지만 한쪽은 8.24 시작·3회기·60%로 진행 중
+  //    이제 ① 목표 2개 이상 ② 각 목표 3회기 이상 ③ 80% 미만 목표가 하나도 없을 때만 숙달로 본다.
+  const MASTERY_MIN_GOALS = 2;
+  const MASTERY_MIN_SESSIONS = 3;
+  const goalsByDomain = (() => {
+    const m = {};
+    domGrowthGoals.forEach(g => {
+      if (!g.quotable) return;
+      const key = cleanDomainKey(g.domain || "");
+      if (!key) return;
+      (m[key] = m[key] || []).push(g);
+    });
+    return m;
+  })();
+  const masteredDomains = (domAvgs || []).filter(d => {
+    if (d.avg < 80) return false;
+    const gs = goalsByDomain[cleanDomainKey(d.domain)] || [];
+    if (gs.length < MASTERY_MIN_GOALS) return false;
+    if (gs.some(g => g.series.length < MASTERY_MIN_SESSIONS)) return false;
+    if (gs.some(g => g.last < 80)) return false;
+    return true;
+  });
 
   // ★ [수정] 가속 판정을 목표 단위 .some() → 전체 추이의 최근 구간 기울기로 교체.
   //    기존엔 목표가 20개면 그 중 하나만 최근 3점에서 +10을 넘어도 참이 돼,
@@ -14657,9 +14758,16 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     const today = new Date();
     const weeksSincePause = Math.max(0, Math.round((today - latestPauseDate) / (1000 * 60 * 60 * 24 * 7)));
     const weeksLeft = Math.max(0, RESUME_WEEKS - weeksSincePause);  // ★ [버그수정] 0 허용 - "재평가 시점 도달" 분기에 도달 가능하도록
+    // ★ [50-2] "2주가 지났고, 2주 후에 재평가"처럼 두 기간이 나란히 붙으면 읽기 어렵다.
+    //    중단일 + 4주 = 재평가 예정일을 실제 날짜로 계산해 문장에 쓴다.
+    const reviewAt = new Date(latestPauseDate.getTime() + RESUME_WEEKS * 7 * 24 * 60 * 60 * 1000);
+    const pad2 = (v) => String(v).padStart(2, "0");
+    const reviewDateText = `${reviewAt.getFullYear()}.${pad2(reviewAt.getMonth() + 1)}.${pad2(reviewAt.getDate())}`;
     return {
       weeksUntilReview: weeksLeft,
       weeksSincePause,
+      reviewDateText,
+      resumeWeeks: RESUME_WEEKS,
       hasDate: true,
       pausedAt: recent[0].pausedAt
     };
@@ -14786,14 +14894,13 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
 
   if (curFields[3] && curFields[3].trim()) {
     sec1Parts.push(curFields[3]);
-  } else if (done.length > 0 && highRate.length > 0) {
-    // ★ [수정] task명은 길어서 28자에서 잘렸다('"어떻게"와 같은 의문사를 자발적으로 사용하여 질문…').
-    //    보고서 카드 제목과 같은 goalName을 쓴다('"어떻게" 이용 맨드').
-    const exemplar = shortTaskName(done[0]?.goalName || done[0]?.name || "주요 목표");
-    // ★ [수정] 뒤쪽 "80% 이상 연속 / DTT·NET 독립 반응" 문장 제거 — 앞 문장과 중복이고 근거 데이터가 없다.
-    // ★ [수정] "촉구(prompt) 수준을 줄였고" 삭제 — 촉구 수준은 앱에서 측정하지 않는다(키워드 입력으로 이관).
-    //    리스트 상향은 listGroup 이동 기록으로 확인되는 사실이라 유지.
-    sec1Parts.push(`'${exemplar}' 등 ${done.length}개 목표에서 리스트를 상향했습니다.`);
+  } else if (listAdvance.steps > 0 && highRate.length > 0) {
+    // ★ [49-2 버그수정] "N개 목표에서 리스트를 상향" 의 N이 done.length(준거 달성 STO 수)였다.
+    //    바로 앞 문장("그중 16개에서 준거를 달성했습니다")과 숫자가 항상 같아
+    //    세 아동 모두 16/16, 22/22, 6/6으로 같은 사실이 두 번 나갔다.
+    //    실제 '리스트 상향'은 한 목표 안에서 다음 단계로 넘어간 경우다.
+    //    준거를 달성했는데 뒤에 이어지는 단계가 없으면 그 목표가 끝난 것이지 상향이 아니다.
+    sec1Parts.push(`'${listAdvance.exemplar}' 등 ${listAdvance.goals}개 목표에서 총 ${listAdvance.steps}회 리스트를 상향했습니다.`);
   } else if (lastAvg > 0) {
     if (lastAvg >= 80) {
       sec1Parts.push(`진행 중인 ${prog.length}개 목표에서 평균 ${lastAvg}%의 정반응률을 보이고 있습니다.`);
@@ -14941,7 +15048,10 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
         cautions.push(`${fn}${josa이가(fn)} '${bn}' 행동을 할 때 바로 반응(혼내기, 달래기, 시선 주기)하시면 관심 획득(attention) 기능이 강화됩니다. 안전한 상황이라면 그 행동에는 시선과 말을 줄이시고, 적절한 방법(이름 부르기, 손 들기, 어깨 두드리기 등)으로 관심을 요청할 때 바로 반응해 주세요.`);
       }
       if (bf.includes("sensory")) {
-        cautions.push(`'${bn}' 행동이 자기자극(감각) 기능일 때는 못 하게 막는 것보다 같은 감각을 채워줄 수 있는 대체 활동을 주는 게 효과적입니다. 손으로 두드리는 행동이면 촉감 장난감이나 찰흙, 몸을 흔드는 행동이면 그네나 트램펄린을 일과 중에 넣어 주세요.`);
+        // ★ [50-3] 뒷문장의 예시가 템플릿 그대로라 실제 행동과 어긋났다.
+        //    ('장난감 위아래로 흔들기'인데 "손으로 두드리는 행동이면…"이 붙었다)
+        //    행동별로 다른 감각을 채워야 하므로, 예시를 특정하지 않고 원리와 상담 안내로 바꾼다.
+        cautions.push(`'${bn}' 행동이 자기자극(감각) 기능일 때는 못 하게 막는 것보다 같은 감각을 채워줄 수 있는 대체 활동을 주는 게 효과적입니다. '${bn}'이 어떤 감각을 채워 주는지(촉각·전정·고유수용 등)에 따라 맞는 활동이 달라지므로, 일과 중에 넣을 대체 활동은 담당 치료사와 함께 정해 주세요.`);
       }
       if (bf.includes("access")) {
         cautions.push(`${fn}${josa이가(fn)} 원하는 걸 얻으려고 '${bn}' 행동을 할 때 그걸 들어주시면 그 행동이 의사소통 수단으로 학습됩니다. 적절한 표현(가리키기, 사인, 그림 카드, 단어 등)을 사용할 때 바로 원하는 걸 주시면 됩니다.`);
@@ -15037,14 +15147,14 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
       const pr = pauseRecommendation;
       const pausedDateText = pr.pausedAt ? pr.pausedAt.replace(/-/g, ".") : "";
       if (pr.weeksUntilReview > 0) {
-        sentences.push(`보류 중인 ${paused.length}개 목표는 ${pausedDateText} 중단 이후 ${pr.weeksSincePause}주가 지났고, ${pr.weeksUntilReview}주 후에 ${fn}의 컨디션과 학습 상황을 보고 재평가한 다음 재개하겠습니다.`);
+        sentences.push(`${pausedDateText} 중단한 ${paused.length}개 항목은 중단 ${pr.resumeWeeks}주 시점인 ${pr.reviewDateText} 무렵에 ${fn}의 컨디션과 학습 상황을 보고 재개 여부를 검토하겠습니다.`);
       } else {
-        sentences.push(`보류 중인 ${paused.length}개 목표는 중단 이후 ${pr.weeksSincePause}주가 지나 재평가 시점이 됐습니다. 다음 회기에서 ${fn}의 현재 상태를 확인하고 우선순위를 조정한 뒤 재개를 검토하겠습니다.`);
+        sentences.push(`중단한 ${paused.length}개 항목은 중단 이후 ${pr.weeksSincePause}주가 지나 재평가 시점이 됐습니다. 다음 회기에서 ${fn}의 현재 상태를 확인하고 우선순위를 조정한 뒤 재개를 검토하겠습니다.`);
       }
     } else if (pauseRecommendation) {
-      sentences.push(`보류 중인 ${paused.length}개 목표는 약 ${pauseRecommendation.weeksUntilReview}주 후 ${fn}의 컨디션이 돌아오면 재평가하고 재개하겠습니다.`);
+      sentences.push(`중단한 ${paused.length}개 항목은 약 ${pauseRecommendation.weeksUntilReview}주 후 ${fn}의 컨디션이 돌아오면 재평가하고 재개하겠습니다.`);
     } else {
-      sentences.push(`보류 중인 ${paused.length}개 목표는 ${fn}의 컨디션이 돌아오면 재개하겠습니다.`);
+      sentences.push(`중단한 ${paused.length}개 항목은 ${fn}의 컨디션이 돌아오면 재개하겠습니다.`);
     }
   }
 
@@ -18234,7 +18344,18 @@ function GoalDashboard({ stos }) {
       const byDate = new Map();
       src.forEach(p => {
         const prev = byDate.get(p.date);
-        if (!prev || p.value > prev.value) byDate.set(p.date, p);
+        if (!prev) { byDate.set(p.date, { ...p }); return; }
+        // ★ [51-2] O·X 판정은 기존 그대로(그날 한 단계라도 성공하면 O),
+        //    단계 표시만 '가장 상위 단계' 기준으로 따로 가져온다.
+        //    (꺾은선 차트·자동 문장이 쓰는 규칙과 같게 맞춘다)
+        const merged = { ...prev };
+        if (p.value > merged.value) merged.value = p.value;
+        if ((p.taskIdx == null ? -1 : p.taskIdx) >= (prev.taskIdx == null ? -1 : prev.taskIdx)) {
+          merged.taskIdx = p.taskIdx;
+          merged.taskListNum = p.taskListNum;
+          merged.taskListGroup = p.taskListGroup;
+        }
+        byDate.set(p.date, merged);
       });
       return [...byDate.values()].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     })();
@@ -18243,20 +18364,49 @@ function GoalDashboard({ stos }) {
     const OX_GREEN = "#38680F", OX_GREEN_BG = "#E4F0D6";
     const OX_RED = "#9C9A94", OX_RED_BG = "#F1F1F0";
     const fmt = (d) => { const a = (d || "").split("-"); return a.length >= 3 ? `${Number(a[1])}.${Number(a[2])}` : d; };
+    // ★ [51-2] 단계(L) 구분 표시. 꺾은선 차트에는 L1·L2 구분선이 있는데 O·X 스트립에는 없어서,
+    //    학습 내용에 L3·L4가 나란히 적혀 있어도 어느 칸이 어느 단계인지 알 수 없었다.
+    //    (지환 '인쇄 글자 매칭 대문자' L3·L4, 도겸 '간단한 동작 모방' L1~L3)
+    //    단계가 바뀌는 자리에 단계 뱃지를 끼워 넣는다. 단계가 하나뿐이면 표시하지 않는다.
+    const OX_STAGE_COLORS = ["#e34948", "#eb6834", "#eda100", "#1baf7a", "#2a78d6", "#3f51b5", "#8e44ad"];
+    const oxStageColor = (n) => OX_STAGE_COLORS[((Number(n) || 1) - 1) % OX_STAGE_COLORS.length];
+    const stageNums = [...new Set(points.map(p => p.taskListNum).filter(v => v != null))];
+    const showStages = stageNums.length > 1;
     return (
       <div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "flex-start" }}>
           {points.map((p, i) => {
             const ok = p.value >= 100;
+            const ln = p.taskListNum;
+            const prevLn = i > 0 ? points[i - 1].taskListNum : null;
+            const stageBadge = showStages && ln != null && ln !== prevLn;
+            const col = oxStageColor(ln);
             return (
-              <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-                <div style={{
-                  width: 28, height: 28, borderRadius: 6, display: "flex", alignItems: "center",
-                  justifyContent: "center", fontSize: 13, fontWeight: 700,
-                  background: ok ? OX_GREEN_BG : OX_RED_BG, color: ok ? OX_GREEN : OX_RED
-                }}>{ok ? "O" : "X"}</div>
-                <span style={{ fontSize: 8.5, color: "#aaa" }}>{fmt(p.date)}</span>
-              </div>
+              <React.Fragment key={i}>
+                {stageBadge && (
+                  <div style={{
+                    display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+                    marginLeft: i > 0 ? 5 : 0, paddingLeft: i > 0 ? 7 : 0,
+                    borderLeft: i > 0 ? "1px dashed #d8d4cc" : "none"
+                  }}>
+                    <div style={{
+                      height: 28, minWidth: 22, padding: "0 5px", borderRadius: 6,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 10, fontWeight: 800, color: col,
+                      background: "#fff", border: `1px solid ${col}`
+                    }}>{`L${ln}`}</div>
+                    <span style={{ fontSize: 8.5, color: "transparent" }}>.</span>
+                  </div>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                  <div style={{
+                    width: 28, height: 28, borderRadius: 6, display: "flex", alignItems: "center",
+                    justifyContent: "center", fontSize: 13, fontWeight: 700,
+                    background: ok ? OX_GREEN_BG : OX_RED_BG, color: ok ? OX_GREEN : OX_RED
+                  }}>{ok ? "O" : "X"}</div>
+                  <span style={{ fontSize: 8.5, color: "#aaa" }}>{fmt(p.date)}</span>
+                </div>
+              </React.Fragment>
             );
           })}
         </div>
@@ -18294,6 +18444,27 @@ function GoalDashboard({ stos }) {
     // 날짜 라벨 솎기 (많으면 일부만)
     const labelEvery = (n) => n <= 6 ? 1 : Math.ceil(n / 6);
 
+    // ★ [51-1] '숙달 80%' 라벨이 데이터 점·값 라벨과 겹쳐 가려지던 문제.
+    //    (지환 p.6·p.11, 도겸 p.4·p.5 — 마지막 점이 80% 선 근처 오른쪽 끝에 놓여 라벨을 덮었다)
+    //    오른쪽 위 → 오른쪽 아래 → 왼쪽 위 → 왼쪽 아래 순으로 점이 없는 자리를 고른다.
+    const MasteryLabel = (cs) => {
+      const LW = 48, LH = 11;
+      const spots = [
+        { x: W - padR - 2, y: y80 - 4,  anchor: "end" },
+        { x: W - padR - 2, y: y80 + 13, anchor: "end" },
+        { x: padL + 2,     y: y80 - 4,  anchor: "start" },
+        { x: padL + 2,     y: y80 + 13, anchor: "start" }
+      ];
+      const blocked = (sp) => {
+        const x0 = sp.anchor === "end" ? sp.x - LW : sp.x;
+        const x1 = x0 + LW;
+        // 점 위 약 12px에 값 라벨(00%)이 붙으므로 위쪽을 넉넉히 잡는다.
+        return (cs || []).some(c => c.x >= x0 - 5 && c.x <= x1 + 5 && c.y >= sp.y - LH - 13 && c.y <= sp.y + 8);
+      };
+      const sp = spots.find(one => !blocked(one)) || spots[1];
+      return <text x={sp.x} y={sp.y} fontSize="8.5" fill="#3D7A0F" textAnchor={sp.anchor} fontWeight="800">숙달 80%</text>;
+    };
+
     if (points.length === 1) {
       const p = points[0];
       const cx = padL + innerW / 2, cy = yOf(p.value);
@@ -18301,7 +18472,7 @@ function GoalDashboard({ stos }) {
         <svg className="dashboard-bigchart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "0 auto", width: `${W}px`, height: `${H}px`, maxWidth: "100%" }}>
           {grid}
           <line x1={padL} y1={y80} x2={W - padR} y2={y80} stroke="#3D7A0F" strokeWidth="1.2" strokeDasharray="4,3" opacity="0.85" />
-          <text x={W - padR - 2} y={y80 - 3} fontSize="8.5" fill="#3D7A0F" textAnchor="end" fontWeight="800">숙달 80%</text>
+          {MasteryLabel([{ x: cx, y: cy }])}
           <circle cx={cx} cy={cy} r="5" fill={safeColor} stroke="#fff" strokeWidth="2" />
           <text x={cx} y={cy - 10} fontSize="9" fill={safeColor} textAnchor="middle" fontWeight="700">{p.value}%</text>
           <text x={cx} y={H - padBottom + 14} fontSize="8" fill="#888" textAnchor="middle">{shortDate(p.date)}</text>
@@ -18331,7 +18502,7 @@ function GoalDashboard({ stos }) {
       <svg className="dashboard-bigchart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "0 auto", width: `${W}px`, height: `${H}px`, maxWidth: "100%" }}>
         {grid}
         <line x1={padL} y1={y80} x2={W - padR} y2={y80} stroke="#3D7A0F" strokeWidth="1.2" strokeDasharray="4,3" opacity="0.85" />
-        <text x={W - padR - 2} y={y80 - 3} fontSize="8.5" fill="#3D7A0F" textAnchor="end" fontWeight="800">숙달 80%</text>
+        {MasteryLabel(coords)}
         {/* 단계별 선 */}
         {Object.entries(stageGroups).map(([key, grp]) => {
           if (grp.pts.length === 0) return null;
