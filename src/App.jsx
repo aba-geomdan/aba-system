@@ -1409,7 +1409,8 @@ function buildInterimNextGoal(selected, info) {
   const cats = CAT_ORDER.filter(c => byCategory[c]);
   if (cats.length === 0) return "";
 
-  const intro = `${fn}${이가(fn)} 지금까지의 학습 진행과 다음 단계 발달 과제를 정리해서, 다음 회기에서는 다음 방향으로 진행할 예정입니다.`;
+  // ★ [수정] 도입 문장 축약 — 자동 문단의 마지막 문장("…를 중심으로 진행하겠습니다")과 내용이 겹쳤다.
+  const intro = `다음 회기에서는 아래 방향으로 진행할 예정입니다.`;
 
   const buildCatPara = (cat, descs) => {
     const heading = `▸ ${CAT_NAMES[cat]}`;
@@ -1571,18 +1572,22 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
   //    글과 그래프가 어긋났다. 목표 전체의 첫 값 → 가장 최근 값으로 본다.
   const growthByGoal = (() => {
     const m = {};
-    ratedStos.forEach(s => {
+    // ★ [버그수정] 같은 날 여러 단계를 기록하면 '그날 최고값'을 쓰던 규칙이 문제였다.
+    //    예: 8.24에 L3=100(이미 끝난 단계), L4=0(현재 단계)이면 100이 이겨서
+    //    "최근 100%"로 나갔지만 카드의 마지막 점은 0%였다.
+    //    stos는 목표별로 단계 순서대로 들어오므로, 배열 위치가 뒤일수록 상위 단계다.
+    //    같은 날짜에는 '가장 상위 단계'의 값을 쓴다.
+    ratedStos.forEach((s, order) => {
       const key = shortTaskName(s.goalName || s.name);
       if (!m[key]) m[key] = { name: key, domain: s.domain, dates: new Map() };
       (s.points || []).forEach(p => {
         if (!p || !p.date || typeof p.value !== "number") return;
         const prev = m[key].dates.get(p.date);
-        // 같은 날 여러 단계를 기록했으면 그날의 최고값으로 본다
-        if (prev == null || p.value > prev) m[key].dates.set(p.date, p.value);
+        if (prev == null || order >= prev.order) m[key].dates.set(p.date, { value: p.value, order });
       });
     });
     return Object.values(m).map(g => {
-      const series = [...g.dates.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(e => e[1]);
+      const series = [...g.dates.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(e => e[1].value);
       return { name: g.name, domain: g.domain, series };
     });
   })();
@@ -1596,8 +1601,13 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
     })
     .sort((a, b) => b.diff - a.diff);
 
+  // ★ [수정] 같은 목표가 두 항목에 중복해 나오던 문제 — 이미 쓴 목표를 기록해 둔다.
+  //    (예: '소근육 모방'이 '향상'과 '빠른 적응'에 동시에 뽑혔다)
+  const usedNames = new Set();
+
   if (withGrowth.length > 0) {
     const top = withGrowth[0];
+    usedNames.add(top.name);
     highlights.push({
       title: `'${top.name}'의 향상`,
       desc: `초기 ${top.first}%에서 최근 ${top.last}%까지 올라가, ${fn}${이가(fn)} 단계적 연습으로 수행 능력이 늘고 있음이 확인됩니다.`
@@ -1612,6 +1622,8 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
     })
     .sort((a, b) => b.finalRate - a.finalRate)
     .slice(0, 2);
+
+  masteredRecent.forEach(m => usedNames.add(shortTaskName(m.name)));
 
   if (masteredRecent.length >= 2) {
     const names = masteredRecent.map(m => `'${shortTaskName(m.name)}'`).join(", ");
@@ -1630,6 +1642,7 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
   // ★ [수정] 최소 데이터 수를 3회 → 5회로 올림.
   //    X·O·O 3회만으로 "단기간에 안정적인 수행"이라고 적히던 문제. O·X 목표도 제외한다.
   const fastClimb = ratedStos.filter(s => {
+    if (usedNames.has(shortTaskName(s.goalName || s.name))) return false;  // ★ 중복 배제
     const pts = s.points || [];
     if (pts.length < 5 || pts.length > 8) return false;
     const last = pts[pts.length - 1]?.value;
@@ -14801,8 +14814,10 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     sec2Parts.push(`${fn}${jEunNeun(fn)} 이번 기간에 설정된 ${total}개 단기 목표(STO) 전체에서 '2회 연속 80% 이상' 준거를 달성했습니다. 학습한 기술이 안정적으로 유지되고 있습니다.${masteredText} 일반화 단계로 넘어갈 차례입니다.`);
   } else if (domGrowth.length >= 2) {
     const g1 = domGrowth[0], g2 = domGrowth[1];
-    const desc1 = g1.masteredFromStart ? `'${g1.domainLabel}' 영역은 안정적으로 수행되고 있고` : `'${g1.domainLabel}' 영역이 ${g1.diff >= 0 ? "+" : ""}${g1.diff}%p 올랐고`;
-    const desc2 = g2.masteredFromStart ? `'${g2.domainLabel}' 영역은 일관되게 수행되고 있습니다` : `'${g2.domainLabel}' 영역도 ${g2.diff >= 0 ? "+" : ""}${g2.diff}%p 올랐습니다`;
+    // ★ [수정] 목표가 1개뿐인 영역을 그냥 "영역"이라 부르면 규모가 과장돼 보인다 — 목표 수를 밝힌다.
+    const cnt = (g) => (g.count === 1 ? "(목표 1개)" : "");
+    const desc1 = g1.masteredFromStart ? `'${g1.domainLabel}' 영역${cnt(g1)}은 안정적으로 수행되고 있고` : `'${g1.domainLabel}' 영역${cnt(g1)}이 ${g1.diff >= 0 ? "+" : ""}${g1.diff}%p 올랐고`;
+    const desc2 = g2.masteredFromStart ? `'${g2.domainLabel}' 영역${cnt(g2)}은 일관되게 수행되고 있습니다` : `'${g2.domainLabel}' 영역${cnt(g2)}도 ${g2.diff >= 0 ? "+" : ""}${g2.diff}%p 올랐습니다`;
     const doneText = done.length > 0 ? ` 전체 ${total}개 STO 중 ${done.length}개에서 준거를 달성했습니다.` : "";
     const accelText = acceleratingTrend ? " 최근 회기에서 더 빠르게 올라가고 있습니다." : "";
     const masteredTail = masteredDomains.length > 0
@@ -14901,7 +14916,8 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   // ★ [수정] % 표기 제거 — 같은 숫자가 영역별 균형 그래프와 종합 현황에 이미 두 번 나온다.
   //    다음 목표는 점수가 아니라 계획을 적는 자리다.
   if (best.domain !== "—" && best.avg >= 80) {
-    sentences.push(`'${cleanDomainKey(best.domain)}' 영역은 숙달 기준에 도달했습니다.`);
+    const bCnt = best.count === 1 ? "(목표 1개)" : "";
+    sentences.push(`'${cleanDomainKey(best.domain)}' 영역${bCnt}은 숙달 기준에 도달했습니다.`);
   }
 
   // ★ [수정] worst.avg !== 0 가드 제거 — 8회 전부 0%처럼 '기록된 0'까지 빠져
@@ -14924,21 +14940,22 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   //    (2) 회기 수도 단계 하나치만 세어 카드에 보이는 칸 수와 어긋났다(받아쓰기 27칸인데 14회기).
   const goalBuckets = (() => {
     const m = {};
-    stos.filter(s => s.status !== "중단").forEach(s => {
+    // ★ [버그수정] 같은 날 여러 단계 기록 시 '최고값'이 아니라 '가장 상위 단계'의 값을 쓴다.
+    //    끝난 이전 단계(L3=100)가 현재 단계(L4=0)를 가려 정체 판정이 어긋났다.
+    stos.filter(s => s.status !== "중단").forEach((s, order) => {
       const key = shortTaskName(s.goalName || s.name);
       if (!m[key]) m[key] = { name: key, dates: new Map(), hasProgress: false };
       (s.points || []).forEach(p => {
-        if (!p || !p.date) return;
+        if (!p || !p.date || typeof p.value !== "number") return;
         const prev = m[key].dates.get(p.date);
-        // 같은 날 여러 단계를 기록했으면 그날의 최고값으로 본다 (O·X 스트립과 같은 규칙)
-        if (prev == null || p.value > prev) m[key].dates.set(p.date, p.value);
+        if (prev == null || order >= prev.order) m[key].dates.set(p.date, { value: p.value, order });
       });
       if (s.status === "진행중") m[key].hasProgress = true;
     });
     return Object.values(m).map(g => ({
       name: g.name,
       hasProgress: g.hasProgress,
-      series: [...g.dates.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(e => e[1])
+      series: [...g.dates.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(e => e[1].value)
     }));
   })();
 
@@ -14997,7 +15014,6 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
 
 function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domainLevelOverrides, getTimeline, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, awaitingNewData, askConfirm, reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportReinfType, reportPromptStart, reportPromptNow, reportNextPlans, reportBehaviors, reportSections, dailyMemos, setReportField, setReportPatch, setInfo, archiveList, cutoffDisabled, setCutoffDisabled, reportMode, setReportMode, onArchiveSave, onArchiveDelete, onArchiveView, onPrev, onPreview, onPrint }) {
   const [showReportHelp, setShowReportHelp] = useState(false); // ★ 인쇄 안내 박스 접기 (기본 접힘)
-  const [showArchiveHelp, setShowArchiveHelp] = useState(false); // ★ 보관함 안내 접기 (기본 접힘)
   const visibleArchiveList = useMemo(() => {
     if (!archiveList || archiveList.length === 0) return [];
     if (currentUser?.role === "admin") {
@@ -16428,6 +16444,9 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");  // "all" / "interim" / "final" / "auto" / "manual"
   const [sortMode, setSortMode] = useState("recent");  // "recent" / "old" / "order"
+  // ★ [버그수정] 이 상태를 ReportTab에 선언해 두는 바람에 ArchiveListCard 렌더링이 터졌다
+  //    (다른 컴포넌트의 변수를 참조 → 보관함을 펼치면 화면이 비었음). 쓰는 곳으로 옮긴다.
+  const [showArchiveHelp, setShowArchiveHelp] = useState(false);  // 보관함 안내 접기 (기본 접힘)
   const count = (list || []).length;
 
   const handleSave = async () => {
