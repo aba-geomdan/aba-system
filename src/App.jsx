@@ -14997,6 +14997,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
 
 function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domainLevelOverrides, getTimeline, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, awaitingNewData, askConfirm, reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportReinfType, reportPromptStart, reportPromptNow, reportNextPlans, reportBehaviors, reportSections, dailyMemos, setReportField, setReportPatch, setInfo, archiveList, cutoffDisabled, setCutoffDisabled, reportMode, setReportMode, onArchiveSave, onArchiveDelete, onArchiveView, onPrev, onPreview, onPrint }) {
   const [showReportHelp, setShowReportHelp] = useState(false); // ★ 인쇄 안내 박스 접기 (기본 접힘)
+  const [showArchiveHelp, setShowArchiveHelp] = useState(false); // ★ 보관함 안내 접기 (기본 접힘)
   const visibleArchiveList = useMemo(() => {
     if (!archiveList || archiveList.length === 0) return [];
     if (currentUser?.role === "admin") {
@@ -16609,14 +16610,38 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
               </div>
             );
           })()}
-          <div style={{ marginTop: 8, padding: "8px 12px", background: "#fafafa", borderRadius: 6, fontSize: 10, color: "#888", lineHeight: 1.6 }}>
-            💡 [👁 미리보기]는 인쇄 양식만 확인하며 <b>보관되지 않습니다</b> (데이터에 영향 없음).<br />
-            💡 [📄 중간보고서 양식으로 인쇄하기] 버튼을 누르면 <b>자동으로 보관됩니다</b> (같은 기간의 자동 보관본은 24시간 이내에 한 번만 저장).<br />
-            💡 [💾 현재 보고서 보관] 버튼은 명시적으로 새 차수로 저장합니다.<br />
-            <br />
-            🔹 [👁 보기] 이 시점에 저장된 보고서를 그대로 열어봅니다 (열람용 · 데이터·그래프에 영향 없음).<br />
-            🔹 [🔒 컷오프 적용 / ↩ 그래프 복원] 보관본은 <b>그대로 두고</b>, 그래프에서 이전 데이터를 숨기거나(컷오프) 다시 표시합니다(복원). 되돌릴 수 있습니다.<br />
-            🔹 [🗑 삭제] 보관본을 <b>영구 삭제</b>합니다. 최신 보관본을 삭제하면 컷오프가 풀려 이전 데이터가 그래프에 다시 나타납니다.
+          {/* ★ [수정] 안내 6줄이 항상 펼쳐져 있어 읽히지 않았다.
+               핵심 한 문장만 남기고 나머지는 접는다. '컷오프'가 뭘 뜻하는지도 먼저 설명한다. */}
+          <div style={{ marginTop: 8, padding: "8px 12px", background: "#fafafa", borderRadius: 6, fontSize: 10.5, color: "#777", lineHeight: 1.7 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+              <span style={{ flex: 1 }}>
+                💡 보고서를 <b>보관</b>하면 그 시점까지의 데이터가 그래프에서 접힙니다(컷오프).
+                다음 보고서는 그 이후에 쌓인 데이터만 다룹니다.
+              </span>
+              <button
+                onClick={() => setShowArchiveHelp(v => !v)}
+                style={{ padding: "2px 8px", fontSize: 10, fontFamily: "inherit", background: "#fff", color: "#777", border: "1px solid #ddd", borderRadius: 5, cursor: "pointer", whiteSpace: "nowrap" }}>
+                {showArchiveHelp ? "▾ 접기" : "▸ 버튼별 설명"}
+              </button>
+            </div>
+
+            {showArchiveHelp && (
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed #ddd" }}>
+                <div style={{ fontWeight: 700, color: "#666", marginBottom: 3 }}>언제 보관되나</div>
+                <div style={{ paddingLeft: 4, marginBottom: 8 }}>
+                  <b>📄 인쇄하기</b> — 누르면 자동으로 보관됩니다 (같은 기간은 24시간에 한 번만)<br />
+                  <b>💾 현재 보고서 보관</b> — 직접 새 차수로 보관합니다<br />
+                  <b>👁 미리보기</b> — 양식만 확인하고 <b>보관하지 않습니다</b>
+                </div>
+
+                <div style={{ fontWeight: 700, color: "#666", marginBottom: 3 }}>보관본으로 할 수 있는 것</div>
+                <div style={{ paddingLeft: 4 }}>
+                  <b>👁 보기</b> — 그때 저장된 보고서를 그대로 열어봅니다 (현재 데이터에 영향 없음)<br />
+                  <b>🔒 컷오프 적용 / ↩ 그래프 복원</b> — 그래프에서 이전 데이터를 숨기거나 다시 봅니다. 보관본 자체는 그대로 두므로 언제든 되돌릴 수 있습니다<br />
+                  <b>🗑 삭제</b> — 보관본을 영구 삭제합니다. 가장 최근 것을 삭제하면 컷오프가 풀려 이전 데이터가 그래프에 다시 나옵니다
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
