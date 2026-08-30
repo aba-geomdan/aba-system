@@ -9501,8 +9501,11 @@ export default function App() {
                 await handleDeleteArchive(id);
               }}
               onView={(item) => setViewingArchive(item)}
+              /* ★ [58-4] IEP 보관함에는 컷오프 개념이 없다. 기존엔 빈 함수를 넘겨
+                 눌러도 아무 일이 없는 버튼이 떠 있었다. isFinalMode로 같이 감춘다. */
+              isFinalMode={true}
               cutoffDisabled={true}
-              setCutoffDisabled={() => {}}
+              setCutoffDisabled={null}
             />
 
             {/* ★ [제거] 목표 템플릿 라이브러리 — 커리큘럼(ELCAR/VB-MAPP/ESDM)+통합검색과 기능 중복으로 삭제 */}
@@ -10240,7 +10243,7 @@ function ArchiveViewModal({ item, onClose }) {
         {/* 헤더 */}
         <div style={{ padding: "16px 22px", borderBottom: "1px solid #f0e0e5", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: PKD, marginBottom: 4 }}>📁 {item.title || `${item.period} - ${item.order}차`}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: PKD, marginBottom: 4 }}>📁 {archiveDisplayTitle(item)}</div>
             <div style={{ fontSize: 11, color: "#888" }}>
               {snapshot?.childName} · 저장: {fmtTime(item.savedAt)}
               {item.auto && <span style={{ marginLeft: 6, fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "#e6f1fb", color: "#185fa5" }}>자동 보관</span>}
@@ -11035,11 +11038,12 @@ function BarChart({ data }) {
   );
 }
 
-function VbmappGrid({ goals }) {
-  const domainNames = VBMAPP_GRID_DATA.domains;
-  if (!domainNames || domainNames.length === 0) {
-    return <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: "#aaa" }}>VB-MAPP 데이터 없음</div>;
-  }
+// ★ [58-6] 격자 채움 계산 — 표를 그릴 때와 개수를 셀 때가 같은 결과를 보게 분리한다.
+//    (유찬: 16개 영역 중 동그라미 하나뿐인 표가 그대로 인쇄돼, 커리큘럼에서 몇 개만 고른 것이
+//     "평가했는데 거의 못 했다"처럼 읽혔다. 아래 MIN 미만이면 섹션을 통째로 생략한다.)
+const VBMAPP_MIN_DOTS = 5;
+function buildVbmappFilled(goals) {
+  const domainNames = (VBMAPP_GRID_DATA && VBMAPP_GRID_DATA.domains) || [];
   const filled = {};
   domainNames.forEach(d => { filled[d] = { 1: new Set(), 2: new Set(), 3: new Set() }; });
   (goals || []).forEach(g => {
@@ -11075,6 +11079,20 @@ function VbmappGrid({ goals }) {
       }
     });
   });
+  return { domainNames, filled };
+}
+function countVbmappDots(goals) {
+  const { domainNames, filled } = buildVbmappFilled(goals);
+  let n = 0;
+  domainNames.forEach(d => { n += filled[d][1].size + filled[d][2].size + filled[d][3].size; });
+  return n;
+}
+
+function VbmappGrid({ goals }) {
+  const { domainNames, filled } = buildVbmappFilled(goals);
+  if (!domainNames || domainNames.length === 0) {
+    return <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: "#aaa" }}>VB-MAPP 데이터 없음</div>;
+  }
   const hasData = domainNames.some(d => filled[d][1].size > 0 || filled[d][2].size > 0 || filled[d][3].size > 0);
   if (!hasData) {
     return <div style={{ padding: 14, textAlign: "center", fontSize: 11, color: "#aaa" }}>
@@ -11974,8 +11992,10 @@ cleanedHTML + '\n' +
                               <td style={{ padding: "8px 12px", background: "#f5f7f0", fontWeight: 600, color: "#3d6014", border: "1px solid #d4e5ba", verticalAlign: "top" }}>데이터 분석 기간</td>
                               <td style={{ padding: "8px 12px", border: "1px solid #d4e5ba" }}>
                                 {pg.analysisRange}{pg.spanLabel ? ` (${pg.spanLabel})` : ""}
+                                {/* ★ [58-5] 뒷문장은 '이전 구간 경과' 행이 실제로 있을 때만.
+                                    비워두면 없는 줄을 가리키는 안내가 나갔다. */}
                                 <div style={{ fontSize: 11, color: "#767676", marginTop: 3, lineHeight: 1.6 }}>
-                                  ※ 본 보고서의 정반응률·성장 추이 분석은 위 기간의 기록을 대상으로 합니다. 그 이전 구간의 경과는 아래에 별도로 기술하였습니다.
+                                  ※ 본 보고서의 정반응률·성장 추이 분석은 위 기간의 기록을 대상으로 합니다.{prior ? " 그 이전 구간의 경과는 아래에 별도로 기술하였습니다." : ""}
                                 </div>
                               </td>
                             </tr>
@@ -12041,6 +12061,9 @@ cleanedHTML + '\n' +
                 g.source === "VB-MAPP" || classifyCurriculum(g.domain || "") === "vbmapp"
               );
               if (!hasVbmapp) return null;
+              // ★ [58-6] 커리큘럼에서 몇 개만 고른 아동은 표가 거의 비어 나간다.
+              //    빈 표는 정보가 아니라 오해를 만들어, 채워진 동그라미가 적으면 섹션째 생략한다.
+              if (countVbmappDots(goals) < VBMAPP_MIN_DOTS) return null;
               return (
                 <PrintSection num={nextSn()} title="VB-MAPP 마일스톤 현황">
                   <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
@@ -12068,10 +12091,17 @@ cleanedHTML + '\n' +
 
             {/* ★ [신규] 성장 추이 - 보고 기간 동안 평균 정반응률 변화 (라인 차트) */}
             {(() => {
+              // ★ [58-7] 종결보고서는 치료 전 기간을 다루므로 컷오프를 걸지 않는다.
+              //    이 블록만 archiveList에서 컷오프를 다시 계산해, 종결 모드인데도
+              //    중간 보관본 기준으로 그래프 앞부분이 잘렸다.
+              //    (유찬: 치료 개요의 데이터 분석 기간은 2026-05-07부터인데
+              //     성장 추이 첫 점만 05-11 — 같은 보고서 안에서 시작일이 둘로 갈렸다)
               let cutoffDate = null;
-              const cutoffArchives = (archiveList || []).filter(item => !item.isFinal);
-              if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
-                cutoffDate = cutoffOf(cutoffArchives[0]);
+              if (!isFinalMode) {
+                const cutoffArchives = (archiveList || []).filter(item => !item.isFinal);
+                if (cutoffArchives.length > 0 && cutoffArchives[0].savedAt) {
+                  cutoffDate = cutoffOf(cutoffArchives[0]);
+                }
               }
               // ★ 보고 기간 연동 — 단일 진실원(props) 사용. evalEnd 대타 제거.
               const periodStart = reportPeriodStart;
@@ -17380,6 +17410,8 @@ function archiveDisplayTitle(item) {
   if (!item) return "";
   const period = item.period || "";
   if (!period) return item.title || "보고서";
+  // ★ IEP 보관함도 같은 카드를 쓴다. isIep을 먼저 걸러야 IEP가 '중간보고서'로 찍히지 않는다.
+  if (item.isIep) return `IEP 계획안 (${period})` + (item.order ? ` · ${item.order}차` : "");
   if (item.isFinal) return `종결보고서 (${period})`;
   return `중간보고서 (${period})` + (item.order ? ` · ${item.order}차` : "");
 }
