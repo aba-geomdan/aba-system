@@ -2732,6 +2732,22 @@ function getRatedGoalSeries(goal) {
   return getCombinedDailySeries({ ...goal, tasks: ratedTasks });
 }
 
+// ★ [55-1] 영역별 균형(막대)이 문장과 같은 목표 집합을 보게 한다.
+//    getRatedGoalSeries는 O·X 단계를 빼고 남은 %단계의 '마지막 값'을 목표값으로 잡는다.
+//    그래서 현재 진행 단계가 O·X인 목표는 이미 끝난 하위 단계의 100%를 그대로 물고 갔다.
+//      예) 도겸 '소근육 모방' — 카드 그래프는 현재 단계 0%, 영역 막대는 100%,
+//          문장(buildGoalSeries.quotable)은 아예 제외 → 한 보고서 안에서 세 가지로 취급됨.
+//          그 결과 언어행동기초가 96%로 잡혀 "숙달 → 일반화" 권고까지 이어졌다.
+//    판정 기준을 buildGoalSeries의 quotable과 맞춘다: 중단 단계 제외 후,
+//    데이터가 있는 O·X 단계가 하나라도 섞여 있으면 %평균에서 뺀다(카드 그래프는 그대로 둔다).
+function goalQuotableForAvg(goal) {
+  const tasks = ((goal && goal.tasks) || []).filter(t => t.listGroup !== "paused");
+  const withData = tasks.filter(t => Object.keys(t.daily || {}).length > 0);
+  if (withData.length === 0) return false;
+  if (withData.some(t => taskIsOX(t))) return false;
+  return true;
+}
+
 function generateCurrentLevel(goal) {
   const { domain, subDomain, item, note, vbmapp, esdm, source } = goal;
 
@@ -5854,6 +5870,9 @@ export default function App() {
       // ★ [수정] O·X 목표 제외 — 0/100 환산값이 영역 평균을 부풀린다.
       //    (예: '회기당 1회 성공'인 맨드 목표 4개의 마지막 O가 각각 100%로 잡혀 청자 영역이 96%가 됨)
       if (goalIsOX(g)) return;
+      // ★ [55-1] 현재 단계가 O·X이거나 단계별 측정 방식이 섞인 목표도 제외 —
+      //    문장 쪽(buildGoalSeries.quotable)과 같은 집합을 보게 한다.
+      if (!goalQuotableForAvg(g)) return;
       // ★ 요약카드(summary.avg)와 동일 기준으로 통일 — goal 통합 시계열의 최근 값 사용.
       //   (기존: task별 독립 최신값 평균 → goal 최근 세션 통합값. 요약카드와 계산 일치)
       // ★ [48-1] getTimeline → getRatedGoalSeries. O·X 단계가 섞인 목표에서
@@ -18649,7 +18668,11 @@ function GoalDashboard({ stos }) {
           //    카드가 CURR_BREAK_MIN_CARDS개 이상인 그룹만 새 페이지에서 시작하고,
           //    그보다 작은 그룹은 앞 페이지의 남은 자리에 흘려 넣는다.
           //    (그룹 박스 자체에는 break-inside 제한이 없어 페이지를 걸쳐도 카드는 안 잘린다)
-          const CURR_BREAK_MIN_CARDS = 3;
+          // ★ [55-2] 3 → 999. 카드 3장 이상 그룹의 강제 개행도 없앤다.
+          //    (지환 p.5 — VB-MAPP 마지막 카드 1장만 남고 ELCAR가 새 페이지에서 시작해
+          //     페이지의 65%가 비었다. 그룹 헤더가 페이지 중간에서 시작하는 건 허용.)
+          //    다시 켜려면 이 값을 3으로 되돌리면 된다.
+          const CURR_BREAK_MIN_CARDS = 999;
           const currCardCount = domains.reduce((n, dom) => n + (currGroups[curr][dom] || []).length, 0);
           const isPdfCurrBreak = renderedCurrCount > 0 && currCardCount >= CURR_BREAK_MIN_CARDS;
           renderedCurrCount++;
