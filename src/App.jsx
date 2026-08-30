@@ -5104,6 +5104,17 @@ export default function App() {
     }));
   };
 
+  // ★ [신규] 유지 점검 핀 — 습득 완료한 과제를 데일리 시트에 '참고용 한 줄'로 계속 띄운다.
+  //    종이 시트의 세션 메모 줄("청자:책상 두드려/박수쳐/만세해")이 하던 역할.
+  //    기록은 하지 않는다 — 습득한 과제의 프로브 값이 시계열에 다시 들어가면
+  //    목표 최근값·영역 평균·보고서 문장이 실제보다 높아지기 때문.
+  const toggleTaskKeepRef = (goalId, taskId) => {
+    setGoals(prev => prev.map(g => {
+      if (g.id !== goalId) return g;
+      return { ...g, tasks: (g.tasks || []).map(t => t.id === taskId ? { ...t, keepRef: !t.keepRef } : t) };
+    }));
+  };
+
   const setTaskMeasureMode = (goalId, taskId, mode, date) => {
     if (mode !== "pct" && mode !== "raw" && mode !== "click") return;
     setGoals(prev => prev.map(g => {
@@ -8797,6 +8808,7 @@ export default function App() {
             activeChildId={activeChildId}
             calcDayRate={calcDayRate}
             addTask={addTask} removeTask={removeTask} renameTask={renameTask}
+            toggleTaskKeepRef={toggleTaskKeepRef}
             bumpTask={bumpTask} setTaskDayOX={setTaskDayOX} resetTask={resetTask}
             setTaskListGroup={setTaskListGroup}
             setTaskMeasureMode={setTaskMeasureMode}
@@ -12417,7 +12429,7 @@ function StrategyConsolidatedTable({ goals }) {
   );
 }
 
-function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, addTask, removeTask, renameTask, bumpTask, setTaskDayOX, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, clearPendingNext, updateGoal, dailyMemos, setDailyMemo, archiveList, mediaList, setInfo, addHistory, onPrev, onNext }) {
+function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, addTask, removeTask, renameTask, toggleTaskKeepRef, bumpTask, setTaskDayOX, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, clearPendingNext, updateGoal, dailyMemos, setDailyMemo, archiveList, mediaList, setInfo, addHistory, onPrev, onNext }) {
   const [hideMastered, setHideMastered] = useState({ "ELCAR": true, "VB-MAPP": true, "ESDM": true, "기타": true });
   const [hidePaused, setHidePaused] = useState({ "ELCAR": true, "VB-MAPP": true, "ESDM": true, "기타": true });
   const currentMemo = (dailyMemos && dailyMemos[dailyDate]) || "";
@@ -13317,6 +13329,7 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
                         addTask={addTask}
                         removeTask={removeTask}
                         renameTask={renameTask}
+                        toggleTaskKeepRef={toggleTaskKeepRef}
                         bumpTask={bumpTask}
                         setTaskDayOX={setTaskDayOX}
                         resetTask={resetTask}
@@ -13348,7 +13361,7 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
   );
 }
 
-function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask, bumpTask, setTaskDayOX, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, clearPendingNext, updateGoal }) {
+function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask, toggleTaskKeepRef, bumpTask, setTaskDayOX, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, clearPendingNext, updateGoal }) {
   const [newTaskName, setNewTaskName] = useState("");
   const [showMastered, setShowMastered] = useState(false);
   const [showPaused, setShowPaused] = useState(true);  // paused는 기본 펼침 (확인 필요한 항목)
@@ -13524,6 +13537,79 @@ function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask
               removeTask={removeTask} renameTask={renameTask} />
           );
         })}
+
+        {/* ★ [신규] 유지 점검 참고 줄 — 종이 데이터 시트의 '세션 메모' 줄 역할.
+             습득 완료 과제 중 📌 핀한 것만 이름을 한 줄로 보여준다. 기록칸은 없다(참고 전용).
+             기록을 받지 않는 이유: 습득한 과제의 프로브 값이 시계열에 다시 들어가면
+             목표 최근값·영역 평균·보고서 문장이 실제 수행보다 높아진다. */}
+        {(() => {
+          const refTasks = list2.filter(t => t.keepRef);
+          if (refTasks.length === 0) return null;
+          return (
+            <div style={{ marginTop: 6, padding: "6px 9px", background: "#f7f9f3", border: "1px dashed #c5d99c", borderRadius: 6, display: "flex", gap: 7, alignItems: "flex-start" }}>
+              <span style={{ fontSize: 9.5, fontWeight: 700, color: "#4a7316", whiteSpace: "nowrap", paddingTop: 1 }}>📌 유지 점검</span>
+              <span style={{ fontSize: 10.5, color: "#5d6b4d", lineHeight: 1.65 }}>
+                {refTasks.map((t, i) => (
+                  <span key={t.id}>
+                    {i > 0 && <span style={{ color: "#b5c4a3" }}> · </span>}
+                    {t.name}
+                  </span>
+                ))}
+              </span>
+            </div>
+          );
+        })()}
+
+        {/* ★ [신규] 습득 완료 과제 접힘 목록 — 여기서 📌 유지 점검 핀을 켠다.
+             기존엔 이 목록이 목표 카드 안에 없어서, 앞 리스트에서 습득한 과제를
+             데일리 시트에서 다시 볼 방법이 커리큘럼 단위 전체 펼치기밖에 없었다. */}
+        {list2.length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            <button
+              onClick={() => setShowMastered(v => !v)}
+              style={{
+                padding: "3px 9px", fontSize: 10, fontFamily: "inherit",
+                background: "#fff", color: "#4a7316",
+                border: "1px solid #c5d99c", borderRadius: 6,
+                cursor: "pointer", fontWeight: 600
+              }}>
+              {showMastered ? "▾" : "▸"} 습득 완료 과제 {list2.length}개
+              {list2.filter(t => t.keepRef).length > 0 && (
+                <span style={{ marginLeft: 5, color: "#7a9968", fontWeight: 500 }}>
+                  · 📌 {list2.filter(t => t.keepRef).length}
+                </span>
+              )}
+            </button>
+            {showMastered && (
+              <div style={{ marginTop: 5, padding: "6px 8px", background: "#fbfdf8", border: "1px solid #e0ebd2", borderRadius: 6 }}>
+                <div style={{ fontSize: 9.5, color: "#8a9a78", marginBottom: 5 }}>
+                  📌을 켜면 위 진행 과제 아래에 이름만 한 줄로 남습니다 (기록칸 없음).
+                </div>
+                {list2.map(t => (
+                  <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "2px 0" }}>
+                    <button
+                      onClick={() => toggleTaskKeepRef && toggleTaskKeepRef(goal.id, t.id)}
+                      title={t.keepRef ? "유지 점검 줄에서 빼기" : "유지 점검 줄에 남기기"}
+                      style={{
+                        width: 22, height: 20, lineHeight: 1,
+                        border: `1px solid ${t.keepRef ? "#7a9968" : "#ddd"}`,
+                        background: t.keepRef ? "#e4f0d6" : "#fff",
+                        borderRadius: 5, cursor: "pointer",
+                        fontSize: 10, fontFamily: "inherit",
+                        opacity: t.keepRef ? 1 : 0.45
+                      }}>📌</button>
+                    <span style={{ fontSize: 10.5, color: t.keepRef ? "#3d6014" : "#888", fontWeight: t.keepRef ? 600 : 400 }}>
+                      {t.name}
+                    </span>
+                    {t.masteredAt && (
+                      <span style={{ fontSize: 9, color: "#aab89a", marginLeft: "auto" }}>{t.masteredAt}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* task 추가 입력 */}
         {/* ★ [중간 투입 아동] 첫 task 추가 직전에만 시작 L차수 입력 표시 */}
