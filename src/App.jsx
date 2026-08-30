@@ -1000,18 +1000,21 @@ function buildSummary(stosForReport, info) {
   const active = stosForReport.filter(s => s.status !== "중단");
   const total = active.length;
   const done = active.filter(s => s.status === "완료").length;
-  // ★ [수정] 평균 계산에서 O·X 목표 제외 — 0/100 환산값이 평균을 부풀렸다.
-  //    준거 달성 개수(done)는 O·X 목표도 실제 달성이므로 그대로 센다.
-  const rated = active.filter(s => !s.isOX);
+  // ★ [57-7] 표지 요약도 buildGoalSeries 기준으로 맞춘다.
+  //    기존엔 STO 단위로 !s.isOX만 봐서, 한 목표 안에 L1=O·X / L2=%가 섞여 있으면
+  //    L2만 통과해 "달성률 평균이 40%에서 60%로 +20%p" 같은 문장이 표지에 실렸다.
+  //    같은 목표를 buildGoalSeries는 hasOXStage로 통째로 제외하므로,
+  //    한 보고서 안에서 표지는 %를 말하고 종합 평가는 "산출하지 않았다"고 말하는 모순이 생겼다.
+  //    목표(goal) 단위로 묶고, 시작·종결 값은 비교 섹션과 같은 창(compareEdgeSize)을 쓴다.
+  //    개수(total/done)는 STO 단위 그대로 — '영역별 완료 현황'의 과제 수와 맞춘다.
+  const series = buildGoalSeries(active).filter(g => g.quotable && g.series.length > 0);
   let lastSum = 0, lastCnt = 0, firstSum = 0, firstCnt = 0;
-  rated.forEach(s => {
-    const pts = s.points || [];
-    if (pts.length > 0) {
-      const lastV = pts[pts.length - 1].value;
-      const firstV = pts[0].value;
-      if (typeof lastV === "number") { lastSum += lastV; lastCnt++; }
-      if (typeof firstV === "number") { firstSum += firstV; firstCnt++; }
-    }
+  series.forEach(g => {
+    const n = compareEdgeSize(g.series.length);
+    const head = g.series.slice(0, n);
+    const tail = g.series.slice(-n);
+    firstSum += head.reduce((a, b) => a + b, 0) / head.length; firstCnt++;
+    lastSum += tail.reduce((a, b) => a + b, 0) / tail.length; lastCnt++;
   });
   const lastAvg = lastCnt > 0 ? Math.round(lastSum / lastCnt) : 0;
   const firstAvg = firstCnt > 0 ? Math.round(firstSum / firstCnt) : 0;
@@ -1021,11 +1024,18 @@ function buildSummary(stosForReport, info) {
   //    "달성률 평균 0%를 유지했고, 9개 STO 중 6개에서 준거를 달성했습니다"라는
   //    자기모순 문장이 나갔다. 이 경우 %는 아예 말하지 않는다.
   const hasRated = lastCnt > 0;
+  // ★ [57-7] %를 못 쓰는 이유가 두 가지다 — 전부 O·X인 경우와,
+  //    한 목표 안에 O·X 단계와 % 단계가 섞여 제외된 경우.
+  //    후자에 "모든 목표가 O·X 방식"이라고 적으면 사실과 다르다.
+  const allOX = active.length > 0 && active.every(s => s.isOX);
+  const noRateReason = allOX
+    ? "모든 목표가 회기당 1회 기록(O·X) 방식이라 달성률 평균은 산출하지 않습니다."
+    : "목표별 측정 방식이 회기당 1회 기록(O·X)과 정반응률로 섞여 있어 달성률 평균은 산출하지 않습니다.";
   if (total === 0) {
     return `${fn}${josa은는(fn)} 본 보고 기간에 평가가 진행됐습니다.`;
   } else if (!hasRated) {
     return done > 0
-      ? `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 단기 목표(STO) 중 ${done}개에서 준거를 달성했습니다. 모든 목표가 회기당 1회 기록(O·X) 방식이라 달성률 평균은 산출하지 않습니다.`
+      ? `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 단기 목표(STO) 중 ${done}개에서 준거를 달성했습니다. ${noRateReason}`
       : `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 단기 목표(STO)를 회기당 1회 기록(O·X) 방식으로 진행했습니다.`;
   } else if (done === total && done > 0) {
     return `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 단기 목표(STO) 전체에서 준거를 달성해 안정화 단계에 들어갔습니다.`;
@@ -2063,6 +2073,39 @@ function buildReferralReason(selected, info) {
   return [para1, para2, para3].join(" ");
 }
 
+// ★ [57-1] 의뢰 사유 IEP 연동.
+//    같은 아동인데 IEP와 종결보고서가 의뢰 사유를 따로 입력받아,
+//    한 아동의 두 보고서에 서로 다른 주호소가 나갈 수 있었다.
+//    저장 형식이 양쪽 다 "본문 + <!--SELECTED:키워드|키워드-->"로 같으므로 키워드를 그대로 가져온다.
+//    본문은 복사가 아니라 재생성한다 — IEP는 "…도모하고자 합니다"(현재), 종결은 "…진행하였습니다"(과거)라
+//    문장을 그대로 옮기면 종결보고서에 IEP 어투가 그대로 박힌다.
+const REFERRAL_MARKER_RE = /\n*<!--SELECTED:([^>]*)-->\s*$/;
+function referralKeywordsOf(text) {
+  const m = (text || "").match(REFERRAL_MARKER_RE);
+  return m ? m[1].split("|").filter(Boolean) : [];
+}
+function referralVisibleText(text) {
+  return (text || "")
+    .replace(REFERRAL_MARKER_RE, "")
+    .replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n")
+    .trim();
+}
+// IEP 의뢰 사유 → 종결보고서용 값(본문 + 마커). 가져올 게 없으면 "".
+function finalReferralFromIep(info) {
+  const kw = referralKeywordsOf(info && info.iepReferralReason);
+  if (kw.length > 0) {
+    const para = buildReferralReason(kw, info);
+    if (para) return para + "\n\n<!--SELECTED:" + kw.join("|") + "-->";
+  }
+  // 키워드 없이 손으로만 쓴 IEP 의뢰 사유는 그대로 가져온다.
+  return referralVisibleText(info && info.iepReferralReason);
+}
+// 인쇄·자동 문장이 함께 쓰는 최종 의뢰 사유. 종결 값이 비면 IEP로 폴백.
+function effectiveReferralReason(info) {
+  if (referralVisibleText(info && info.finalReferralReason)) return info.finalReferralReason;
+  return finalReferralFromIep(info);
+}
+
 function buildEndReason(selected, info) {
   if (!selected || selected.length === 0) return "";
   const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
@@ -2123,10 +2166,13 @@ function buildEndReason(selected, info) {
   return `${intro} ${body} ${closing}`;
 }
 
-function buildFinalSummary(goals, info) {
+// ★ [57-2] periodEnd — 표지·치료 개요 표와 같은 값(reportPeriodEnd)을 넘겨받는다.
+// ★ [57-4] stos — 넘기면 비교 섹션과 같은 계산(buildStartEndCompare)을 쓴다.
+//    안 넘기면 예전 동작 그대로.
+function buildFinalSummary(goals, info, periodEnd, stos) {
   const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
   const startDate = info?.evalStart || "";
-  const endDate = info?.finalEndDate || info?.evalEnd || "";
+  const endDate = periodEnd || info?.finalEndDate || info?.evalEnd || "";
   // 날짜 역전 방어 (입력이 거꾸로여도 정렬)
   const [startDateO, endDateO] = orderDateRange(startDate, endDate);
 
@@ -2139,49 +2185,22 @@ function buildFinalSummary(goals, info) {
   });
   const totalSessions = allSessionDates.size;
 
-  const byDomain = {};
-  let firstSessionDate = null;
-  goals.forEach(g => {
-    if (!g.includeInIep) return;
-    const d = g.domain || "(영역 없음)";
-    if (!byDomain[d]) byDomain[d] = { firstRates: [], lastRates: [], masteredTasks: 0, pausedTasks: 0, totalTasks: 0 };
-    (g.tasks || []).forEach(t => {
-      byDomain[d].totalTasks++;
-      if ((t.listGroup || "1") === "2") byDomain[d].masteredTasks++;
-      if ((t.listGroup || "1") === "paused") byDomain[d].pausedTasks++;
-      const dates = Object.keys(t.daily || {}).sort();
-      if (dates.length > 0 && (!firstSessionDate || dates[0] < firstSessionDate)) firstSessionDate = dates[0];
-      const rates = dates.map(d2 => calcDayRateGlobal(t.daily[d2], t.plannedTrials)).filter(r => r !== null);
-      if (rates.length > 0) {
-        const N = 5;
-        const firstN = rates.slice(0, Math.min(N, rates.length));
-        const lastN = rates.slice(-Math.min(N, rates.length));
-        const firstAvg = firstN.reduce((a, b) => a + b, 0) / firstN.length;
-        const lastAvg = lastN.reduce((a, b) => a + b, 0) / lastN.length;
-        byDomain[d].firstRates.push(firstAvg);
-        byDomain[d].lastRates.push(lastAvg);
-      }
-    });
-  });
+  // ★ [57-4] 비교 섹션과 같은 계산을 쓴다.
+  //    기존엔 여기서 goals를 다시 묶어 buildGoalSeries를 우회했고, 그래서
+  //    O·X 목표·중단 STO·측정방식 혼재 목표가 종합 평가에만 섞여 들어갔다.
+  const cmp = buildStartEndCompare(stos || [], goals);
+  const totalDomains = cmp.rows.length;
+  const totalTasks = cmp.totalTasks;
+  const totalMastered = cmp.totalMastered;
+  const totalPaused = cmp.totalPaused;
+  const masterPct = cmp.masterPct;
 
-  const domainSummaries = Object.entries(byDomain).map(([dom, d]) => {
-    const firstAvg = d.firstRates.length > 0 ? Math.round(d.firstRates.reduce((a, b) => a + b, 0) / d.firstRates.length) : null;
-    const lastAvg = d.lastRates.length > 0 ? Math.round(d.lastRates.reduce((a, b) => a + b, 0) / d.lastRates.length) : null;
-    const change = (firstAvg !== null && lastAvg !== null) ? lastAvg - firstAvg : null;
-    return { domain: dom, firstAvg, lastAvg, change, masteredTasks: d.masteredTasks, pausedTasks: d.pausedTasks, totalTasks: d.totalTasks };
-  }).filter(r => r.totalTasks > 0);
-
-  const totalDomains = domainSummaries.length;
-  const totalTasks = domainSummaries.reduce((s, r) => s + r.totalTasks, 0);
-  const totalMastered = domainSummaries.reduce((s, r) => s + r.masteredTasks, 0);
-  const totalPaused = domainSummaries.reduce((s, r) => s + r.pausedTasks, 0);
-  const masterPct = totalTasks > 0 ? Math.round(totalMastered / totalTasks * 100) : 0;
-
-  const sortedByChange = [...domainSummaries].filter(r => r.change !== null && r.change > 0).sort((a, b) => b.change - a.change);
-  const topDomains = sortedByChange.slice(0, 3);
-
-  const validChanges = domainSummaries.map(r => r.change).filter(c => c !== null);
-  const avgChange = validChanges.length > 0 ? Math.round(validChanges.reduce((a, b) => a + b, 0) / validChanges.length) : 0;
+  const topDomains = cmp.quotableRows
+    .filter(r => r.change !== null && r.change > 0)
+    .sort((a, b) => b.change - a.change)
+    .slice(0, 3);
+  // %로 서술 가능한 영역이 하나도 없으면 null — 아래에서 %p 문장을 통째로 생략한다.
+  const avgChange = cmp.avgChange;
 
   let monthsLabel = "";
   if (startDateO && endDateO) {
@@ -2205,7 +2224,8 @@ function buildFinalSummary(goals, info) {
   } else {
     para1Parts.push(`${fn}${josa은는(fn)} 본 ABA 치료 프로그램에 참여하였습니다.`);
   }
-  const referral = (info?.finalReferralReason || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
+  // ★ [57-1] 종결 값이 비어 있으면 IEP 의뢰 사유로 폴백 — 인쇄 본문과 같은 문장을 인용한다.
+  const referral = referralVisibleText(effectiveReferralReason(info));
   if (referral) {
     const firstSentence = referral.split(/[.\n]/).find(s => s.trim().length > 10) || referral.split("\n")[0];
     if (firstSentence && firstSentence.trim()) {
@@ -2239,7 +2259,14 @@ function buildFinalSummary(goals, info) {
   } else if (totalTasks > 0) {
     para2Parts.push(`치료 기간 동안 여러 학습 과제를 단계적으로 진행하며 각 과제에서 학습 진행이 확인되었습니다.`);
   }
-  if (avgChange >= 25) {
+  // ★ [57-4] avgChange가 null이면 %로 서술할 수 있는 영역이 없다는 뜻(전 목표 O·X 등).
+  //    요약 카드는 "달성률 평균은 산출하지 않습니다"라고 적는데 여기만 %p를 적어
+  //    한 보고서 안에서 서로 부딪히던 문장이다. 이 경우 개수 기반으로만 말한다.
+  if (avgChange === null) {
+    if (totalMastered > 0) {
+      para2Parts.push(`목표별 기록 방식이 회기당 1회(O·X)여서 정반응률 평균은 산출하지 않았으며, 준거 달성 과제 수를 기준으로 진행을 확인하였습니다.`);
+    }
+  } else if (avgChange >= 25) {
     para2Parts.push(`전반적으로 영역별 평균 정반응률이 약 ${avgChange}%p 향상되어, 치료 기간 동안 유의한 발달적 진전이 확인되었습니다.`);
   } else if (avgChange >= 15) {
     para2Parts.push(`전반적인 영역별 평균 정반응률이 약 ${avgChange}%p 향상되어, 학습 진행이 안정적으로 이루어졌음이 확인되었습니다.`);
@@ -2281,7 +2308,10 @@ function buildFinalSummary(goals, info) {
   return [para1, para2, para3, para4, para5].filter(Boolean).join("\n\n");
 }
 
-function buildFinalGrowth(goals, info) {
+// ★ [57-5] stos — 넘기면 학습 곡선을 buildGoalSeries 기준으로 계산한다.
+//    기존엔 t.daily를 직접 훑어서 O·X(회기당 1회) 기록도 0/100으로 환산해 평균에 넣었다.
+//    조영훈 보고서: 전 목표가 O·X인데 "초기 11% → 중반 46% → 종결 32%"가 그대로 나갔다.
+function buildFinalGrowth(goals, info, stos) {
   const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
   const i_ga = josa이가(fn) === "이" ? "이" : "가";
 
@@ -2291,6 +2321,7 @@ function buildFinalGrowth(goals, info) {
   const masteredByMonth = {};  // YYYY-MM → [task, ...] 시간 흐름에 따른 숙달
   let totalMastered = 0;
   let totalPaused = 0;
+  const hasStos = Array.isArray(stos) && stos.length > 0;
 
   goals.forEach(g => {
     if (!g.includeInIep) return;
@@ -2300,21 +2331,35 @@ function buildFinalGrowth(goals, info) {
         if (!firstSessionDate || dates[0] < firstSessionDate) firstSessionDate = dates[0];
         if (!lastSessionDate || dates[dates.length - 1] > lastSessionDate) lastSessionDate = dates[dates.length - 1];
       }
-      dates.forEach(date => {
-        const rate = calcDayRateGlobal(t.daily[date], t.plannedTrials);
-        if (rate !== null) allRates.push({ date, rate });
-      });
+      // ★ [57-5] stos가 있으면 정반응률은 아래에서 buildGoalSeries로 다시 모은다.
+      //    여기서 t.daily를 직접 환산하면 O·X 기록이 0/100으로 섞여 들어간다.
+      if (!hasStos) {
+        dates.forEach(date => {
+          const rate = calcDayRateGlobal(t.daily[date], t.plannedTrials);
+          if (rate !== null) allRates.push({ date, rate });
+        });
+      }
       if ((t.listGroup || "1") === "2") {
         totalMastered++;
         const m = (t.masteredAt || dates[dates.length - 1] || "").slice(0, 7);
         if (m) {
           if (!masteredByMonth[m]) masteredByMonth[m] = [];
-          masteredByMonth[m].push({ name: t.name, domain: g.domain });
+          masteredByMonth[m].push({ name: t.name, domain: reportDomainOf(g) });
         }
       }
       if ((t.listGroup || "1") === "paused") totalPaused++;
     });
   });
+
+  if (hasStos) {
+    const goalDomainById = {};
+    (goals || []).forEach(g => { if (g && g.id != null) goalDomainById[g.id] = reportDomainOf(g); });
+    buildGoalSeries(stos.map(s => (s ? { ...s, domain: goalDomainById[s.goalId] || reportDomainOf(s) } : s)))
+      .forEach(g => {
+        if (!g.quotable) return;
+        g.dates.forEach((d, i) => allRates.push({ date: d, rate: g.series[i] }));
+      });
+  }
 
   const paragraphs = [];
 
@@ -2336,13 +2381,25 @@ function buildFinalGrowth(goals, info) {
     const lateAvg = Math.round(lateRates.reduce((a, b) => a + b.rate, 0) / lateRates.length);
 
     let timeline = "";
-    if (lateAvg - earlyAvg >= 25) {
+    // ★ [57-5] 기존엔 종결값과 초기값만 비교해서, 중반이 정점이고 종결이 내려간 경우도
+    //    "초기 11% → 중반 46% → 종결 32%까지 안정적인 향상"으로 나갔다.
+    //    중반→종결 하락(dip)과 초기→종결 하락을 따로 판정한다.
+    const rise = lateAvg - earlyAvg;
+    const dip = midAvg - lateAvg;
+    if (rise >= 25 && dip < 10) {
       timeline = `학습 곡선 분석 결과, 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 점진적이고 일관된 향상이 확인되었습니다. ` +
                  `이는 단기적 향상이 아닌 치료 기간 전반에 걸친 학습 동기 유지와 능동적 참여의 결과로 해석됩니다. ` +
                  `초기 시도가 누적되어 안정적인 수행 수준으로 도달하는 단계적 진행이 확인되었습니다.`;
-    } else if (lateAvg - earlyAvg >= 10) {
+    } else if (rise >= 10 && dip < 10) {
       timeline = `학습 곡선 분석 결과, 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%까지 안정적인 향상이 확인되었습니다. ` +
                  `회기 누적에 따른 점진적 변화 양상으로, 보호자의 지속적 지원이 학습 진행에 기여하였습니다.`;
+    } else if (dip >= 10 && rise > 0) {
+      // 중반이 정점, 종결이 그보다 낮음 — 전체로는 올랐지만 "일관된 향상"은 아니다.
+      timeline = `학습 곡선 분석 결과, 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%까지 향상된 뒤 종결 시점 ${lateAvg}%로 나타났습니다. ` +
+                 `종결 시점 값은 초기 대비 ${rise}%p 높은 수준이며, 중반 이후 구간은 새로 도입된 목표가 낮은 값에서 출발하면서 전체 평균이 함께 내려간 시점일 수 있어 목표별 추이와 함께 확인이 필요합니다.`;
+    } else if (rise <= -10) {
+      timeline = `학습 곡선 분석 결과, 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 나타났습니다. ` +
+                 `종결 시점 평균이 초기보다 낮으므로, 보고 기간 후반에 추가된 목표의 난이도와 목표별 개별 추이를 함께 확인해 주시기 바랍니다.`;
     } else if (lateAvg >= 75) {
       timeline = `${fn}${josa은는(fn)} 치료 기간 전반에 걸쳐 평균 ${lateAvg}% 수준의 일관된 학습 수행을 유지하였습니다. ` +
                  `이는 학습 환경 적응이 신속히 이루어지고 안정적인 학습 수행 양상이 형성되었음을 나타냅니다.`;
@@ -2350,6 +2407,12 @@ function buildFinalGrowth(goals, info) {
       timeline = `치료 기간 동안 평균 ${lateAvg}% 수준의 정반응률이 유지되었으며, 회기별 단계적 학습 진행이 확인되었습니다.`;
     }
     paragraphs.push(timeline.replace(/\(가\)/g, i_ga));
+  } else if (hasStos && totalMastered > 0) {
+    // ★ [57-5] %로 말할 수 있는 회기가 없는 아동(전 목표 O·X 등) — 숫자 대신 개수로 쓴다.
+    paragraphs.push(
+      `${fn}의 목표는 회기당 1회 기록(O·X) 방식으로 진행되어 정반응률 곡선은 산출하지 않았으며, ` +
+      `준거를 달성한 과제가 ${totalMastered}개 누적되는 형태로 학습 진행이 확인되었습니다.`
+    );
   }
 
   const monthKeys = Object.keys(masteredByMonth).sort();
@@ -2549,6 +2612,203 @@ function withTopicParticle(word) {
 }
 
 // 두 날짜를 항상 [이른 날짜, 늦은 날짜] 순으로 정렬 (입력이 거꾸로여도 방어)
+// ★ [57-3] 종결 어투 변환.
+//    중간보고서용 진행형 문장을 종결 시점 과거형으로 바꾼다.
+//    기존엔 이 치환이 buildLocalReport의 '종합 현황' 지역 변수 한 곳에만 걸려 있어서,
+//    종합 평가·치료 기간 중 성장과 변화·인계 정보에는 "…되고 있습니다"가 그대로 남아
+//    한 보고서 안에서 시제가 섞였다. (조영훈 보고서 "유지·확장되고 있음을 나타냅니다")
+//    치환 규칙을 한 곳에 모으고, 종결 모드에서 인쇄되는 모든 서술 단락에 통과시킨다.
+const FINAL_TENSE_RULES = [
+  [/늘고 있습니다/g, "늘었습니다"],
+  [/줄고 있습니다/g, "줄었습니다"],
+  [/올라가고 있습니다/g, "올라갔습니다"],
+  [/나오고 있고,/g, "나왔고,"],
+  [/나오고 있습니다/g, "나왔습니다"],
+  [/조정하고 있습니다/g, "조정하였습니다"],
+  [/진행하고 있습니다/g, "진행하였습니다"],
+  [/형성되고 있습니다/g, "형성되었습니다"],
+  [/향상되고 있습니다/g, "향상되었습니다"],
+  [/증가하고 있습니다/g, "증가하였습니다"],
+  [/진행되고 있습니다/g, "진행되었습니다"],
+  [/보이고 있습니다/g, "보였습니다"],
+  [/좋아지고 있습니다/g, "좋아졌습니다"],
+  [/유지되고 있습니다/g, "유지되었습니다"],
+  [/넘어갈 수 있는 수준입니다/g, "넘어갈 수 있는 수준에 도달하였습니다"],
+  // ↓ [57-3 추가] 종결 전용 단락(종합 평가·성장과 변화·인계)에 남아 있던 진행형.
+  [/유지·확장되고 있음을/g, "유지·확장되었음을"],
+  [/확장되고 있음을/g, "확장되었음을"],
+  [/형성되고 있음을/g, "형성되었음을"],
+  [/안정되고 있음을/g, "안정되었음을"],
+  [/증가하고 있어/g, "증가하였으며"],
+  [/확장되고 있어/g, "확장되었으며"],
+  [/이어지고 있습니다/g, "이어졌습니다"],
+  [/나타나고 있습니다/g, "나타났습니다"],
+  [/참여하고 있습니다/g, "참여하였습니다"],
+  [/확대되고 있습니다/g, "확대되었습니다"],
+  [/발전하고 있습니다/g, "발전하였습니다"],
+  [/자리잡고 있습니다/g, "자리잡았습니다"],
+  [/진행 중입니다/g, "진행되었습니다"]
+];
+// ★ 회고 단락(치료 기간 중 성장과 변화 · 종합 평가 · 도전적 행동 변화)에만 적용한다.
+//    가정 유지 방안 · 권고사항 · 인계 정보는 보호자를 향한 앞으로의 안내라 현재형이 맞다
+//    ("…권합니다", "…적합합니다"를 과거형으로 바꾸면 안내가 아니라 보고가 된다).
+function toFinalTense(text) {
+  if (!text) return text;
+  let out = String(text);
+  for (let i = 0; i < FINAL_TENSE_RULES.length; i++) {
+    out = out.replace(FINAL_TENSE_RULES[i][0], FINAL_TENSE_RULES[i][1]);
+  }
+  return out;
+}
+
+// ★ [57-4] 시작 vs 종결 비교 — 영역 단위 행을 여기 한 곳에서 만든다.
+//    buildFinalSummary가 자체적으로 byDomain을 다시 묶는 바람에 buildGoalSeries를 안 거쳤고,
+//    그래서 quotable(O·X·측정방식 혼재) 제외도, 중단 STO 제외도, 같은 날 상위 단계 우선도
+//    종결 전용 단락에만 빠져 있었다. 그 결과 한 보고서 안에서 숫자가 갈라졌다.
+//      · 조영훈 — 요약 "모든 목표가 O·X라 평균 산출 안 함" / 종합 평가 "32%p 향상, 20%→60%"
+//      · 성윤준 — 영역별 균형 막대 신체발달 77% / 종합 평가 "76%→85%"
+//    비교 섹션과 종합 평가가 같은 행을 쓰게 해서 55-1과 같은 방식으로 갈래를 없앤다.
+//
+//    firstAvg/lastAvg는 목표별 앞·뒤 회기 평균을 낸 뒤 영역에서 다시 평균한다.
+//    (첫 회기 한 점만 쓰면 컨디션 한 번에 출발점이 흔들린다.)
+//    창 크기는 min(5, floor(회기수/2)) — 6회기짜리 목표에 앞5/뒤5를 그대로 쓰면
+//    두 창이 4점을 공유해서 실제로는 20%→80%로 오른 목표가 44%→56%로 뭉개진다.
+const COMPARE_EDGE_N = 5;
+function compareEdgeSize(len) {
+  return Math.max(1, Math.min(COMPARE_EDGE_N, Math.floor(len / 2)));
+}
+function buildStartEndCompare(stos, goals) {
+  // ★ 영역 재매핑을 호출자에게 맡기지 않는다. reportDomainOf는 멱등이라
+  //   이미 재매핑된 stos를 다시 넣어도 그대로 통과한다.
+  //   단 STO에 subDomain이 없으면 재매핑이 안 돼(상위 章 이름 그대로) 아래 두 집계가
+  //   서로 다른 영역 이름으로 갈린다 — %변화는 '화자', 마스터 수는 '택트' 같은 식.
+  //   그래서 영역명은 목표(goal) 쪽에서 뽑은 것을 우선 쓴다. 두 절반이 같은 문자열을 보게.
+  const goalDomainById = {};
+  (goals || []).forEach(g => { if (g && g.id != null) goalDomainById[g.id] = reportDomainOf(g); });
+  const normStos = (Array.isArray(stos) ? stos : []).map(s => (
+    s ? { ...s, domain: goalDomainById[s.goalId] || reportDomainOf(s) } : s
+  ));
+  const series = buildGoalSeries(normStos);
+
+  const byDomain = {};
+  const bucket = (dom) => {
+    const k = cleanDomainKey(dom || "") || "(영역 없음)";
+    if (!byDomain[k]) byDomain[k] = {
+      domain: k, firsts: [], lasts: [],
+      total: 0, mastered: 0, paused: 0, ongoing: 0,
+      quotableGoals: 0, excludedGoals: 0
+    };
+    return byDomain[k];
+  };
+
+  // ① 정반응률 변화 — buildGoalSeries 기준(중단 제외·O·X 제외·상위 단계 우선)
+  series.forEach(g => {
+    const b = bucket(g.domain);
+    if (!g.quotable || g.series.length === 0) { b.excludedGoals++; return; }
+    const n = compareEdgeSize(g.series.length);
+    const head = g.series.slice(0, n);
+    const tail = g.series.slice(-n);
+    b.firsts.push(head.reduce((a, c) => a + c, 0) / head.length);
+    b.lasts.push(tail.reduce((a, c) => a + c, 0) / tail.length);
+    b.quotableGoals++;
+  });
+
+  // ② 마스터 진척 — 과제(STO) 개수. O·X 목표도 "달성했는가"는 셀 수 있으므로 여기선 제외하지 않는다.
+  (goals || []).forEach(g => {
+    if (!g.includeInIep) return;
+    const b = bucket(reportDomainOf(g));
+    (g.tasks || []).forEach(t => {
+      const lg = t.listGroup || "1";
+      b.total++;
+      if (lg === "2") b.mastered++;
+      else if (lg === "paused") b.paused++;
+      else b.ongoing++;
+    });
+  });
+
+  const rows = Object.values(byDomain).map(b => {
+    const firstAvg = b.firsts.length > 0 ? Math.round(b.firsts.reduce((a, c) => a + c, 0) / b.firsts.length) : null;
+    const lastAvg = b.lasts.length > 0 ? Math.round(b.lasts.reduce((a, c) => a + c, 0) / b.lasts.length) : null;
+    return {
+      domain: b.domain,
+      firstAvg, lastAvg,
+      change: (firstAvg !== null && lastAvg !== null) ? lastAvg - firstAvg : null,
+      total: b.total, mastered: b.mastered, paused: b.paused, ongoing: b.ongoing,
+      quotableGoals: b.quotableGoals, excludedGoals: b.excludedGoals,
+      // %로 말할 수 있는 영역인가 — 이 값이 false면 문장에서 %를 쓰지 않는다.
+      quotable: firstAvg !== null && lastAvg !== null
+    };
+  }).filter(r => r.total > 0 || r.quotableGoals > 0);
+
+  const quotableRows = rows.filter(r => r.quotable);
+  const changes = quotableRows.map(r => r.change);
+  const totalTasks = rows.reduce((s, r) => s + r.total, 0);
+  const totalMastered = rows.reduce((s, r) => s + r.mastered, 0);
+  const totalPaused = rows.reduce((s, r) => s + r.paused, 0);
+
+  return {
+    rows: rows.sort((a, b) => (b.change ?? -999) - (a.change ?? -999)),
+    quotableRows,
+    // 영역 평균 변화 — %로 말할 수 있는 영역이 하나도 없으면 null(문장에서 %p를 쓰지 않는다).
+    avgChange: changes.length > 0 ? Math.round(changes.reduce((a, c) => a + c, 0) / changes.length) : null,
+    totalTasks, totalMastered, totalPaused,
+    masterPct: totalTasks > 0 ? Math.round(totalMastered / totalTasks * 100) : 0,
+    // 전 영역이 O·X거나 측정 방식이 섞여 %로 서술 불가한 아동인가.
+    allNonQuotable: quotableRows.length === 0
+  };
+}
+
+// ★ [57-6] '앞으로의 방향'이 통째로 사라지는 문제.
+//    권고사항·인계가 둘 다 비면 섹션이 렌더되지 않아 보고서가 도전적 행동 표에서 끝났다.
+//    종결보고서에서 '앞으로의 방향'이 없는 건 사실상 미완성 문서라, 비었을 때 쓸
+//    기본 권고 키워드를 아동 데이터에서 뽑는다. 손으로 쓴 값이 있으면 그 값이 항상 이긴다.
+function defaultRecommendationKeys(info, goals) {
+  const keys = [];
+  const push = (k) => { if (keys.indexOf(k) === -1) keys.push(k); };
+
+  // 가정 지속은 어떤 종결에서든 해당된다.
+  push("가정 내 행동지원 지속");
+
+  // 진행 중이거나 중단된 과제가 남아 있으면 후속 치료·재평가를 권한다.
+  let ongoing = 0;
+  (goals || []).forEach(g => {
+    if (!g.includeInIep) return;
+    (g.tasks || []).forEach(t => {
+      const lg = t.listGroup || "1";
+      if (lg !== "2") ongoing++;
+    });
+  });
+  if (ongoing > 0) {
+    push("후속 ABA 치료 권고");
+    push("일반화·유지 위한 재평가");
+  }
+
+  // 의뢰 사유 키워드로 방향을 좁힌다 (종결 값이 없으면 IEP 폴백을 본다).
+  const kw = referralKeywordsOf(effectiveReferralReason(info));
+  if (kw.indexOf("또래 상호작용 어려움") >= 0 || kw.indexOf("눈맞춤·공동주의 부족") >= 0 || kw.indexOf("사회적 단서 이해 부족") >= 0) {
+    push("또래 상호작용 기회 확대 권고");
+  }
+  if (kw.indexOf("표현 언어 지연") >= 0 || kw.indexOf("수용 언어 지연") >= 0 || kw.indexOf("비구어/제한된 발성") >= 0) {
+    push("언어치료 병행 권고");
+  }
+  if (kw.indexOf("감각 처리 어려움") >= 0) push("감각통합치료 병행 권고");
+  if (kw.indexOf("도전 행동") >= 0 || kw.indexOf("자기자극·상동 행동") >= 0 || referralVisibleText(info && info.finalBehaviorChange)) {
+    push("필요 시 BCBA 컨설팅 재개");
+  }
+  if (kw.indexOf("변화·전환 어려움") >= 0 || kw.indexOf("학습 준비 부족") >= 0) {
+    push("유치원·학교 입학 후 적응 모니터링");
+  }
+
+  return keys;
+}
+// 인쇄가 쓰는 최종 권고사항. 손으로 쓴 값이 있으면 그대로, 없으면 기본 권고를 만들어 준다.
+function effectiveRecommendations(info, goals) {
+  if (referralVisibleText(info && info.finalRecommendations)) return info.finalRecommendations;
+  const keys = defaultRecommendationKeys(info, goals);
+  if (keys.length === 0) return "";
+  return buildRecommendations(keys, info) || "";
+}
+
 function orderDateRange(a, b) {
   const sa = a || "", sb = b || "";
   if (sa && sb && sa > sb) return [sb, sa];
@@ -4765,6 +5025,23 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [info?.finalEndDate, activeChildId]);
 
+  // ★ [57-1] 종결 모드로 들어왔는데 종결 의뢰 사유가 비어 있고 같은 아동 IEP에 값이 있으면,
+  //    IEP 키워드로 종결 어투 단락을 만들어 기본값으로 채운다.
+  //    한 번 채운 뒤에는 종결보고서 값이 독립이라, 여기서 다시 덮어쓰지 않는다
+  //    (IEP를 나중에 고쳐도 이미 검토·인쇄한 종결 문구가 조용히 바뀌지 않게).
+  useEffect(() => {
+    if (reportMode !== "final") return;
+    if (!activeChildId) return;
+    if (referralVisibleText(info?.finalReferralReason)) return;
+    const seeded = finalReferralFromIep(info);
+    if (!seeded) return;
+    setInfo(prev => {
+      if (referralVisibleText(prev?.finalReferralReason)) return prev;
+      return { ...prev, finalReferralReason: seeded };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportMode, activeChildId, info?.iepReferralReason]);
+
   const [curriculum, setCurriculum] = useState("ELCAR"); // "ELCAR" | "VB-MAPP" | "ESDM"
   const [selDomainIdx, setSelDomainIdx] = useState(0);
   const [activeGoalId, setActiveGoalId] = useState(null);
@@ -5815,7 +6092,13 @@ export default function App() {
         result.push({
           id: t.id,
           name: t.name,
-          domain: g.domain,
+          // ★ [57-4 / 55-3 마무리] goalsForReport·currentAvgs는 reportDomainOf를 쓰는데
+          //    여기만 원본이 남아, masteredDomainsOf가 cleanDomainKey(원본)로 만든 키를
+          //    재매핑된 domainAvgs 영역명과 맞추지 못하고 조용히 걸러냈다
+          //    (맨드·에코익·택트처럼 재매핑되는 영역은 숙달 판정에서 통째로 빠졌다).
+          //    rawDomain은 평가도구 분류용으로 남긴다 — 18000번대 classifyCurriculum이 이미 읽고 있다.
+          domain: reportDomainOf(g),
+          rawDomain: g.domain,
           subDomain: g.subDomain,
           goalId: g.id,      // ★ [48-1] 목표 병합 키 — goalName이 비면 STO명으로 갈라졌다
           goalName: g.item,  // 상위 영역목표명
@@ -11485,19 +11768,23 @@ cleanedHTML + '\n' +
           return (
           <>
             {/* ★ [종결보고서 전용] 치료 개요 — 의뢰 사유, 종결 사유 */}
-            {isFinalMode && (info.finalReferralReason || info.finalEndReason) && (
+            {isFinalMode && (effectiveReferralReason(info) || info.finalEndReason) && (
               <PrintSection num={nextSn()} title="치료 개요" accent>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, lineHeight: 1.7 }}>
                   <tbody>
                     <tr>
                       <td style={{ padding: "8px 12px", background: "#f5f7f0", fontWeight: 600, color: "#3d6014", border: "1px solid #d4e5ba", width: "20%", verticalAlign: "top" }}>치료 기간</td>
                       <td style={{ padding: "8px 12px", border: "1px solid #d4e5ba" }}>
-                        {info.evalStart || "—"} ~ {info.finalEndDate || info.evalEnd || "—"}
+                        {/* ★ [57-2] 표지 치료기간과 같은 값을 쓴다.
+                            기존엔 표지 = evalStart ~ (finalEndDate ?? 마지막 데이터일),
+                            이 표 = evalStart ~ (finalEndDate ?? evalEnd)라서
+                            종결일을 안 넣으면 한 보고서에 치료기간이 둘로 찍혔다. */}
+                        {reportPeriodStart || info.evalStart || "—"} ~ {reportPeriodEnd || info.finalEndDate || info.evalEnd || "—"}
                       </td>
                     </tr>
                     {(() => {
                       const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
-                      const refClean = stripMarker(info.finalReferralReason);
+                      const refClean = stripMarker(effectiveReferralReason(info));
                       const endClean = stripMarker(info.finalEndReason);
                       return (
                         <>
@@ -11526,6 +11813,93 @@ cleanedHTML + '\n' +
             )}
 
             {/* ★ [종결보고서 전용] 시작 vs 종결 비교 — 영역별 % 변화 + 마스터 진척 */}
+            {isFinalMode && (() => {
+              const cmp = buildStartEndCompare(stosForReport || [], goals || []);
+              if (!cmp.rows || cmp.rows.length === 0) return null;
+              // ★ [57-8] %로 말할 수 있는 목표가 하나도 없으면(전 목표 O·X 등)
+              //    이 표는 시작·종결 열이 전부 '—'이고 마스터 수만 남는다.
+              //    그 정보는 바로 앞 '영역별 완료 현황'이 이미 담고 있어, 빈 표가 한 장 더 붙을 뿐이다.
+              if (cmp.allNonQuotable) return null;
+
+              const barW = (v) => Math.max(0, Math.min(100, v || 0));
+              const changeColor = (c) => c === null ? "#999" : c > 0 ? "#3a6014" : c < 0 ? "#a8342a" : "#767676";
+              const changeText = (c) => c === null ? "—" : c > 0 ? `+${c}%p` : `${c}%p`;
+
+              return (
+                <PrintSection num={nextSn()} title="시작 vs 종결 비교" accent>
+                  <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
+                    ※ 각 영역의 학습 시작 무렵과 종결 시점을 나란히 놓고, 정반응률 변화와 과제 진척을 함께 봅니다.<br />
+                    ※ 시작·종결 값은 각 목표의 앞·뒤 구간 평균(최대 {COMPARE_EDGE_N}회기, 두 구간이 겹치지 않는 범위)을 영역에서 다시 평균한 값입니다.<br />
+                    ※ 회기당 1회 기록(O·X) 목표와 단계별 측정 방식이 섞인 목표는 %로 환산하지 않아 변화 열에서 제외되며, 마스터 수에는 포함됩니다.
+                  </div>
+
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ padding: "6px 8px", background: "#f5f7f0", border: "1px solid #d4e5ba", color: "#3d6014", textAlign: "left", width: "22%" }}>영역</th>
+                        <th style={{ padding: "6px 8px", background: "#f5f7f0", border: "1px solid #d4e5ba", color: "#3d6014", width: "10%" }}>시작</th>
+                        <th style={{ padding: "6px 8px", background: "#f5f7f0", border: "1px solid #d4e5ba", color: "#3d6014", width: "10%" }}>종결</th>
+                        <th style={{ padding: "6px 8px", background: "#f5f7f0", border: "1px solid #d4e5ba", color: "#3d6014", width: "10%" }}>변화</th>
+                        <th style={{ padding: "6px 8px", background: "#f5f7f0", border: "1px solid #d4e5ba", color: "#3d6014", width: "34%" }}>시작 → 종결</th>
+                        <th style={{ padding: "6px 8px", background: "#f5f7f0", border: "1px solid #d4e5ba", color: "#3d6014", width: "14%" }}>마스터</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cmp.rows.map((r, i) => (
+                        <tr key={i} style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
+                          <td style={{ padding: "6px 8px", border: "1px solid #d4e5ba", fontWeight: 600, color: "#333" }}>
+                            {r.domain}
+                          </td>
+                          <td style={{ padding: "6px 8px", border: "1px solid #d4e5ba", textAlign: "center", color: "#767676" }}>
+                            {r.quotable ? `${r.firstAvg}%` : "—"}
+                          </td>
+                          <td style={{ padding: "6px 8px", border: "1px solid #d4e5ba", textAlign: "center", fontWeight: 600, color: "#333" }}>
+                            {r.quotable ? `${r.lastAvg}%` : "—"}
+                          </td>
+                          <td style={{ padding: "6px 8px", border: "1px solid #d4e5ba", textAlign: "center", fontWeight: 700, color: changeColor(r.change) }}>
+                            {changeText(r.change)}
+                          </td>
+                          <td style={{ padding: "6px 8px", border: "1px solid #d4e5ba" }}>
+                            {r.quotable ? (
+                              <div>
+                                {/* 시작 막대 (연한 회색) → 종결 막대 (영역색) 두 줄 비교 */}
+                                <div style={{ height: 7, background: "#eee", borderRadius: 4, marginBottom: 3, overflow: "hidden" }}>
+                                  <div style={{ width: `${barW(r.firstAvg)}%`, height: "100%", background: "#c9c9c9" }} />
+                                </div>
+                                <div style={{ height: 7, background: "#eee", borderRadius: 4, overflow: "hidden" }}>
+                                  <div style={{ width: `${barW(r.lastAvg)}%`, height: "100%", background: r.lastAvg >= 80 ? "#5a8c1f" : r.lastAvg >= 60 ? "#4a7bb5" : "#d38b1e" }} />
+                                </div>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: 10, color: "#999" }}>
+                                O·X 기록 {r.excludedGoals}개 — % 환산 제외
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: "6px 8px", border: "1px solid #d4e5ba", textAlign: "center", color: "#3d6014" }}>
+                            {r.mastered} / {r.total}
+                            {r.paused > 0 && <span style={{ color: "#a87108", fontSize: 10 }}> · 중단 {r.paused}</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  <div style={{
+                    marginTop: 10, padding: "8px 12px",
+                    background: "#f5f7f0", border: "1px solid #d4e5ba", borderLeft: "4px solid #5a8c1f",
+                    borderRadius: 6, fontSize: 11.5, color: "#3d6014", lineHeight: 1.7
+                  }}>
+                    {cmp.allNonQuotable ? (
+                      <>전 목표가 회기당 1회 기록(O·X) 방식이라 정반응률 평균은 산출하지 않았습니다. 총 {cmp.totalTasks}개 과제 중 <b>{cmp.totalMastered}개</b>에서 준거를 달성했습니다.</>
+                    ) : (
+                      <>영역 평균 정반응률이 시작 대비 <b>{cmp.avgChange > 0 ? `+${cmp.avgChange}` : cmp.avgChange}%p</b> 변화했으며, 총 {cmp.totalTasks}개 과제 중 <b>{cmp.totalMastered}개</b>에서 준거를 달성했습니다.</>
+                    )}
+                    {cmp.totalPaused > 0 && <> {cmp.totalPaused}개 과제는 학습 경로 조정에 따라 중단·보류하였습니다.</>}
+                  </div>
+                </PrintSection>
+              );
+            })()}
 
           </>
           );
@@ -11760,13 +12134,15 @@ cleanedHTML + '\n' +
             {(() => {
               const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
               const personalize = (text) => personalizeText(text || "", childName);
+              // ★ [57-3] 회고 단락 전용 — 진행형을 종결 시점 과거형으로 바꾼 뒤 이름 치환.
+              const personalizePast = (text) => personalizeText(toFinalTense(text || ""), childName);
               return (
                 <>
             {/* ★ [종결보고서 흐름 개선] 치료 기간 중 성장과 변화 — 종합 평가 앞으로 (회고 → 평가 → 정리) */}
             {isFinalMode && info.finalGrowth && info.finalGrowth.trim() && (
               <PrintSection num={nextSn()} title="치료 기간 중 성장과 변화" accent>
                 <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
-                  {personalize(info.finalGrowth)}
+                  {personalizePast(info.finalGrowth)}
                 </div>
               </PrintSection>
             )}
@@ -11775,7 +12151,7 @@ cleanedHTML + '\n' +
             {isFinalMode && info.finalSummary && info.finalSummary.trim() && (
               <PrintSection num={nextSn()} title="종합 평가" accent>
                 <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
-                  {personalize(info.finalSummary)}
+                  {personalizePast(info.finalSummary)}
                 </div>
               </PrintSection>
             )}
@@ -11873,7 +12249,7 @@ cleanedHTML + '\n' +
                     ※ 치료 시작 시점부터 종결까지의 도전적 행동 변화 양상입니다.
                   </div>
                   <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333" }}>
-                    {personalize(behaviorClean).split("\n").map((line, i) => (
+                    {personalizePast(behaviorClean).split("\n").map((line, i) => (
                       <p key={i} style={{ margin: line.trim() === "" ? "4px 0" : "0 0 6px 0" }}>
                         {line || "\u00A0"}
                       </p>
@@ -11951,7 +12327,7 @@ cleanedHTML + '\n' +
             {/* ★ [v19 통합] 종결보고서 끝부분 — 앞으로의 방향 (권고사항 + 다음 기관 인계) */}
             {isFinalMode && (() => {
               const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
-              const recClean = stripMarker(info.finalRecommendations);
+              const recClean = stripMarker(effectiveRecommendations(info, goals));
               const handoverClean = stripMarker(info.finalHandover);
               if (!recClean && !handoverClean) return null;
               return (
@@ -15092,22 +15468,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   if (finalMode) {
     // ★ [종결보고서] 진행 중(중간보고서) 어투를 종결 시점 과거형으로 변환.
     //    종결보고서는 치료가 끝난 시점에 작성하므로 "~하고 있습니다"가 아니라 "~했습니다"가 자연스러움.
-    sec1Text = sec1Text
-      .replace(/늘고 있습니다/g, "늘었습니다")
-      .replace(/줄고 있습니다/g, "줄었습니다")
-      .replace(/올라가고 있습니다/g, "올라갔습니다")
-      .replace(/나오고 있고,/g, "나왔고,")
-      .replace(/나오고 있습니다/g, "나왔습니다")
-      .replace(/조정하고 있습니다/g, "조정하였습니다")
-      .replace(/진행하고 있습니다/g, "진행하였습니다")
-      .replace(/형성되고 있습니다/g, "형성되었습니다")
-      .replace(/향상되고 있습니다/g, "향상되었습니다")
-      .replace(/증가하고 있습니다/g, "증가하였습니다")
-      .replace(/진행되고 있습니다/g, "진행되었습니다")
-      .replace(/보이고 있습니다/g, "보였습니다")
-      .replace(/좋아지고 있습니다/g, "좋아졌습니다")
-      .replace(/유지되고 있습니다/g, "유지되었습니다")
-      .replace(/넘어갈 수 있는 수준입니다/g, "넘어갈 수 있는 수준에 도달하였습니다");
+    sec1Text = toFinalTense(sec1Text);
   }
   r["종합 현황"] = sec1Text;
 
@@ -15950,8 +16311,46 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                 setInfo(prev => ({ ...prev, finalReferralReason: "" }));
               };
 
+              // ★ [57-1] 같은 아동 IEP의 의뢰 사유 — 안내 배너 + 수동 다시 불러오기.
+              const iepSeed = finalReferralFromIep(info);
+              const iepKeywords = referralKeywordsOf(info.iepReferralReason);
+              const sameAsIep = iepSeed && iepSeed === (info.finalReferralReason || "");
+              const pullFromIep = () => {
+                if (!iepSeed) return;
+                setInfo(prev => ({ ...prev, finalReferralReason: iepSeed }));
+              };
+
               return (
                 <>
+                  {iepSeed && (
+                    <div style={{
+                      display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6,
+                      padding: "6px 10px", marginBottom: 8,
+                      background: sameAsIep ? "#f0f6e8" : "#fff8e8",
+                      border: `1px solid ${sameAsIep ? "#c5d99c" : "#e5cf8a"}`,
+                      borderRadius: 6, fontSize: 10, color: "#5a6b3a", lineHeight: 1.6
+                    }}>
+                      <span>
+                        {sameAsIep
+                          ? "📋 이 아동의 IEP 의뢰 사유와 같은 내용입니다 (키워드 동일 · 종결 어투로 변환됨)"
+                          : "📋 이 아동의 IEP에 의뢰 사유가 있습니다. 지금 내용은 IEP와 다릅니다"}
+                        {iepKeywords.length > 0 && (
+                          <span style={{ color: "#888", marginLeft: 5 }}>· IEP 키워드 {iepKeywords.length}개</span>
+                        )}
+                      </span>
+                      {!sameAsIep && (
+                        <button
+                          onClick={pullFromIep}
+                          style={{
+                            padding: "3px 9px", fontSize: 10, border: "1px solid #a8862a",
+                            borderRadius: 12, background: "#fff", color: "#8a6a12",
+                            cursor: "pointer", fontFamily: "inherit", fontWeight: 600
+                          }}>
+                          IEP 내용으로 맞추기
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
                     {REFERRAL_CHIPS.map(([label], i) => {
                       const isSelected = selectedSet.has(label);
@@ -16130,7 +16529,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
             </h3>
             <button
               onClick={() => {
-                const auto = buildFinalSummary(goals, info);
+                const auto = buildFinalSummary(goals, info, reportPeriodEnd, stosForReport);
                 setInfo(prev => ({ ...prev, finalSummary: auto }));
               }}
               style={{ padding: "5px 12px", fontSize: 10.5, border: "1px solid #5a8c1f", borderRadius: 6, background: "#f5f7f0", color: "#3d6014", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
@@ -16160,7 +16559,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
             </h3>
             <button
               onClick={() => {
-                const auto = buildFinalGrowth(goals, info);
+                const auto = buildFinalGrowth(goals, info, stosForReport);
                 setInfo(prev => ({ ...prev, finalGrowth: auto }));
               }}
               style={{ padding: "5px 12px", fontSize: 10.5, border: "1px solid #5a8c1f", borderRadius: 6, background: "#f5f7f0", color: "#3d6014", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
@@ -16581,8 +16980,39 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
               setInfo(prev => ({ ...prev, finalRecommendations: "" }));
             };
 
+            // ★ [57-6] 비워두면 인쇄 시 기본 권고가 대신 나간다는 걸 알리고, 미리 채울 수단을 준다.
+            const autoKeys = defaultRecommendationKeys(info, goals);
+            const isEmpty = !visibleText;
+            const loadDefaults = () => {
+              if (autoKeys.length === 0) return;
+              const para = buildRecommendations(autoKeys, info);
+              if (!para) return;
+              setInfo(prev => ({ ...prev, finalRecommendations: para + `\n\n<!--SELECTED:${autoKeys.join("|")}-->` }));
+            };
+
             return (
               <>
+                {isEmpty && autoKeys.length > 0 && (
+                  <div style={{
+                    display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6,
+                    padding: "6px 10px", marginBottom: 8,
+                    background: "#fff8e8", border: "1px solid #e5cf8a", borderRadius: 6,
+                    fontSize: 10, color: "#7a6320", lineHeight: 1.6
+                  }}>
+                    <span>
+                      🎯 비워두시면 인쇄 시 아동 데이터 기반 기본 권고({autoKeys.length}개)가 대신 나갑니다 — '앞으로의 방향'이 빈 채로 끝나지 않도록
+                    </span>
+                    <button
+                      onClick={loadDefaults}
+                      style={{
+                        padding: "3px 9px", fontSize: 10, border: "1px solid #a8862a",
+                        borderRadius: 12, background: "#fff", color: "#8a6a12",
+                        cursor: "pointer", fontFamily: "inherit", fontWeight: 600
+                      }}>
+                      기본 권고 불러와서 수정
+                    </button>
+                  </div>
+                )}
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
                   {REC_CHIPS.map((label, i) => {
                     const isSelected = selectedSet.has(label);
@@ -18953,7 +19383,10 @@ function DomainCompletionSection({ goals }) {
   const byDomain = {};
   goals.forEach(g => {
     if (!g.includeInIep) return;
-    const dom = g.domain || "(영역 없음)";
+    // ★ [57-8 / 55-3 마무리] 여기만 원본 영역으로 묶고 라벨에서 로마숫자만 떼고 있었다.
+    //    그래서 '시작 vs 종결 비교'·종합 평가는 '택트'라고 쓰는데
+    //    이 표만 '화자'라고 써서 같은 보고서 안에서 영역 이름이 갈렸다.
+    const dom = reportDomainOf(g) || "(영역 없음)";
     if (!byDomain[dom]) byDomain[dom] = { total: 0, mastered: 0, paused: 0, ongoing: 0 };
     (g.tasks || []).forEach(t => {
       const lg = t.listGroup || "1";
