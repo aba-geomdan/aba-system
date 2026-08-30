@@ -1445,7 +1445,7 @@ function buildInterimStrengths(domAvgs, stos, info) {
   if (withGrowth.length >= 3) {
     strengths.push({
       title: "여러 영역의 향상",
-      desc: `${withGrowth.length}개 이상의 활동에서 초기 대비 향상이 보여, ${fn}의 학습 진행이 데이터로 확인됩니다.`
+      desc: `${withGrowth.length}개 활동에서 초기 대비 향상이 보여, ${fn}의 학습 진행이 데이터로 확인됩니다.`
     });
   } else if (withGrowth.length >= 1) {
     const exemplar = withGrowth[0];
@@ -1522,7 +1522,7 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
   if (withGrowth.length > 0) {
     const top = withGrowth[0];
     highlights.push({
-      title: `'${top.name}' 활동의 향상`,
+      title: `'${shortTaskName(top.name)}' 활동의 향상`,
       desc: `초기 ${top.first}%에서 최근 ${top.last}%까지 올라가, ${fn}${이가(fn)} 단계적 연습으로 수행 능력이 늘고 있음이 확인됩니다.`
     });
   }
@@ -1560,7 +1560,7 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
   if (fastClimb.length > 0 && highlights.length < 3) {
     const ex = fastClimb[0];
     highlights.push({
-      title: `'${ex.name}' 활동에 빠른 적응`,
+      title: `'${shortTaskName(ex.name)}' 활동에 빠른 적응`,
       desc: `학습 시작 후 단기간에 안정적인 수행이 나와, ${fn}${이가(fn)} 새 학습 내용에 빠르게 적응했습니다.`
     });
   }
@@ -14345,10 +14345,11 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     // ★ [수정] 해석형 문구(요구하기·따라말하기 반응, 수용·표현 언어 변화, 일반화 단계 판단) 제거.
     //    측정한 적 없는 내용이고 영역만 맞으면 무조건 붙던 고정 문구였다.
     //    또한 g는 '과제' 단위라 그 수치를 "영역 점수"로 부를 수 없다 → 과제 수치 표기 자체를 뻐다.
-    const lgDoneTxt = lgDone.length > 0 && isValidTaskName(lgDone[0].name)
-      ? ` '${shortTaskName(lgDone[0].name)}' 등 ${lgDone.length}개 목표에서 준거를 달성했습니다.`
-      : (lgDone.length > 0 ? ` ${lgDone.length}개 목표에서 준거를 달성했습니다.` : "");
-    sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역에서 학습을 진행했습니다.${langCountText}${lgDoneTxt}`);
+    // ★ [수정] langCountText와 개별 문장이 "N개에서 준거 달성"을 두 번 말하던 중복 제거.
+    const lgEx = lgDone.length > 0 && isValidTaskName(lgDone[0].name) ? ` (예: '${shortTaskName(lgDone[0].name)}')` : "";
+    sec1Parts.push(langCountText
+      ? `${fn}${jEunNeun(fn)}${langCountText.replace(/,$/, "")}${lgEx}.`
+      : `${fn}${jEunNeun(fn)} 언어 영역에서 학습을 진행했습니다.`);
   } else if (lgDone.length > 0) {
     // ★ [수정] "따라말하기 정확도 / 택트·인트라버벌 기초" 꼬리 제거 — 데이터 근거 없는 상투구.
     sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역에서 ${isValidTaskName(lgDone[0].name) ? `'${shortTaskName(lgDone[0].name)}'의 준거를` : "핵심 목표의 준거를"} 달성했습니다.${langCountText}`);
@@ -14512,23 +14513,10 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   r["이번 기간의 성장과 변화"] = sec2Parts.join(" ");
   r["총괄 요약 및 권고사항"] = sec2Parts.join(" "); // 호환용
 
-  const homeMissions = [];
-  if (best.domain !== "—" && best.avg >= 70) {
-    homeMissions.push(`${fn}의 강점 영역인 '${cleanDomainKey(best.domain)}'${josa을를(best.domain)} 가정에서도 활용하기. ${fn}${jIGa(fn)} 좋아하는 간식이나 장난감을 줄 때 바로 주지 마시고, 눈을 보며 3초 기다려 주세요. 시선, 손짓, 말로 표현이 나오면 그때 주시면 됩니다. 요구하기(Mand)가 자연스럽게 강화됩니다.`);
-  }
-  if (worst.domain !== "—" && worst.avg < 60 && worst.avg !== 0) {
-    homeMissions.push(`'${cleanDomainKey(worst.domain)}' 영역의 기초 다지기를 가정에서도 함께. 짧은 지시(앉아, 와, 줘)를 일상에서 써 주세요. 잘 따라했을 때 바로 칭찬하시고, ${fn}${jIGa(fn)} 좋아하는 활동으로 강화해 주시면 됩니다.`);
-  }
-  if (homeMissions.length === 0) {
-    homeMissions.push(`${fn}${josa이가(fn)} 스스로 표현할 기회를 늘려 주세요. 좋아하는 물건이나 활동을 바로 주지 마시고, 잠깐 기다려 시선이나 몸짓, 소리, 말 어떤 형태든 표현이 나오면 그때 반응해 주세요.`);
-  }
-
-  const dailyTips = [
-    `식사 시간 — 음식을 주기 전에 음식 이름을 한 번 말해 주세요. 일상에서 청자(Listener) 기술과 어휘가 함께 늘어납니다.`,
-    `놀이 시간 — 좋아하는 활동 중에 잠깐 멈춰 주세요. '더?' 표시가 나오면 다시 시작해 주시면 됩니다. 요구하기(Mand)가 강화됩니다.`,
-    `잠자리 전 — 그림책을 같이 보며 ${fn}${jIGa(fn)} 가리키는 것을 따라 말해 주세요. 청자 반응과 어휘가 같이 늘어납니다.`
-  ];
-
+  // ★ [수정] '핵심 방향'·'일상 실천 방안' 자동 문구 제거.
+  //    "간식 줄 때 3초 기다리기", "'더?' 표시가 나오면", "가리키는 것 따라 말하기" 등
+  //    초기 단계 아동을 전제한 내용이라 발달 수준이 높은 아동에게는 맞지 않았다.
+  //    이 섹션은 키워드 선택으로 작성하고, 자동 부분은 데이터에서 나오는 주의사항만 남긴다.
   const cautions = [];
   if (bName && bName.trim()) {
     const bn = bName.trim();
@@ -14559,7 +14547,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   }
   cautions.push(`가정에서도 같은 방식으로 일관되게 해 주시는 게 중요합니다. ABA의 핵심은 일관성이라, 가정과 센터에서 같게 대응할 때 행동이 안정적으로 유지됩니다. 가정에서 관찰한 점이나 어려운 점은 담당 치료사에게 편하게 말씀해 주세요.`);
 
-  r["가정 협력 방안"] = `[이번 보고 기간 핵심 방향]\n${homeMissions.map((m,i) => `${i+1}. ${m}`).join("\n")}\n\n[일상에서 실천 방안]\n${dailyTips.map((t,i) => `${i+1}. ${t}`).join("\n")}\n\n[주의사항]\n${cautions.map((c,i) => `${i+1}. ${c}`).join("\n")}`;
+  r["가정 협력 방안"] = `[주의사항]\n${cautions.map((c,i) => `${i+1}. ${c}`).join("\n")}`;
   r["가정에서 함께 하기"] = r["가정 협력 방안"]; // 호환용
   r["일반화 계획 및 가정 협력 방안"] = r["가정 협력 방안"]; // 호환용
 
@@ -14568,11 +14556,17 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   const bestSto = stableMasteredList[0] || recentMastery[0];
   const bestDomain = best.domain !== "—" && best.avg >= 70 ? best.domain : null;
   if (bestSto || bestDomain) {
-    const refName = bestSto && isValidTaskName(bestSto.name)
-      ? bestSto.name
-      : (bestSto ? (cleanDomainKey(bestSto.domain) || "강점 영역") : cleanDomainKey(bestDomain));
-    const refSuffix = bestDomain && best.avg > 0 ? `(${best.avg}%)` : "";
-    sentences.push(`${fn}${josa이가(fn)} 잘하는 '${refName}'${refSuffix} 영역을 동기 유발 도구로 활용해 학습을 통합적으로 진행할 계획입니다.`);
+    // ★ [수정] refName에 과제명이 들어가는데 뒤에 영역 평균(%)을 붙여 "'1음절 : 아/이/우'(96%) 영역"처럼
+    //    과제명과 없는 영역 점수가 섮였다. 영역명으로 통일한다.
+    const refDomain = bestDomain
+      ? cleanDomainKey(bestDomain)
+      : (bestSto ? cleanDomainKey(bestSto.domain) : null);
+    if (refDomain) {
+      const refSuffix = bestDomain && best.avg > 0 ? `(${best.avg}%)` : "";
+      sentences.push(`${fn}${josa이가(fn)} 잘하는 '${refDomain}' 영역${refSuffix}을 동기 유발 도구로 활용해 학습을 통합적으로 진행할 계획입니다.`);
+    } else {
+      sentences.push(`${fn}의 강점 영역을 동기 유발 도구로 활용해 학습을 통합적으로 진행할 계획입니다.`);
+    }
   } else {
     sentences.push(`${fn}의 현재 발달 단계에 맞춰 개별화된 학습 목표를 운영하고, 데이터를 보면서 효과를 확인할 예정입니다.`);
   }
@@ -17625,23 +17619,44 @@ function GoalDashboard({ stos }) {
     const OX_GREEN = "#38680F", OX_GREEN_BG = "#E4F0D6";
     const OX_RED = "#9C9A94", OX_RED_BG = "#F1F1F0";
     const fmt = (d) => { const a = (d || "").split("-"); return a.length >= 3 ? `${Number(a[1])}.${Number(a[2])}` : d; };
+    // ★ [신규] 단계(L1, L2…)별로 묶어서 표시.
+    //    기존엔 여러 단계가 한 줄로 이어져, 같은 날 다른 단계를 기록한 경우
+    //    날짜가 중복되어 보이고 어느 단계의 기록인지 구분이 안 됐다.
+    const segs = [];
+    points.forEach((p) => {
+      const key = p.taskListNum != null ? String(p.taskListNum) : "_";
+      const cur = segs[segs.length - 1];
+      if (!cur || cur.key !== key) segs.push({ key, listNum: p.taskListNum, pts: [p] });
+      else cur.pts.push(p);
+    });
+    const multi = segs.length > 1;
     return (
       <div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-          {points.map((p, i) => {
-            const ok = p.value >= 100;
-            return (
-              <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-                <div style={{
-                  width: 28, height: 28, borderRadius: 6, display: "flex", alignItems: "center",
-                  justifyContent: "center", fontSize: 13, fontWeight: 700,
-                  background: ok ? OX_GREEN_BG : OX_RED_BG, color: ok ? OX_GREEN : OX_RED
-                }}>{ok ? "O" : "X"}</div>
-                <span style={{ fontSize: 8.5, color: "#aaa" }}>{fmt(p.date)}</span>
-              </div>
-            );
-          })}
-        </div>
+        {segs.map((seg, si) => (
+          <div key={"seg" + si} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: multi && si < segs.length - 1 ? 9 : 0 }}>
+            {multi && (
+              <span style={{
+                flexShrink: 0, marginTop: 5, fontSize: 9.5, fontWeight: 700, color: "#993556",
+                border: "1px solid #E9C4D2", borderRadius: 9, padding: "1px 8px", background: "#fff"
+              }}>{seg.listNum != null ? `L${seg.listNum}` : "—"}</span>
+            )}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+              {seg.pts.map((p, i) => {
+                const ok = p.value >= 100;
+                return (
+                  <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                    <div style={{
+                      width: 28, height: 28, borderRadius: 6, display: "flex", alignItems: "center",
+                      justifyContent: "center", fontSize: 13, fontWeight: 700,
+                      background: ok ? OX_GREEN_BG : OX_RED_BG, color: ok ? OX_GREEN : OX_RED
+                    }}>{ok ? "O" : "X"}</div>
+                    <span style={{ fontSize: 8.5, color: "#aaa" }}>{fmt(p.date)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     );
   };
