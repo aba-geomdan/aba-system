@@ -295,7 +295,7 @@ const INTERVENTION_PRESETS = ["DRO", "DRA", "NCR", "FCT", "선행조절"];
 // 촉구 수준 — 배열 순서가 곧 위계(0=가장 독립적). 인덱스 비교로 증감을 판정한다.
 const PROMPT_LEVELS = ["독립 수행", "언어 촉구", "제스처 촉구", "모델링", "부분 신체 촉구", "전신 촉구"];
 
-// 문제행동 빈도 추세 — 앱에 빈도 데이터가 없으므로 치료사가 직접 고른다. '미측정'이면 문장을 쓰지 않는다.
+// 도전적 행동 빈도 추세 — 앱에 빈도 데이터가 없으므로 치료사가 직접 고른다. '미측정'이면 문장을 쓰지 않는다.
 const BEHAVIOR_TRENDS = [
   { k: "decrease", l: "감소" },
   { k: "same", l: "유지" },
@@ -1007,7 +1007,7 @@ function buildBehaviorChange(selected, info) {
   const phrases = selected.map(l => KEY_DESC[l]).filter(Boolean);
   if (phrases.length === 0) return "";
 
-  const intro = `${fn}${이가(fn)} 본 치료 기간에 보인 문제행동의 변화는 다음과 같습니다.`;
+  const intro = `${fn}${이가(fn)} 본 치료 기간에 보인 도전적 행동의 변화는 다음과 같습니다.`;
 
   let body;
   if (phrases.length === 1) {
@@ -1050,7 +1050,7 @@ function buildRecommendations(selected, info) {
     "일반화·유지 위한 재평가":     { cat: "monitor",    desc: `학습 기술의 일반화와 유지 상태를 확인하기 위해 약 6개월 후 재평가를 받아보시기를 권합니다. 객관적인 평가로 다음 단계를 잡아갈 수 있습니다` },
     "가정 내 행동지원 지속":       { cat: "family",     desc: `종결 후에도 가정에서 일관된 행동지원을 이어가 주시는 게 중요합니다. 본 보고서의 가정 유지 방안을 참고하셔서 ${fn}의 발달이 끊기지 않도록 지원해 주세요` },
     "또래 상호작용 기회 확대 권고": { cat: "family",     desc: `또래와의 상호작용 기회를 늘려 주시기를 권합니다. 놀이터·소그룹 활동·또래 만남을 통해 ${fn}${josa이가(fn)} 사회적 기술을 일상에서 연습할 수 있도록 도와주세요` },
-    "필요 시 BCBA 컨설팅 재개":    { cat: "monitor",    desc: `도전 행동이 다시 늘거나 학습한 기술이 퇴행하는 모습이 보이면, 가능한 빨리 BCBA(행동분석전문가) 컨설팅을 의뢰해 주세요` }
+    "필요 시 BCBA 컨설팅 재개":    { cat: "monitor",    desc: `도전적 행동이 다시 늘거나 학습한 기술이 퇴행하는 모습이 보이면, 가능한 빨리 BCBA(행동분석전문가) 컨설팅을 의뢰해 주세요` }
   };
 
   const CAT_NAMES = {
@@ -1181,8 +1181,8 @@ function buildInterimSummary(selected, info) {
     "눈맞춤 안정":            { cat: "social", desc: `대화나 활동 중 눈맞춤을 주고받는 빈도가 안정적입니다` },
     // ★ [수정] "떼쓰기·자해·공격 행동" 예시 나열 제거.
     //    행동명을 앱에서 받지 않고 예시를 고정으로 적어, 아동에게 없던 행동(자해·공격)이 보고서에 적혔다.
-    //    실제 행동명은 문제행동 입력란에서 받아 자동 문단에 이미 들어간다.
-    "도전 행동 감소":         { cat: "behav",  desc: `좌절·전환 상황에서 나타나던 문제행동의 빈도와 강도가 줄고 있습니다` },
+    //    실제 행동명은 도전적 행동 입력란에서 받아 자동 문단에 이미 들어간다.
+    "도전 행동 감소":         { cat: "behav",  desc: `좌절·전환 상황에서 나타나던 도전적 행동의 빈도와 강도가 줄고 있습니다` },
     "정서 안정":              { cat: "behav",  desc: `감정 변화의 폭이 안정되고, 좌절 상황에서도 적응적으로 대처하려는 모습이 관찰됩니다` },
     "전환 적응 향상":         { cat: "behav",  desc: `활동이나 환경 전환 시 거부 반응이 줄고, 사전 안내가 있으면 비교적 잘 받아들입니다` },
     "지시 따르기 안정":       { cat: "learn",  desc: `다양한 단계의 지시를 이해하고 따라하는 능력이 안정적입니다` },
@@ -1318,10 +1318,10 @@ function buildInterimHomeCoop(selected, info) {
     "일상 루틴 안에서 연습":      { cat: "routine",   desc: `식사·놀이·외출 같은 일상 활동 안에서 배운 기술을 연습할 기회를 만들어 주세요` },
     "사진·시각 단서 활용":        { cat: "routine",   desc: `시각적 일정표나 사진 단서를 쓰시면 ${fn}${이가(fn)} 다음 활동을 예측하고 적응하는 데 도움이 됩니다` },
     "주간 진행 상황 공유":        { cat: "communication", desc: `주 1회 정도 가정에서 보신 ${fn}의 변화나 어려운 점을 알려 주시면 회기 계획에 반영합니다` },
-    "행동 일지 기록":             { cat: "communication", desc: `문제행동이나 새로운 변화가 보이면 짧게 메모해 주세요. 간단한 기록도 다음 회기에 도움이 됩니다` },
+    "행동 일지 기록":             { cat: "communication", desc: `도전적 행동이나 새로운 변화가 보이면 짧게 메모해 주세요. 간단한 기록도 다음 회기에 도움이 됩니다` },
     "구조화된 환경 제공":         { cat: "environment",   desc: `가정에서도 일과를 예측할 수 있게 유지해 주시면 ${fn}의 학습이 더 안정적으로 진행됩니다` },
     "또래 만남 기회 마련":        { cat: "environment",   desc: `놀이터나 또래 활동처럼 다른 아이들과 어울릴 기회를 정기적으로 만들어 주세요` },
-    "도전 행동 시 차분한 대응":   { cat: "challenge", desc: `문제행동이 나올 때는 바로 반응하지 마시고, 적절한 행동이 나올 때 바로 칭찬해 주세요` },
+    "도전 행동 시 차분한 대응":   { cat: "challenge", desc: `도전적 행동이 나올 때는 바로 반응하지 마시고, 적절한 행동이 나올 때 바로 칭찬해 주세요` },
     "전환 시 사전 예고":          { cat: "challenge", desc: `활동을 바꾸거나 외출하기 전에 미리 알려 주시면 ${fn}${이가(fn)} 더 안정적으로 넘어갑니다` }
   };
 
@@ -1387,7 +1387,7 @@ function buildInterimNextGoal(selected, info) {
     "다른 사람과의 일반화": { cat: "general", desc: `학습한 기술을 치료사 외의 다른 사람(보호자, 또래, 교사 등)과의 상호작용에서도 나오도록 일반화 단계로 확장합니다` },
     "자발적 시도 강화":     { cat: "autonomy", desc: `촉구에 의존하지 않고 스스로 시도하는 자발적 행동의 빈도와 다양성을 늘려가는 것을 다음 목표로 합니다` },
     "선택·결정 기회 확대":   { cat: "autonomy", desc: `${fn}${이가(fn)} 스스로 선택하고 결정할 기회를 늘려, 자기결정 능력의 기초를 만듭니다` },
-    "도전 행동 안정화":     { cat: "challenge", desc: `현재 진행 중인 도전 행동 중재의 결과를 유지하고 잔존 빈도를 더 줄이는 것을 다음 목표로 합니다` },
+    "도전 행동 안정화":     { cat: "challenge", desc: `현재 진행 중인 도전적 행동 중재의 결과를 유지하고 잔존 빈도를 더 줄이는 것을 다음 목표로 합니다` },
     "전환·변화 적응 강화":  { cat: "challenge", desc: `다양한 환경·일과 변화 상황에 대한 적응력을 더 강화해서, 일상의 여러 상황에서 안정적으로 기능할 수 있도록 지원합니다` },
     "학습 준비 기술 강화":  { cat: "school",  desc: `유치원·학교 환경 적응을 위한 학습 준비 기술(착석, 집단 지시 따르기, 차례 기다리기 등)을 단계적으로 강화합니다` },
     "또래 환경 적응":       { cat: "school",  desc: `또래 집단 환경에서의 적응과 참여 능력 향상을 다음 단계의 목표로 잡습니다` }
@@ -1684,9 +1684,9 @@ function buildHomeMaintenance(selected, info) {
     "가족 모두 같은 방식 적용":   { cat: "consistency",    desc: `보호자와 다른 양육자가 같은 방식으로 일관되게 대응해 주시는 게 중요합니다. ${fn}${이가(fn)} 어떤 상황에서도 같은 기준과 반응을 경험할 때 학습한 행동이 유지됩니다` },
     "선호 활동을 활용":           { cat: "reinforce",      desc: `${fn}${이가(fn)} 좋아하는 놀이나 활동을 학습과 연결해 주시면 자연스러운 동기가 됩니다. 좋아하는 책 보기 전에 간단한 지시 따르기, 좋아하는 간식 전에 요청하기 같은 식으로 학습 기회를 만들어 주세요` },
     "일반화 환경 다양화":         { cat: "generalization", desc: `센터에서 익힌 기술이 가정 외의 다양한 환경에서도 나오도록, 마트·공원·친척 집 등 새 장소에서도 같은 기술을 연습할 기회를 만들어 주세요` },
-    "도전 행동 발생 시 무관심 후 대안 행동 강화": { cat: "regression", desc: `도전 행동이 다시 나올 때는 그 행동에 바로 반응하지 마시고, ${fn}${이가(fn)} 적절한 대체 행동을 보일 때 바로 칭찬과 관심을 주세요` },
+    "도전 행동 발생 시 무관심 후 대안 행동 강화": { cat: "regression", desc: `도전적 행동이 다시 나올 때는 그 행동에 바로 반응하지 마시고, ${fn}${이가(fn)} 적절한 대체 행동을 보일 때 바로 칭찬과 관심을 주세요` },
     "정기적 부모 모니터링":       { cat: "monitor",        desc: `주 1회 정도 ${fn}의 행동과 학습 기술 유지 상태를 짧게 점검하고 메모로 남겨 주세요. 작은 변화도 기록해 두시면 다음 단계 검토에 도움이 됩니다` },
-    "퇴행 시 즉시 ABA 치료 재개 검토": { cat: "regression", desc: `일정 기간 이상 학습한 기술이 퇴행하거나 새 도전 행동이 늘어나면, 가능한 빨리 ABA 치료 재개나 컨설팅을 검토해 주세요. 일찍 개입하는 게 효과적입니다` },
+    "퇴행 시 즉시 ABA 치료 재개 검토": { cat: "regression", desc: `일정 기간 이상 학습한 기술이 퇴행하거나 새로운 도전적 행동이 늘어나면, 가능한 빨리 ABA 치료 재개나 컨설팅을 검토해 주세요. 일찍 개입하는 게 효과적입니다` },
     "또래 상호작용 기회 정기 마련": { cat: "social",        desc: `놀이터·또래 만남·소그룹 활동 같은 기회를 정기적으로 만들어 주시면 사회적 기술 발달에 도움이 됩니다. ${fn}${josa이가(fn)} 또래 안에서 어울리도록 격려해 주세요` },
     "시각적 일정표·사진 단서 활용": { cat: "routine",        desc: `필요하시면 시각적 일정표나 사진 단서를 활용해 주세요. ${fn}${이가(fn)} 다음에 일어날 일을 예측하고 전환 상황에 적응하는 데 도움이 됩니다` }
   };
@@ -1697,7 +1697,7 @@ function buildHomeMaintenance(selected, info) {
     consistency:    "일관성 있는 양육 환경",
     generalization: "다양한 환경으로의 일반화",
     monitor:        "정기적인 점검과 기록",
-    regression:     "퇴행이나 도전 행동에 대한 대처",
+    regression:     "퇴행이나 도전적 행동에 대한 대처",
     social:         "또래·사회적 기회 마련"
   };
   const CAT_ORDER = ["consistency", "reinforce", "routine", "generalization", "social", "monitor", "regression"];
@@ -3350,7 +3350,7 @@ const blankChild = () => ({
     finalGrowth: "",       // 치료 기간 중 성장과 변화 (자동 생성 + 수정 가능)
     finalHomeMaintenance: "",  // 가정에서의 유지 방안 (수동 + 빠른 칩)
     finalRecommendations: "",  // 권고사항 (수동 + 빠른 칩)
-    finalBehaviorChange: "",   // 문제행동 변화 (선택, 수동 입력)
+    finalBehaviorChange: "",   // 도전적 행동 변화 (선택, 수동 입력)
     finalHandover: "",     // 다음 기관 인계 정보 (선택, 자동 생성 + 수정 가능)
     iepReferralReason: "",      // IEP 의뢰 사유 (자동 생성 + 수정)
     iepHomeCollab: "",          // 보호자 협력 방안 (자동 생성 + 수정)
@@ -3358,7 +3358,7 @@ const blankChild = () => ({
   },
   goals: [],
   domainLevelOverrides: {},
-  reportFields: ["", "", "", "", ""],  // 언어/사회성/문제행동/교수참여도/최근변화
+  reportFields: ["", "", "", "", ""],  // 언어/사회성/도전적 행동/교수참여도/최근변화
   reportSelStrats: [],  // 중재 전략 선택
   reportSelStratsCustom: "",  // W-18: 중재 전략 직접입력 (콤마 구분)
   reportSelPrein: [],   // 1차 강화제
@@ -4135,7 +4135,7 @@ export default function App() {
     { id: "t_following", name: "👂 지시 따르기", domain: "발달 언어", description: "1-2단계 지시 따르기", category: "기본" },
     { id: "t_imitation", name: "🎭 모방", domain: "발달 언어", description: "신체 및 음성 모방", category: "기본" },
     { id: "t_attention", name: "🎯 집중력", domain: "발달 언어", description: "과제에 주의 집중하기", category: "기본" },
-    { id: "t_behavior", name: "🚫 문제행동 감소", domain: "행동 관리", description: "문제행동 빈도 감소", category: "행동" },
+    { id: "t_behavior", name: "🚫 도전적 행동 감소", domain: "행동 관리", description: "도전적 행동 빈도 감소", category: "행동" },
     { id: "t_selfcare", name: "🧼 자기관리", domain: "생활 기술", description: "손씻기, 이닦기 등", category: "생활" },
     { id: "t_social", name: "👫 사회적 상호작용", domain: "사회성", description: "또래와 상호작용하기", category: "사회" },
   ];
@@ -9549,7 +9549,8 @@ function ArchiveViewModal({ item, onClose }) {
                   const body = sections[key];
                   if (!body || !String(body).trim()) return null;
                   const personalized = personalizeText(String(body), snapChildName);
-                  const personalizedKey = personalizeText(key, snapChildName);
+                  // ★ [표기] 저장 키는 유지, 화면 표기만 '도전적 행동'으로
+                  const personalizedKey = personalizeText(key, snapChildName).replace("문제행동", "도전적 행동");
                   return (
                     <div key={key} style={{ marginBottom: 14, paddingBottom: 12, borderBottom: "1px dashed #e8d8de" }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: PKD, marginBottom: 6 }}>{personalizedKey}</div>
@@ -9565,7 +9566,7 @@ function ArchiveViewModal({ item, onClose }) {
               {/* FBA + 중재 전략 + 강화제 (있으면) */}
               {Array.isArray(snapshot.reportBehaviors) && snapshot.reportBehaviors.length > 0 && snapshot.reportBehaviors.some(b => b.name) && (
                 <div style={{ marginTop: 14, padding: "10px 14px", background: "#fdf8f9", borderRadius: 8 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: PKD, marginBottom: 6 }}>⚠️ 문제행동 (당시)</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: PKD, marginBottom: 6 }}>⚠️ 도전적 행동 (당시)</div>
                   {snapshot.reportBehaviors.filter(b => b.name).map((b, i) => (
                     <div key={i} style={{ fontSize: 10.5, color: "#555", marginBottom: 3 }}>
                       <b>{b.name}</b>{b.severity ? ` · ${b.severity}` : ""}{b.intervention ? ` · 중재: ${b.intervention === "__custom__" ? b.interventionCustom : b.intervention}` : ""}
@@ -11346,7 +11347,7 @@ cleanedHTML + '\n' +
             {/* ★ [v19 통일] 옛 중간모드 reportBehaviors 표 제거 */}
             {/* 중간모드도 종결과 동일하게 finalBehaviorChange 단락 사용 */}
 
-            {/* ★ [v19 흐름 개선] 중간모드 문제행동 변화 — 차트 영역 끝 (사실 데이터와 함께) */}
+            {/* ★ [v19 흐름 개선] 중간모드 도전적 행동 변화 — 차트 영역 끝 (사실 데이터와 함께) */}
             {!isFinalMode && !isIepMode && (() => {
               const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
               const behaviorClean = stripMarker(info.finalBehaviorChange);
@@ -11354,9 +11355,9 @@ cleanedHTML + '\n' +
               const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
               const personalize = (text) => personalizeText(text || "", childName);
               return (
-                <PrintSection num={nextSn()} title="문제행동 변화">
+                <PrintSection num={nextSn()} title="도전적 행동 변화">
                   <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                    ※ 본 보고 기간 동안 관찰된 문제행동 변화 양상입니다.
+                    ※ 본 보고 기간 동안 관찰된 도전적 행동 변화 양상입니다.
                   </div>
                   <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333" }}>
                     {personalize(behaviorClean).split("\n").map((line, i) => (
@@ -11536,16 +11537,16 @@ cleanedHTML + '\n' +
 
             {/* ★ [종결보고서 전용] 습득 완료 목표 모음 — 영역별 그룹화 (성장과 변화 다음) */}
 
-            {/* ★ [v19 흐름 개선] 종결모드 문제행동 변화 — 성장과 변화 직후 (회고 흐름) */}
+            {/* ★ [v19 흐름 개선] 종결모드 도전적 행동 변화 — 성장과 변화 직후 (회고 흐름) */}
             {/* 중간모드는 위 차트 영역 끝에서 표시됨 */}
             {isFinalMode && (() => {
               const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
               const behaviorClean = stripMarker(info.finalBehaviorChange);
               if (!behaviorClean) return null;
               return (
-                <PrintSection num={nextSn()} title="문제행동 변화">
+                <PrintSection num={nextSn()} title="도전적 행동 변화">
                   <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                    ※ 치료 시작 시점부터 종결까지의 문제행동 변화 양상입니다.
+                    ※ 치료 시작 시점부터 종결까지의 도전적 행동 변화 양상입니다.
                   </div>
                   <div style={{ fontSize: 10.5, lineHeight: 1.85, color: "#333" }}>
                     {personalize(behaviorClean).split("\n").map((line, i) => (
@@ -11664,8 +11665,8 @@ cleanedHTML + '\n' +
               );
             })()}
 
-            {/* ★ [종결보고서 전용] 9. 문제행동 변화 (선택) — finalBehaviorChange가 있을 때만 표시 */}
-            {/* ★ [중복 제거] 옛 문제행동 표 제거 — 아래 7086번 '주요 문제행동 및 중재' 표가 더 풍부함 (기능 컬럼 포함) */}
+            {/* ★ [종결보고서 전용] 9. 도전적 행동 변화 (선택) — finalBehaviorChange가 있을 때만 표시 */}
+            {/* ★ [중복 제거] 옛 도전적 행동 표 제거 — 아래 7086번 '주요 도전적 행동 및 중재' 표가 더 풍부함 (기능 컬럼 포함) */}
                 </>
               );
             })()}
@@ -14565,7 +14566,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   if (curFields[2] && curFields[2].trim()) {
     sec1Parts.push(curFields[2]);
   } else {
-    // ★ [3단계] 등록된 문제행동 전체를 반영한다(기존엔 reportBehaviors[0]만 나갔다).
+    // ★ [3단계] 등록된 도전적 행동 전체를 반영한다(기존엔 reportBehaviors[0]만 나갔다).
     //    빈도 추세는 키워드 입력값이 있을 때만 쓴다 — '미측정'이거나 미선택이면 문장을 만들지 않는다.
     const TREND_TEXT = {
       decrease: "중재 시작 이후 빈도가 줄어드는 양상입니다.",
@@ -14596,7 +14597,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
       sec1Parts.push(bParts.join(" "));
     });
   }
-  // ★ [수정] 문제행동 데이터가 없을 때 넣던 "문제행동은 낮은 수준으로 유지" 상투구 제거.
+  // ★ [수정] 도전적 행동 데이터가 없을 때 넣던 "도전적 행동은 낮은 수준으로 유지" 상투구 제거.
   //    기록이 없는 아동에게도 무조건 나가서 사실과 다를 수 있었다.
 
   // ★ [3단계] 촉구 수준 변화 — 앱이 측정하지 않으므로 키워드(시작/현재)를 고른 경우에만 쓴다.
@@ -14750,7 +14751,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   //    초기 단계 아동을 전제한 내용이라 발달 수준이 높은 아동에게는 맞지 않았다.
   //    이 섹션은 키워드 선택으로 작성하고, 자동 부분은 데이터에서 나오는 주의사항만 남긴다.
   const cautions = [];
-  // ★ [수정] 등록된 문제행동 전체를 반영 (기존엔 첫 번째 행동만).
+  // ★ [수정] 등록된 도전적 행동 전체를 반영 (기존엔 첫 번째 행동만).
   const cautionBehaviors = (behaviors && behaviors.length > 0)
     ? behaviors.filter(b => b && (b.name || "").trim())
     : (bName && bName.trim() ? [{ name: bName, funcs: selFuncs || [] }] : []);
@@ -15730,11 +15731,11 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
         </div>
       )}
 
-      {/* ★ [중간/종결 통일] 문제행동 변화 — 칩 클릭 + [✨ 자동 생성] */}
+      {/* ★ [중간/종결 통일] 도전적 행동 변화 — 칩 클릭 + [✨ 자동 생성] */}
       {/* ReportTab은 보고서 탭 (④) — IEP 모드 자체 없음. 항상 표시 */}
       <div style={{ ...CS, marginBottom: 12 }}>
         <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 8, color: "#3d6014" }}>
-          문제행동 변화
+          도전적 행동 변화
           <span style={{ fontSize: 10, fontWeight: 500, color: "#767676", marginLeft: 8 }}>
             (선택 · 키워드 선택 후 [✨ 자동 생성])
           </span>
@@ -15784,6 +15785,8 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
                   {BEHAVIOR_CHIPS.map((label, i) => {
                     const isSelected = selectedSet.has(label);
+                    // ★ [표기] 저장 식별자는 그대로 두고(기존 보고서의 선택 기록이 깨지지 않도록) 화면 표기만 바꾼다.
+                    const shownLabel = label.replace("문제행동", "도전적 행동");
                     return (
                       <button key={i}
                         onClick={() => toggle(label)}
@@ -15795,7 +15798,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                           color: isSelected ? "#fff" : "#3d6014",
                           cursor: "pointer", fontFamily: "inherit", fontWeight: 500
                         }}>
-                        {isSelected ? "✓" : "+"} {label}
+                        {isSelected ? "✓" : "+"} {shownLabel}
                       </button>
                     );
                   })}
@@ -15826,7 +15829,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                     🗑 초기화
                   </button>
                   <span style={{ fontSize: 9.5, color: "#888", marginLeft: 4 }}>
-                    {selectedSet.size > 0 ? `선택: ${selectedSet.size}개 — [✨ 자동 생성] 누르면 변화 양상이 작성됩니다` : "특이 문제행동 없으면 비워두셔도 됩니다"}
+                    {selectedSet.size > 0 ? `선택: ${selectedSet.size}개 — [✨ 자동 생성] 누르면 변화 양상이 작성됩니다` : "특별한 도전적 행동이 없으면 비워두셔도 됩니다"}
                   </span>
                 </div>
                 <AutoTextarea
@@ -15835,7 +15838,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                     const marker = selected.length > 0 ? `\n\n<!--SELECTED:${selected.join("|")}-->` : "";
                     setInfo(prev => ({ ...prev, finalBehaviorChange: e.target.value + marker }));
                   }}
-                  placeholder="치료 시작 시 보였던 문제행동의 변화를 작성하세요. 비워두면 인쇄에서 자동 생략됩니다."
+                  placeholder="치료 시작 시 보였던 도전적 행동의 변화를 작성하세요. 비워두면 인쇄에서 자동 생략됩니다."
                   rows={3}
                   style={{ width: "100%", padding: "10px 12px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 12, fontFamily: "inherit", lineHeight: 1.85, resize: "vertical", boxSizing: "border-box" }}
                 />
@@ -16197,7 +16200,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
         </div>
       )}
 
-      {/* ★ [종결보고서 전용] 9. 문제행동 변화 (선택) — 수동 입력 (자동 데이터 없을 때 빈 칸으로 둘 수 있음) */}
+      {/* ★ [종결보고서 전용] 9. 도전적 행동 변화 (선택) — 수동 입력 (자동 데이터 없을 때 빈 칸으로 둘 수 있음) */}
       {/* 🆕 AI 서술형 중간보고서 생성 섹션 (중간모드 전용 — 종결모드는 별도 자동 생성 섹션 사용) */}
       {!isFinalMode && (
         <ReportGeneratorSection
@@ -16854,7 +16857,9 @@ function ReportGeneratorSection({
 
   const displayLabel = (key) => {
     const map = {
-      "이번 기간의 성장과 변화": "치료사 종합 소견"
+      "이번 기간의 성장과 변화": "치료사 종합 소견",
+      // ★ [표기] 저장 키는 기존 보고서 호환을 위해 그대로 두고 화면 표기만 바꾼다.
+      "아동의 현행 상황 – 문제행동 / 주의 집중": "아동의 현행 상황 – 도전적 행동 / 주의 집중"
     };
     return map[key] || key;
   };
@@ -16996,12 +17001,12 @@ function ReportGeneratorSection({
 
       {/* ═ [v19] 영역별 현황 5개 textarea 제거 — 4섹션 칩+✨ 자동생성으로 대체 */}
 
-      {/* ═ 문제행동 · 중재전략 · 강화제 ═ */}
+      {/* ═ 도전적 행동 · 중재전략 · 강화제 ═ */}
       <div className="responsive-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-        {/* W-20: 다중 문제행동 — 각 행동마다 별도 카드, [+ 추가] / [× 삭제] 가능 */}
+        {/* W-20: 다중 도전적 행동 — 각 행동마다 별도 카드, [+ 추가] / [× 삭제] 가능 */}
         <div style={{ padding: 12, background: "#fff", borderRadius: 10, border: "1px solid #f0e0e5" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: PKD }}>⚠️ 주요 문제행동</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: PKD }}>⚠️ 주요 도전적 행동</div>
             <button
               onClick={() => {
                 const next = [...reportBehaviors, { name: "", severity: "", trend: "", funcs: [], funcOther: "", intervention: "", interventionCustom: "" }];
@@ -17014,7 +17019,7 @@ function ReportGeneratorSection({
 
           {reportBehaviors.length === 0 && (
             <div style={{ fontSize: 11, color: "#888", padding: "12px 8px", textAlign: "center", border: "1px dashed #ddd", borderRadius: 6 }}>
-              [+ 추가]를 눌러 문제행동을 등록하세요
+              [+ 추가]를 눌러 도전적 행동을 등록하세요
             </div>
           )}
 
@@ -17455,6 +17460,8 @@ function ReportGeneratorSection({
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
                     {CHIPS_DATA.map(([label], i) => {
                       const isSel = selectedSet.has(label);
+                      // ★ [표기] 저장 식별자는 그대로, 화면 표기만 '도전적 행동'으로 통일
+                      const shownLabel = label.replace(/도전 행동/g, "도전적 행동");
                       return (
                         <button key={i}
                           onClick={() => toggle(label)}
@@ -17466,7 +17473,7 @@ function ReportGeneratorSection({
                             color: isSel ? "#fff" : PKD,
                             cursor: "pointer", fontFamily: "inherit", fontWeight: 500
                           }}>
-                          {isSel ? "✓" : "+"} {label}
+                          {isSel ? "✓" : "+"} {shownLabel}
                         </button>
                       );
                     })}
