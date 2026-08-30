@@ -2216,6 +2216,27 @@ function priorGapInfo(treatStart, firstDataDate, lastDataDate) {
   };
 }
 
+// ★ [58-8] 자동 생성 문장의 '만든 시점' 지문.
+//    종합 평가·성장과 변화는 [✨ 자동 생성]을 누른 순간의 데이터로 만들어져 그대로 저장된다.
+//    그 뒤 기간을 바꾸거나 목표를 추가해도 문장은 그대로라, 낡은 채로 인쇄까지 나갔다.
+//    (하민: 표지는 2026-08-30인데 종합 평가만 2023-09-01 — 옛 빌드에서 만든 문장이 남아 있었다)
+//    문장을 만들 때 아래 지문을 같이 저장해 두고, 지금 값과 다르면 화면에만 경고를 띄운다.
+//    인쇄물 내용은 건드리지 않는다 — 고칠지 말지는 선생님이 정한다.
+function reportTextStamp(periodStart, periodEnd, cmp) {
+  return [
+    periodStart || "",
+    periodEnd || "",
+    cmp ? cmp.totalTasks : "",
+    cmp ? cmp.totalMastered : ""
+  ].join("|");
+}
+// "none" 문장 없음 / "ok" 최신 / "unknown" 만든 시점 모름 / "stale" 그 뒤 데이터가 바뀜
+function stampState(text, savedStamp, currentStamp) {
+  if (!String(text || "").trim()) return "none";
+  if (!savedStamp) return "unknown";
+  return savedStamp === currentStamp ? "ok" : "stale";
+}
+
 // ★ [57-2] periodEnd — 표지·치료 개요 표와 같은 값(reportPeriodEnd)을 넘겨받는다.
 // ★ [57-4] stos — 넘기면 비교 섹션과 같은 계산(buildStartEndCompare)을 쓴다.
 //    안 넘기면 예전 동작 그대로.
@@ -4007,6 +4028,8 @@ const blankChild = () => ({
     finalSummary: "",      // 종합 평가 (자동 생성 + 수정 가능)
     priorProgress: "",     // ★ [58-3] 앱 기록 이전 구간의 경과 (자유 입력 · 6개월 이상 벌어진 아동만 인쇄)
     finalGrowth: "",       // 치료 기간 중 성장과 변화 (자동 생성 + 수정 가능)
+    finalSummaryStamp: "",  // ★ [58-8] 종합 평가를 만든 시점의 데이터 지문
+    finalGrowthStamp: "",   // ★ [58-8] 성장과 변화를 만든 시점의 데이터 지문
     finalHomeMaintenance: "",  // 가정에서의 유지 방안 (수동 + 빠른 칩)
     finalRecommendations: "",  // 권고사항 (수동 + 빠른 칩)
     finalBehaviorChange: "",   // 도전적 행동 변화 (선택, 수동 입력)
@@ -15892,6 +15915,22 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
   }, [archiveList, currentUser, info.ownerName]);
 
   const isFinalMode = reportMode === "final";
+
+  // ★ [58-8] 지금 데이터 기준 지문. 저장된 지문과 다르면 문장이 낡은 것이다.
+  const currentTextStamp = useMemo(
+    () => reportTextStamp(reportPeriodStart, reportPeriodEnd, buildStartEndCompare(stosForReport || [], goals || [])),
+    [reportPeriodStart, reportPeriodEnd, stosForReport, goals]
+  );
+  const StaleNotice = ({ state }) => {
+    if (state !== "stale" && state !== "unknown") return null;
+    return (
+      <div style={{ fontSize: 11, color: "#7a5a00", background: "#fff8e8", border: "1px solid #f0dcb0", borderRadius: 6, padding: "7px 10px", marginBottom: 8, lineHeight: 1.6 }}>
+        {state === "stale"
+          ? <>⚠ 이 문장은 <b>예전 데이터로 만들어졌습니다.</b> 그 뒤로 보고 기간이나 과제 수가 바뀌었습니다 — [✨ 자동 생성]을 다시 눌러 주세요.</>
+          : <>⚠ 이 문장을 <b>언제 만들었는지 확인할 수 없습니다.</b> 내용이 지금 데이터와 맞는지 확인하시거나 [✨ 자동 생성]을 다시 눌러 주세요.</>}
+      </div>
+    );
+  };
   const effectiveArchiveList = (cutoffDisabled || isFinalMode) ? [] : (visibleArchiveList || []).filter(item => !item.isFinal);
   const allDates = useMemo(() => {
     let cutoffDate = null;
@@ -16732,16 +16771,18 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
             <button
               onClick={() => {
                 const auto = buildFinalSummary(goals, info, reportPeriodEnd, stosForReport);
-                setInfo(prev => ({ ...prev, finalSummary: auto }));
+                setInfo(prev => ({ ...prev, finalSummary: auto, finalSummaryStamp: currentTextStamp }));
               }}
               style={{ padding: "5px 12px", fontSize: 10.5, border: "1px solid #5a8c1f", borderRadius: 6, background: "#f5f7f0", color: "#3d6014", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
               title="현재 데이터로 자동 생성된 문장으로 덮어씁니다 (수동 편집 내용 사라짐)">
               ✨ 자동 생성
             </button>
           </div>
+          <StaleNotice state={stampState(info.finalSummary, info.finalSummaryStamp, currentTextStamp)} />
           <AutoTextarea
             value={info.finalSummary || ""}
-            onChange={e => setInfo(prev => ({ ...prev, finalSummary: e.target.value }))}
+            /* 직접 고치면 지금 데이터를 보고 쓴 것이므로 지문을 최신으로 갱신한다 */
+            onChange={e => setInfo(prev => ({ ...prev, finalSummary: e.target.value, finalSummaryStamp: currentTextStamp }))}
             placeholder="[✨ 자동 생성] 버튼을 눌러 시작하거나 직접 작성하세요"
             rows={3}
             style={{ width: "100%", padding: "10px 12px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 12, fontFamily: "inherit", lineHeight: 1.8, resize: "vertical", boxSizing: "border-box" }}
@@ -16762,16 +16803,17 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
             <button
               onClick={() => {
                 const auto = buildFinalGrowth(goals, info, stosForReport);
-                setInfo(prev => ({ ...prev, finalGrowth: auto }));
+                setInfo(prev => ({ ...prev, finalGrowth: auto, finalGrowthStamp: currentTextStamp }));
               }}
               style={{ padding: "5px 12px", fontSize: 10.5, border: "1px solid #5a8c1f", borderRadius: 6, background: "#f5f7f0", color: "#3d6014", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
               title="현재 데이터로 자동 생성된 문장으로 덮어씁니다 (수동 편집 내용 사라짐)">
               ✨ 자동 생성
             </button>
           </div>
+          <StaleNotice state={stampState(info.finalGrowth, info.finalGrowthStamp, currentTextStamp)} />
           <AutoTextarea
             value={info.finalGrowth || ""}
-            onChange={e => setInfo(prev => ({ ...prev, finalGrowth: e.target.value }))}
+            onChange={e => setInfo(prev => ({ ...prev, finalGrowth: e.target.value, finalGrowthStamp: currentTextStamp }))}
             placeholder="[✨ 자동 생성] 버튼을 눌러 시작하거나 직접 작성하세요"
             rows={3}
             style={{ width: "100%", padding: "10px 12px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 12, fontFamily: "inherit", lineHeight: 1.8, resize: "vertical", boxSizing: "border-box" }}
