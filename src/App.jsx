@@ -14342,18 +14342,18 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     const lgPts = lgSto?.points || [];
     const lgRecent = lgPts.slice(-3);
     const isAccelerating = lgRecent.length >= 2 && (lgRecent[lgRecent.length - 1].value - lgRecent[0].value) > 10;
-    if (g.masteredFromStart) {
-      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역에서 안정적으로 수행하고 있습니다. 요구하기(Mand)와 따라말하기(Echoic) 모두 일관되게 나오고 있고,${langCountText}${lgDone.length > 0 && isValidTaskName(lgDone[0].name) ? ` '${shortTaskName(lgDone[0].name)}' 등 핵심 목표에서 준거를 달성했습니다.` : (lgDone.length > 0 ? " 핵심 목표에서 준거를 달성했습니다." : "")} 일반화 단계로 넘어갈 수 있는 수준입니다.`);
-    } else if (isAccelerating) {
-      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역 점수가 ${g.first}%에서 ${g.last}%로 +${g.diff}%p 올랐습니다. 요구하기(Mand)와 따라말하기(Echoic) 반응이 늘었고,${langCountText}${lgDone.length > 0 && isValidTaskName(lgDone[0].name) ? ` '${shortTaskName(lgDone[0].name)}'에서 준거를 달성했습니다.` : (lgDone.length > 0 ? " 핵심 목표에서 준거를 달성했습니다." : "")} 수용·표현 언어 전반에서 변화가 ${pv()}`);
-    } else {
-      sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역 점수가 ${g.first}%에서 ${g.last}%로 ${g.diff > 0 ? `+${g.diff}%p 올랐고,` : `유지되고 있고,`}${langCountText}${lgDone.length > 0 && isValidTaskName(lgDone[0].name) ? ` '${shortTaskName(lgDone[0].name)}' 등 ${lgDone.length}개 목표에서 준거를 달성했습니다.` : (lgDone.length > 0 ? ` ${lgDone.length}개 목표에서 준거를 달성했습니다.` : "")} 요구하기(Mand)와 따라말하기(Echoic)가 ${pg()}`);
-    }
+    // ★ [수정] 해석형 문구(요구하기·따라말하기 반응, 수용·표현 언어 변화, 일반화 단계 판단) 제거.
+    //    측정한 적 없는 내용이고 영역만 맞으면 무조건 붙던 고정 문구였다.
+    //    또한 g는 '과제' 단위라 그 수치를 "영역 점수"로 부를 수 없다 → 과제 수치 표기 자체를 뻐다.
+    const lgDoneTxt = lgDone.length > 0 && isValidTaskName(lgDone[0].name)
+      ? ` '${shortTaskName(lgDone[0].name)}' 등 ${lgDone.length}개 목표에서 준거를 달성했습니다.`
+      : (lgDone.length > 0 ? ` ${lgDone.length}개 목표에서 준거를 달성했습니다.` : "");
+    sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역에서 학습을 진행했습니다.${langCountText}${lgDoneTxt}`);
   } else if (lgDone.length > 0) {
     // ★ [수정] "따라말하기 정확도 / 택트·인트라버벌 기초" 꼬리 제거 — 데이터 근거 없는 상투구.
     sec1Parts.push(`${fn}${jEunNeun(fn)} 언어 영역에서 ${isValidTaskName(lgDone[0].name) ? `'${shortTaskName(lgDone[0].name)}'의 준거를` : "핵심 목표의 준거를"} 달성했습니다.${langCountText}`);
   } else if (total > 0) {
-    sec1Parts.push(`${fn}${jEunNeun(fn)} 지금은 언어 기능의 초기 평가 단계입니다. 요구하기(Mand)와 따라말하기(Echoic) 반응이 조금씩 ${pv()}`);
+    sec1Parts.push(`${fn}${jEunNeun(fn)} 지금은 언어 기능의 초기 평가 단계입니다.`);
   }
 
   const scD = Object.entries(growthMap).filter(([, v]) => socK.some(k => (v.domain||"").includes(k))).map(([,v]) => v).sort((a,b) => b.diff - a.diff);
@@ -14365,15 +14365,11 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     sec1Parts.push(curFields[1]);
   } else if (scD.length > 0) {
     const g = scD[0];
-    if (g.masteredFromStart) {
-      sec1Parts.push(`사회성 영역도 안정적입니다. 또래 공동주의 반응과 눈맞춤이 ${pv()}${socCountText} 다양한 상황에서의 일반화가 다음 과제입니다.`);
-    } else if (g.diff > 0 && g.last >= 80) {
-      sec1Parts.push(`사회성 영역 점수가 ${g.first}%에서 ${g.last}%(+${g.diff}%p)로 올랐습니다.${socCountText} 또래 공동주의와 눈맞춤이 늘고 있고, 일반화 단계로 넘어갈 수 있는 수준입니다.`);
-    } else {
-      sec1Parts.push(`사회성 영역 점수는 ${g.first}%에서 ${g.last}%로 ${g.diff > 0 ? `+${g.diff}%p 올랐고,` : `유지되고 있고,`}${socCountText} 또래 공동주의와 눈맞춤이 ${pg()}`);
-    }
+    // ★ [수정] 해석형 문구(또래 공동주의·눈맞춤, 일반화 판단) 제거 + 과제 수치를 영역 점수로 부르던 문제 제거.
+    if (socCountText) sec1Parts.push(`사회성 영역에서 학습을 진행했습니다.${socCountText}`.replace(/,$/, "."));
   } else if (scDone.length > 0) {
-    sec1Parts.push(`사회성 영역에서 ${isValidTaskName(scDone[0].name) ? `'${shortTaskName(scDone[0].name)}'의 준거를` : "핵심 목표의 준거를"} 달성했습니다.${socCountText} 자유놀이 상황에서도 차례 지키기(Turn-taking)와 공유 행동이 자발적으로 ${pv()}`);
+    // ★ [수정] "자유놀이 차례 지키기·공유 행동" 꼬리 제거 — 측정 근거 없음.
+    sec1Parts.push(`사회성 영역에서 ${isValidTaskName(scDone[0].name) ? `'${shortTaskName(scDone[0].name)}'의 준거를` : "핵심 목표의 준거를"} 달성했습니다.${socCountText}`.replace(/,$/, "."));
   }
 
   if (curFields[2] && curFields[2].trim()) {
@@ -14393,9 +14389,9 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     sec1Parts.push(`'${exemplar}' 등 ${done.length}개 목표에서 촉구(prompt) 수준을 줄였고, 리스트도 상향했습니다.`);
   } else if (lastAvg > 0) {
     if (lastAvg >= 80) {
-      sec1Parts.push(`교수 참여도가 안정적입니다. 진행 중인 ${prog.length}개 목표에서 평균 ${lastAvg}%의 정반응률을 보이고 있습니다. ${stratTxt}이 ${fn}에게 잘 맞습니다.`);
+      sec1Parts.push(`진행 중인 ${prog.length}개 목표에서 평균 ${lastAvg}%의 정반응률을 보이고 있습니다.`);
     } else if (lastAvg >= 60) {
-      sec1Parts.push(`교수 참여도는 ${lastAvg}% 수준이고 조금씩 올라가고 있습니다. 촉구(prompt) 의존도가 줄어 학습 효율이 좋아지고 있습니다.`);
+      sec1Parts.push(`진행 중인 목표의 평균 정반응률은 ${lastAvg}%입니다.`);
     } else {
       if (finalMode) {
         sec1Parts.push(`${fn}의 학습 출발점과 기초 수준을 확인하는 과정을 거쳐, ${stratTxt} 등을 통해 단계적으로 중재를 진행하였습니다.`);
@@ -14494,9 +14490,9 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
       : "";
     sec2Parts.push(`${fn}${jEunNeun(fn)} 이번 기간에 평균 점수가 ${firstAvg}%에서 ${lastAvg}%로 +${overallDiff}%p 올랐습니다.${done.length > 0 ? ` ${done.length}개 목표에서 준거를 달성했습니다.` : ""}${masteredTail}`);
   } else if (recentMastery.length > 0) {
-    sec2Parts.push(`최근 ${isValidTaskName(recentMastery[0].name) ? `'${recentMastery[0].name}'에서` : "핵심 목표에서"} 준거를 달성했습니다. 전체 ${total}개 STO 중 ${done.length}개가 완료되었습니다. 반응 속도와 정확도가 같이 올라가고 있습니다.`);
+    sec2Parts.push(`최근 ${isValidTaskName(recentMastery[0].name) ? `'${recentMastery[0].name}'에서` : "핵심 목표에서"} 준거를 달성했습니다. 전체 ${total}개 STO 중 ${done.length}개가 완료되었습니다.`);
   } else if (total > 0) {
-    sec2Parts.push(`현재 ${total}개 단기 목표 중 ${prog.length}개가 진행 중입니다. 반응 정확도와 자발성이 조금씩 올라가고 있습니다.`);
+    sec2Parts.push(`현재 ${total}개 단기 목표 중 ${prog.length}개가 진행 중입니다.`);
   } else {
     sec2Parts.push(`초기 평가와 기초선 데이터를 수집하는 단계입니다. ${fn}의 학습 특성과 선호 강화제를 파악하면서 개별화 중재 계획을 잡고 있습니다.`);
   }
