@@ -998,7 +998,13 @@ function buildSummary(stosForReport, info) {
   if (!stosForReport || stosForReport.length === 0) return "";
   const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
   const active = stosForReport.filter(s => s.status !== "중단");
-  const total = active.length;
+  // ★ [57-9] 개수는 중단까지 포함한 전체를 쓴다.
+  //    기존엔 active.length(중단 제외)를 썼는데, '영역별 완료 현황'과 '시작 vs 종결 비교'는
+  //    중단을 포함한 전체를 센다. 그래서 성윤준 보고서에 39/66과 39/71이 같이 실렸다.
+  //    %평균 계산은 그대로 active만 본다(중단 STO는 수행 지표에서 빼는 게 맞다).
+  const total = stosForReport.length;
+  const pausedCnt = stosForReport.filter(s => s.status === "중단").length;
+  const pausedNote = pausedCnt > 0 ? ` (이 중 ${pausedCnt}개는 학습 경로 조정에 따라 중단)` : "";
   const done = active.filter(s => s.status === "완료").length;
   // ★ [57-7] 표지 요약도 buildGoalSeries 기준으로 맞춘다.
   //    기존엔 STO 단위로 !s.isOX만 봐서, 한 목표 안에 L1=O·X / L2=%가 섞여 있으면
@@ -1035,18 +1041,20 @@ function buildSummary(stosForReport, info) {
     return `${fn}${josa은는(fn)} 본 보고 기간에 평가가 진행됐습니다.`;
   } else if (!hasRated) {
     return done > 0
-      ? `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 단기 목표(STO) 중 ${done}개에서 준거를 달성했습니다. ${noRateReason}`
+      ? `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 단기 목표(STO) 중 ${done}개에서 준거를 달성했습니다${pausedNote}. ${noRateReason}`
       : `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 단기 목표(STO)를 회기당 1회 기록(O·X) 방식으로 진행했습니다.`;
   } else if (done === total && done > 0) {
     return `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 단기 목표(STO) 전체에서 준거를 달성해 안정화 단계에 들어갔습니다.`;
-  } else if (diff >= 10) {
+  } else if (diff >= 5) {
     // ★ [수정] "평균 달성률"이 어떤 평균인지 밝힌다 — 성장 추이 그래프(회기별 전체 평균)와
     //    계산 방식이 달라 숫자가 다르게 보이던 문제를 문구로 구분한다.
-    return `${fn}${josa은는(fn)} 본 보고 기간에 목표별 달성률 평균이 ${firstAvg}%에서 ${lastAvg}%로 +${diff}%p 올랐습니다${done > 0 ? `. ${done}개 목표에서 준거를 달성했습니다` : ""}.`;
+    // ★ [57-9] 기준을 10 → 5로 내린다. 7%p일 때 표지는 "유지했고", 종합 평가는
+    //    "7%p 향상"이라고 적어 같은 값을 두 가지로 말하던 문제.
+    return `${fn}${josa은는(fn)} 본 보고 기간에 목표별 달성률 평균이 ${firstAvg}%에서 ${lastAvg}%로 +${diff}%p 올랐습니다. ${total}개 STO 중 ${done}개에서 준거를 달성했습니다${pausedNote}.`;
   } else if (diff >= 0 && done > 0) {
-    return `${fn}${josa은는(fn)} 본 보고 기간에 목표별 달성률 평균 ${lastAvg}%를 유지했고, ${total}개 STO 중 ${done}개에서 준거를 달성했습니다.`;
+    return `${fn}${josa은는(fn)} 본 보고 기간에 목표별 달성률 평균 ${lastAvg}%를 유지했고, ${total}개 STO 중 ${done}개에서 준거를 달성했습니다${pausedNote}.`;
   } else if (done > 0) {
-    return `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 STO 중 ${done}개에서 준거를 달성했습니다.`;
+    return `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 STO 중 ${done}개에서 준거를 달성했습니다${pausedNote}.`;
   } else {
     return `${fn}${josa은는(fn)} 본 보고 기간에 목표별 달성률 평균 ${lastAvg}%를 보였고, 기초선 형성 단계에서 진행되고 있습니다.`;
   }
@@ -2671,9 +2679,12 @@ function toFinalTense(text) {
 //
 //    firstAvg/lastAvg는 목표별 앞·뒤 회기 평균을 낸 뒤 영역에서 다시 평균한다.
 //    (첫 회기 한 점만 쓰면 컨디션 한 번에 출발점이 흔들린다.)
-//    창 크기는 min(5, floor(회기수/2)) — 6회기짜리 목표에 앞5/뒤5를 그대로 쓰면
-//    두 창이 4점을 공유해서 실제로는 20%→80%로 오른 목표가 44%→56%로 뭉개진다.
-const COMPARE_EDGE_N = 5;
+//    창 크기는 min(3, floor(회기수/2)) — 두 창이 겹치지 않는 범위.
+// ★ [57-11] 5 → 3. 이 앱의 숙달 기준이 '2회 연속 80%'라 판정은 2~3회기 단위인데
+//    표시만 5회기로 보면 서로 다른 기준을 나란히 놓게 된다. 주 1회 아동은 5회기가
+//    한 달 반 전까지 거슬러 올라가 '종결 시점 수준'이라 부르기 어렵다.
+//    이 상수 하나가 비교 섹션·표지 요약·중간보고서 평균·영역별 균형 막대를 함께 움직인다.
+const COMPARE_EDGE_N = 3;
 function compareEdgeSize(len) {
   return Math.max(1, Math.min(COMPARE_EDGE_N, Math.floor(len / 2)));
 }
@@ -2735,6 +2746,13 @@ function buildStartEndCompare(stos, goals) {
       change: (firstAvg !== null && lastAvg !== null) ? lastAvg - firstAvg : null,
       total: b.total, mastered: b.mastered, paused: b.paused, ongoing: b.ongoing,
       quotableGoals: b.quotableGoals, excludedGoals: b.excludedGoals,
+      // ★ [57-9] %가 없는 이유를 구분한다. 기존엔 전부 "O·X 기록 N개 — % 환산 제외"로 찍혀서,
+      //    전 과제가 중단인 영역(성윤준 '모방' 2과제 전원 중단)에 "O·X 기록 0개"라는
+      //    앞뒤 안 맞는 사유가 나갔다.
+      noRateReason: (firstAvg !== null && lastAvg !== null) ? null
+        : (b.total > 0 && b.paused === b.total) ? "전 과제 중단 — 변화 산출 대상 없음"
+        : (b.excludedGoals > 0) ? `O·X·측정방식 혼재 ${b.excludedGoals}개 — % 환산 제외`
+        : "정반응률 기록 없음",
       // %로 말할 수 있는 영역인가 — 이 값이 false면 문장에서 %를 쓰지 않는다.
       quotable: firstAvg !== null && lastAvg !== null
     };
@@ -2905,6 +2923,13 @@ function buildGoalSeries(stos) {
       series,
       first: series.length > 0 ? series[0] : null,
       last: series.length > 0 ? series[series.length - 1] : null,
+      // ★ [57-11] 최근 N회기 평균 — 막대·비교 섹션의 '종결' 값과 같은 통계.
+      //    last(마지막 한 점)는 한 회기 잘한 것으로 숙달 판정이 서게 만든다.
+      recent: series.length > 0 ? (() => {
+        const n = compareEdgeSize(series.length);
+        const tail = series.slice(-n);
+        return Math.round(tail.reduce((a, b) => a + b, 0) / tail.length);
+      })() : null,
       // %로 서술해도 되는 목표인가 —
       //   · 현재 단계가 O·X거나
       //   · 단계별 측정 방식이 섞여 있으면(hasOXStage) %로 말하지 않는다.
@@ -2934,7 +2959,10 @@ function masteredDomainsOf(domAvgs, stos) {
     const arr = byDomain[cleanDomainKey(d.domain)] || [];
     if (arr.length < MASTERY_MIN_GOALS) return false;
     if (arr.some(g => g.series.length < MASTERY_MIN_SESSIONS)) return false;
-    if (arr.some(g => g.last < 80)) return false;
+    // ★ [57-11] g.last(마지막 한 점) → g.recent(최근 N회기 평균).
+    //    막대가 최근 구간 평균으로 바뀌었는데 판정만 마지막 한 점이면,
+    //    막대 82%인 영역이 숙달로 통과하는 어긋남이 생긴다.
+    if (arr.some(g => g.recent < 80)) return false;
     return true;
   });
 }
@@ -6236,7 +6264,17 @@ export default function App() {
       // ★ [48-1] getTimeline → getRatedGoalSeries. O·X 단계가 섞인 목표에서
       //    O·X 단계의 0/100 환산값이 영역 평균에 새어 들어가던 문제.
       const tl = getRatedGoalSeries(g);
-      const goalValue = tl.length > 0 ? tl[tl.length - 1].rate : null;
+      // ★ [57-11] 목표값을 '마지막 한 점' → '최근 N회기 평균'으로 바꾼다.
+      //    막대(최종 달성률)와 '시작 vs 종결 비교'의 종결 열이 서로 다른 통계라
+      //    같은 영역이 100% / 88%처럼 두 숫자로 실렸다. 비교 섹션과 같은 창을 쓴다.
+      //    한 회기 잘한 것으로 숙달 판정이 서지 않는 부수 효과가 있다 —
+      //    이 값이 masteredDomainsOf·막대 색·'숙달 → 일반화' 문장의 근거가 된다.
+      const goalValue = (() => {
+        if (tl.length === 0) return null;
+        const n = compareEdgeSize(tl.length);
+        const tail = tl.slice(-n);
+        return Math.round(tail.reduce((a, b) => a + b.rate, 0) / tail.length);
+      })();
       if (goalValue === null) return;
       // ★ [55-3] 막대도 재매핑 영역으로 묶는다 — 문장·카드와 같은 이름을 쓴다.
       const dom = reportDomainOf(g);
@@ -11872,7 +11910,7 @@ cleanedHTML + '\n' +
                               </div>
                             ) : (
                               <span style={{ fontSize: 10, color: "#999" }}>
-                                O·X 기록 {r.excludedGoals}개 — % 환산 제외
+                                {r.noRateReason}
                               </span>
                             )}
                           </td>
@@ -11928,7 +11966,8 @@ cleanedHTML + '\n' +
             {domainAvgs.length > 0 && (
               <PrintSection num={nextSn()} title="영역별 균형 분석">
                 <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                  ※ 영역별 학습 목표의 최종 달성률을 한눈에 비교한 그래프입니다. (초록: 80%↑ 숙달, 파랑: 60~79% 진전, 주황: 60%↓ 집중 지도)
+                  ※ 영역별 학습 목표의 최종 달성률을 한눈에 비교한 그래프입니다. (초록: 80%↑ 숙달, 파랑: 60~79% 진전, 주황: 60%↓ 집중 지도)<br />
+                  ※ 최종 달성률은 각 목표의 최근 {COMPARE_EDGE_N}회기 평균이며, '시작 vs 종결 비교'의 종결 값과 같은 기준입니다.
                 </div>
                 <div style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                   <div style={{ fontSize: 11, color: "#666", marginBottom: 6, textAlign: "center", fontWeight: 500 }}>평균 달성률(%)</div>
@@ -15071,7 +15110,14 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
 
   // ★ [수정] %를 다루는 계산은 모두 O·X 목표를 뺀 rated 집합만 쓴다.
   //    (개수를 세는 계산 — done/total/highRate — 은 O·X도 실제 달성이므로 active 그대로.)
-  const rated = active.filter(s => !s.isOX);
+  // ★ [57-10] STO 단위로 !s.isOX만 보면, 한 목표 안에 L1=O·X / L2=%가 섞여 있을 때
+  //    L2만 통과해 "%로 서술하면 안 되는 목표"가 중간보고서 문장에 들어갔다.
+  //    (종결 표지에서 57-7로 고친 것과 같은 함정이 중간보고서에 남아 있었다.)
+  //    buildGoalSeries가 quotable=false로 판정한 목표의 STO는 통째로 뺀다.
+  const _nonQuotableKeys = new Set(
+    buildGoalSeries(active).filter(g => !g.quotable).map(g => g.key)
+  );
+  const rated = active.filter(s => !s.isOX && !_nonQuotableKeys.has(goalKeyOf(s)));
 
   const growthMap = {};
   rated.forEach(s => {
@@ -15122,14 +15168,18 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   // ★ [수정] 표지 요약(buildSummary)과 같은 계산으로 통일 — O·X 제외, 0% 포함.
   //    기존 `lastV > 0` 조건은 0%로 기록된 목표(예: 8회 전부 0%)를 통째로 빼서 평균을 부풀렸다.
   //    0%는 '측정 안 함'이 아니라 실제 데이터다.
+  // ★ [57-10] 표지가 목표(goal) 단위 · 앞뒤 구간 평균으로 바뀌었는데(57-7) 여기는 STO 단위
+  //    첫점/끝점 그대로였다. "같은 계산으로 통일"이라는 주석이 사실이 아니게 돼서 다시 맞춘다.
   let lastSum = 0, lastCnt = 0, firstSum = 0, firstCnt = 0;
-  rated.forEach(s => {
-    if (!s.points || s.points.length === 0) return;
-    const lastV = s.points[s.points.length - 1].value;
-    const firstV = s.points[0].value;
-    if (typeof lastV === "number" && !isNaN(lastV)) { lastSum += lastV; lastCnt++; }
-    if (typeof firstV === "number" && !isNaN(firstV)) { firstSum += firstV; firstCnt++; }
-  });
+  buildGoalSeries(active)
+    .filter(g => g.quotable && g.series.length > 0)
+    .forEach(g => {
+      const n = compareEdgeSize(g.series.length);
+      const head = g.series.slice(0, n);
+      const tail = g.series.slice(-n);
+      firstSum += head.reduce((a, b) => a + b, 0) / head.length; firstCnt++;
+      lastSum += tail.reduce((a, b) => a + b, 0) / tail.length; lastCnt++;
+    });
   const lastAvg = lastCnt > 0 ? Math.round(lastSum / lastCnt) : 0;
   const firstAvg = firstCnt > 0 ? Math.round(firstSum / firstCnt) : 0;
   const overallDiff = lastAvg - firstAvg;
