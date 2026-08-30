@@ -289,6 +289,42 @@ const REPORT_SREIN = ["토큰(스티커·코인)","칭찬·언어적 강화","�
 const REPORT_FUNCS = [{k:"escape",l:"탈출·회피",c:"#fcebeb"},{k:"attention",l:"주목·관심",c:"#e6f1fb"},{k:"sensory",l:"감각자극",c:"#faeeda"},{k:"access",l:"획득",c:"#eaf3de"},{k:"other",l:"기타",c:"#f0f0f0"}];
 const INTERVENTION_PRESETS = ["DRO", "DRA", "NCR", "FCT", "선행조절"];
 
+// ★ [3단계 신규] 자동 문장에서 걷어낸 '해석'을 키워드 입력으로 받는다.
+//    앱이 측정하지 않는 내용은 자동으로 쓰지 않고, 여기서 고른 값이 있을 때만 문장을 만든다.
+
+// 촉구 수준 — 배열 순서가 곧 위계(0=가장 독립적). 인덱스 비교로 증감을 판정한다.
+const PROMPT_LEVELS = ["독립 수행", "언어 촉구", "제스처 촉구", "모델링", "부분 신체 촉구", "전신 촉구"];
+
+// 문제행동 빈도 추세 — 앱에 빈도 데이터가 없으므로 치료사가 직접 고른다. '미측정'이면 문장을 쓰지 않는다.
+const BEHAVIOR_TRENDS = [
+  { k: "decrease", l: "감소" },
+  { k: "same", l: "유지" },
+  { k: "increase", l: "증가" },
+  { k: "none", l: "미측정" }
+];
+
+// 강화 스케줄 — 자유 텍스트 파싱(fr3을 가변비율로 오분류하던 정규식)을 대체한다.
+const REINF_SCHEDULES = [
+  { k: "crf", l: "연속 강화 (CRF)" },
+  { k: "fr", l: "고정비율 (FR)" },
+  { k: "vr", l: "가변비율 (VR)" },
+  { k: "fi", l: "고정간격 (FI)" },
+  { k: "vi", l: "가변간격 (VI)" },
+  { k: "natural", l: "자연 강화" }
+];
+
+// 다음 기간 계획 — '다음 목표' 섹션에서 삭제한 방법 선언을 선택식으로 되살린다.
+const NEXT_PLANS = [
+  "일반화 (환경·사람 확장)",
+  "새 목표 도입",
+  "과제 세분화",
+  "촉구 용암(prompt fading)",
+  "시도 횟수 조정",
+  "VB-MAPP 장벽 평가",
+  "가정 연계 강화",
+  "자연 환경 교수(NET) 확대"
+];
+
 const CURR_COLORS = {
   vbmapp: {
     accent: "#FBDBC6",    // 매우 연한 살구
@@ -910,8 +946,11 @@ function buildSummary(stosForReport, info) {
   const active = stosForReport.filter(s => s.status !== "중단");
   const total = active.length;
   const done = active.filter(s => s.status === "완료").length;
+  // ★ [수정] 평균 계산에서 O·X 목표 제외 — 0/100 환산값이 평균을 부풀렸다.
+  //    준거 달성 개수(done)는 O·X 목표도 실제 달성이므로 그대로 센다.
+  const rated = active.filter(s => !s.isOX);
   let lastSum = 0, lastCnt = 0, firstSum = 0, firstCnt = 0;
-  active.forEach(s => {
+  rated.forEach(s => {
     const pts = s.points || [];
     if (pts.length > 0) {
       const lastV = pts[pts.length - 1].value;
@@ -928,13 +967,15 @@ function buildSummary(stosForReport, info) {
   } else if (done === total && done > 0) {
     return `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 단기 목표(STO) 전체에서 준거를 달성해 안정화 단계에 들어갔습니다.`;
   } else if (diff >= 10) {
-    return `${fn}${josa은는(fn)} 본 보고 기간에 평균 달성률이 ${firstAvg}%에서 ${lastAvg}%로 +${diff}%p 올랐습니다${done > 0 ? `. ${done}개 목표에서 준거를 달성했습니다` : ""}.`;
+    // ★ [수정] "평균 달성률"이 어떤 평균인지 밝힌다 — 성장 추이 그래프(회기별 전체 평균)와
+    //    계산 방식이 달라 숫자가 다르게 보이던 문제를 문구로 구분한다.
+    return `${fn}${josa은는(fn)} 본 보고 기간에 목표별 달성률 평균이 ${firstAvg}%에서 ${lastAvg}%로 +${diff}%p 올랐습니다${done > 0 ? `. ${done}개 목표에서 준거를 달성했습니다` : ""}.`;
   } else if (diff >= 0 && done > 0) {
-    return `${fn}${josa은는(fn)} 본 보고 기간에 평균 ${lastAvg}%의 정반응률을 유지했고, ${total}개 STO 중 ${done}개에서 준거를 달성했습니다.`;
+    return `${fn}${josa은는(fn)} 본 보고 기간에 목표별 달성률 평균 ${lastAvg}%를 유지했고, ${total}개 STO 중 ${done}개에서 준거를 달성했습니다.`;
   } else if (done > 0) {
     return `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 STO 중 ${done}개에서 준거를 달성했습니다.`;
   } else {
-    return `${fn}${josa은는(fn)} 본 보고 기간에 평균 ${lastAvg}%의 정반응률을 보였고, 기초선 형성 단계에서 진행되고 있습니다.`;
+    return `${fn}${josa은는(fn)} 본 보고 기간에 목표별 달성률 평균 ${lastAvg}%를 보였고, 기초선 형성 단계에서 진행되고 있습니다.`;
   }
 }
 
@@ -1421,21 +1462,26 @@ function buildInterimStrengths(domAvgs, stos, info) {
     });
   }
 
-  const activeStos = (stos || []).filter(s => !s.isPaused);
-  const masteredCount = activeStos.filter(s => s.isMastered).length;
+  // ★ [버그수정] stosForReport 항목에는 isPaused·isMastered 필드가 없다(status만 있음).
+  //    !s.isPaused 는 항상 참이라 중단 목표까지 포함됐고, s.isMastered 는 항상 거짓이라
+  //    "N개 준거 달성" 강점이 한 번도 나오지 않았다. status 기준으로 교체.
+  const activeStos = (stos || []).filter(s => s.status !== "중단");
+  const masteredCount = activeStos.filter(s => s.status === "완료").length;
   if (masteredCount >= 5) {
     strengths.push({
       title: "체계적인 학습 진행",
-      desc: `이번 보고 기간에 총 ${masteredCount}개 활동에서 준거를 달성해, ${fn}${이가(fn)} 단계적으로 학습 내용을 습득하고 있습니다.`
+      desc: `이번 보고 기간에 총 ${masteredCount}개 단기 목표에서 준거를 달성해, ${fn}${이가(fn)} 단계적으로 학습 내용을 습득하고 있습니다.`
     });
   } else if (masteredCount >= 2) {
     strengths.push({
       title: "단계적 성취",
-      desc: `${masteredCount}개 활동에서 준거를 달성해, ${fn}${이가(fn)} 단계적으로 학습이 진행되고 있습니다.`
+      desc: `${masteredCount}개 단기 목표에서 준거를 달성해, ${fn}${이가(fn)} 단계적으로 학습이 진행되고 있습니다.`
     });
   }
 
+  // ★ [수정] O·X 목표 제외 — 마지막 O 하나로 0%→100% '향상'이 잡혀 개수가 부풀었다.
   const withGrowth = activeStos.filter(s => {
+    if (s.isOX) return false;
     const pts = s.points || [];
     if (pts.length < 2) return false;
     const first = pts[0]?.value;
@@ -1445,30 +1491,21 @@ function buildInterimStrengths(domAvgs, stos, info) {
   if (withGrowth.length >= 3) {
     strengths.push({
       title: "여러 영역의 향상",
-      desc: `${withGrowth.length}개 활동에서 초기 대비 향상이 보여, ${fn}의 학습 진행이 데이터로 확인됩니다.`
+      desc: `${withGrowth.length}개 단기 목표에서 초기 대비 향상이 보여, ${fn}의 학습 진행이 데이터로 확인됩니다.`
     });
   } else if (withGrowth.length >= 1) {
     const exemplar = withGrowth[0];
     const first = exemplar.points[0].value;
     const last = exemplar.points[exemplar.points.length - 1].value;
+    // ★ [수정] task명 대신 카드 제목(goalName)을 쓴다 — task명은 길어서 28자에서 잘렸다.
     strengths.push({
       title: "구체적 향상 사례",
-      desc: `'${exemplar.name}' 활동에서 ${first}%에서 ${last}%로 향상돼, ${fn}의 학습 진행이 데이터로 확인됩니다.`
+      desc: `'${shortTaskName(exemplar.goalName || exemplar.name)}'에서 ${first}%에서 ${last}%로 향상돼, ${fn}의 학습 진행이 데이터로 확인됩니다.`
     });
   }
 
-  if (domAvgs.length >= 4) {
-    const avgValue = domAvgs.reduce((s, d) => s + d.avg, 0) / domAvgs.length;
-    const stdDev = Math.sqrt(
-      domAvgs.reduce((s, d) => s + Math.pow(d.avg - avgValue, 2), 0) / domAvgs.length
-    );
-    if (stdDev < 15 && avgValue >= 50) {
-      strengths.push({
-        title: "영역 간 균형",
-        desc: `의사소통·사회성·행동 등 여러 영역에서 균형 있는 발달 양상이 보여, ${fn}${이가(fn)} 한 영역에 치우치지 않고 전반적으로 진행되고 있습니다.`
-      });
-    }
-  }
+  // ★ [삭제] '영역 간 균형' 항목 제거 — 실제 영역 구성과 상관없이 "의사소통·사회성·행동"이라는
+  //    고정 영역명을 적어 넣던 문구였다.
 
   if (strengths.length === 0) {
     return `${fn}${은는(fn)} 본 보고 기간에 매 회기 참여하면서 학습이 단계적으로 진행되고 있습니다.`;
@@ -1476,9 +1513,9 @@ function buildInterimStrengths(domAvgs, stos, info) {
 
   const intro = `${fn}${이가(fn)} 본 보고 기간에 보인 강점은 다음과 같습니다.`;
   const items = strengths.map(s => `▸ ${s.title}\n${s.desc}`).join("\n\n");
-  const closing = `이 강점은 ${fn}의 학습 특성을 나타내는 지표이며, 다음 학습 방향 설정에 활용하겠습니다.`;
+  // ★ [삭제] 마무리 문장("이 강점은 …다음 학습 방향 설정에 활용하겠습니다") 제거 — 정보 없는 상투구.
 
-  return `${intro}\n\n${items}\n\n${closing}`;
+  return `${intro}\n\n${items}`;
 }
 
 function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
@@ -1501,9 +1538,15 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
   };
 
   const highlights = [];
-  const activeStos = stos.filter(s => !s.isPaused);
+  // ★ [버그수정] isPaused·isMastered 필드는 존재하지 않는다(status만 있음).
+  //    !s.isPaused는 항상 참이라 중단 목표가 섞였고, s.isMastered는 항상 거짓이라
+  //    "여러 활동의 안정적 수행" 항목이 한 번도 나오지 않았다.
+  const activeStos = stos.filter(s => s.status !== "중단");
+  // ★ [수정] O·X 목표는 %로 말하면 안 된다.
+  //    "회기당 1회 성공"인 목표를 "초기 0% → 최근 100%"로 적으면 8회 중 3회 성공이 완전한 성공처럼 읽힌다.
+  const ratedStos = activeStos.filter(s => !s.isOX);
 
-  const withGrowth = activeStos
+  const withGrowth = ratedStos
     .filter(s => {
       const pts = s.points || [];
       if (pts.length < 2) return false;
@@ -1515,44 +1558,46 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
       const pts = s.points;
       const first = pts[0].value;
       const last = pts[pts.length - 1].value;
-      return { name: s.name, first, last, diff: last - first, domain: s.domain };
+      return { name: s.goalName || s.name, first, last, diff: last - first, domain: s.domain };
     })
     .sort((a, b) => b.diff - a.diff);
 
   if (withGrowth.length > 0) {
     const top = withGrowth[0];
     highlights.push({
-      title: `'${shortTaskName(top.name)}' 활동의 향상`,
+      title: `'${shortTaskName(top.name)}'의 향상`,
       desc: `초기 ${top.first}%에서 최근 ${top.last}%까지 올라가, ${fn}${이가(fn)} 단계적 연습으로 수행 능력이 늘고 있음이 확인됩니다.`
     });
   }
 
   const masteredRecent = activeStos
-    .filter(s => s.isMastered && s.points && s.points.length > 0)
+    .filter(s => s.status === "완료" && s.points && s.points.length > 0)
     .map(s => {
       const lastPt = s.points[s.points.length - 1];
-      return { name: s.name, finalRate: lastPt?.value || 0, domain: s.domain };
+      return { name: s.goalName || s.name, finalRate: lastPt?.value || 0, domain: s.domain };
     })
     .sort((a, b) => b.finalRate - a.finalRate)
     .slice(0, 2);
 
   if (masteredRecent.length >= 2) {
-    const names = masteredRecent.map(m => `'${m.name}'`).join(", ");
+    const names = masteredRecent.map(m => `'${shortTaskName(m.name)}'`).join(", ");
     highlights.push({
-      title: "여러 활동의 안정적 수행",
-      desc: `${names} 등 여러 활동에서 일관된 수행이 나와, ${fn}${이가(fn)} 학습 내용을 안정적으로 적용하고 있음이 확인됩니다.`
+      title: "여러 목표의 안정적 수행",
+      desc: `${names} 등 여러 목표에서 준거를 달성해, ${fn}${이가(fn)} 학습 내용을 안정적으로 적용하고 있음이 확인됩니다.`
     });
   } else if (masteredRecent.length === 1) {
     const m = masteredRecent[0];
     highlights.push({
-      title: `'${m.name}' 활동의 안정적 수행`,
-      desc: `연속 회기에서 일관된 수행이 나와, ${fn}${이가(fn)} 해당 활동에서 준거 수준에 도달했음이 확인됩니다.`
+      title: `'${shortTaskName(m.name)}'의 준거 달성`,
+      desc: `연속 회기에서 일관된 수행이 나와, ${fn}${이가(fn)} 해당 목표에서 준거 수준에 도달했음이 확인됩니다.`
     });
   }
 
-  const fastClimb = activeStos.filter(s => {
+  // ★ [수정] 최소 데이터 수를 3회 → 5회로 올림.
+  //    X·O·O 3회만으로 "단기간에 안정적인 수행"이라고 적히던 문제. O·X 목표도 제외한다.
+  const fastClimb = ratedStos.filter(s => {
     const pts = s.points || [];
-    if (pts.length < 3 || pts.length > 6) return false;
+    if (pts.length < 5 || pts.length > 8) return false;
     const last = pts[pts.length - 1]?.value;
     return typeof last === "number" && last >= 80;
   });
@@ -1560,7 +1605,7 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
   if (fastClimb.length > 0 && highlights.length < 3) {
     const ex = fastClimb[0];
     highlights.push({
-      title: `'${shortTaskName(ex.name)}' 활동에 빠른 적응`,
+      title: `'${shortTaskName(ex.goalName || ex.name)}'에 빠른 적응`,
       desc: `학습 시작 후 단기간에 안정적인 수행이 나와, ${fn}${이가(fn)} 새 학습 내용에 빠르게 적응했습니다.`
     });
   }
@@ -1574,9 +1619,9 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
 
   const intro = `본 보고 기간에 ${fn}${이가(fn)} 보인 주요 변화는 다음과 같습니다.`;
   const items = highlights.map(h => `▸ ${h.title}\n${h.desc}`).join("\n\n");
-  const closing = `이 변화는 ${fn}의 학습이 단계적으로 진행되고 있음을 나타냅니다.`;
+  // ★ [삭제] 마무리 문장("이 변화는 …단계적으로 진행되고 있음을 나타냅니다") 제거 — 정보 없는 상투구.
 
-  return `${intro}\n\n${items}\n\n${closing}`;
+  return `${intro}\n\n${items}`;
 }
 
 function buildHomeMaintenance(selected, info) {
@@ -2431,6 +2476,22 @@ function dayIsOX(day) {
   return ((day.c || 0) + (day.ic || 0)) > 0;
 }
 
+// ★ [신규] O·X(시도) 목표 판정 — 단일 기준으로 통일.
+//    O·X 기록은 calcDayRateGlobal에서 0 또는 100으로 환산되므로, %를 평균 내는 모든 지표
+//    (표지 요약 / 영역별 균형 / 성장 추이 / 자동 문장)에서 제외해야 한다.
+//    제외하지 않으면 "회기당 1회 성공"이 "정반응률 100%"로 잡혀 평균이 부풀려진다.
+function taskIsOX(t) {
+  const daily = (t && t.daily) || {};
+  const keys = Object.keys(daily);
+  if (keys.length === 0) return false;
+  return keys.every(d => dayIsOX(daily[d]));
+}
+function goalIsOX(g) {
+  const tasks = (g && g.tasks) || [];
+  if (!tasks.some(t => Object.keys(t.daily || {}).length > 0)) return false;
+  return tasks.every(t => Object.keys(t.daily || {}).every(d => dayIsOX(t.daily[d])));
+}
+
 function calcDayRateGlobal(day, plannedTrials) {
   if (!day) return null;
   if (Array.isArray(day.trials)) {
@@ -3263,7 +3324,12 @@ const blankChild = () => ({
   reportSelStratsCustom: "",  // W-18: 중재 전략 직접입력 (콤마 구분)
   reportSelPrein: [],   // 1차 강화제
   reportSelSrein: [],   // 2차 강화제
-  reportReinfSchedule: "",  // W-19: 강화 스케줄 (예: FR1 → VR3 thin)
+  reportReinfSchedule: "",  // W-19: 강화 스케줄 세부 메모 (예: FR3 → VR5로 thin)
+  // ★ [3단계 신규] 자동 문장이 근거로 쓰는 키워드 입력
+  reportReinfType: "",      // 강화 스케줄 종류 (REINF_SCHEDULES의 k)
+  reportPromptStart: "",    // 보고 기간 시작 시점 촉구 수준
+  reportPromptNow: "",      // 현재 촉구 수준
+  reportNextPlans: [],      // 다음 기간 계획 (다중선택)
   reportBehaviors: [],
   reportSections: {},   // 자동 생성된 섹션 본문 저장
   dailyMemos: {},   // { "2025-04-29": "메모 내용", ... }
@@ -3337,6 +3403,11 @@ const migrateChild = (c) => ({
   reportSelPrein: c.reportSelPrein || [],
   reportSelSrein: c.reportSelSrein || [],
   reportReinfSchedule: c.reportReinfSchedule || "",
+  // ★ [3단계 신규] 기존 아동 데이터에는 없는 필드 — 빈 값으로 채운다(문장은 값이 있을 때만 생성).
+  reportReinfType: c.reportReinfType || "",
+  reportPromptStart: c.reportPromptStart || "",
+  reportPromptNow: c.reportPromptNow || "",
+  reportNextPlans: Array.isArray(c.reportNextPlans) ? c.reportNextPlans : [],
   reportBehaviors: (() => {
     if (Array.isArray(c.reportBehaviors)) return c.reportBehaviors;
     const hasOld = c.reportBName || c.reportBSeverity ||
@@ -4193,6 +4264,10 @@ export default function App() {
   const reportSelPrein = activeChild?.reportSelPrein || [];
   const reportSelSrein = activeChild?.reportSelSrein || [];
   const reportReinfSchedule = activeChild?.reportReinfSchedule || "";
+  const reportReinfType = activeChild?.reportReinfType || "";
+  const reportPromptStart = activeChild?.reportPromptStart || "";
+  const reportPromptNow = activeChild?.reportPromptNow || "";
+  const reportNextPlans = activeChild?.reportNextPlans || [];
   const reportBehaviors = activeChild?.reportBehaviors || [];
   const reportSections = activeChild?.reportSections || {};
   const dailyMemos = activeChild?.dailyMemos || {};
@@ -5464,6 +5539,7 @@ export default function App() {
           goalName: g.item,  // 상위 영역목표명
           source: g.source || "ELCAR",  // ★ 커리큘럼
           status,
+          isOX: taskIsOX(t),   // ★ [신규] O·X(시도) 기록 여부 — % 평균에서 제외하는 판정
           rate: latestPoint ? latestPoint.value : 0,
           masteryDate: t.masteredAt || null,
           pauseReason: t.pauseReason || null,   // F-3: 중단 사유 포함
@@ -5562,17 +5638,8 @@ export default function App() {
         masteryDate,
         points: allPoints,
         listBoundaries,                  // ★ 핵심: list 경계 정보
-        // ★ [신규] 모든 날짜 기록이 O·X일 때만 스트립으로 표시. 하나라도 섮이면 기존 그래프.
-        isOX: (function () {
-          let has = false;
-          for (const t of (g.tasks || [])) {
-            for (const d of Object.keys(t.daily || {})) {
-              if (!dayIsOX(t.daily[d])) return false;
-              has = true;
-            }
-          }
-          return has;
-        })(),
+        // ★ [수정] 인라인 판정을 공용 헬퍼 goalIsOX()로 교체 — 평균 제외 로직과 같은 기준을 쓰게 통일.
+        isOX: goalIsOX(g),
         vbmapp: g.vbmapp,
         esdm: g.esdm,
         source: g.source
@@ -5589,6 +5656,9 @@ export default function App() {
     const cutoffDate = reportCutoffDate;
     const grouped = {};
     includedGoals.forEach(g => {
+      // ★ [수정] O·X 목표 제외 — 0/100 환산값이 영역 평균을 부풀린다.
+      //    (예: '회기당 1회 성공'인 맨드 목표 4개의 마지막 O가 각각 100%로 잡혀 청자 영역이 96%가 됨)
+      if (goalIsOX(g)) return;
       // ★ 요약카드(summary.avg)와 동일 기준으로 통일 — goal 통합 시계열의 최근 값 사용.
       //   (기존: task별 독립 최신값 평균 → goal 최근 세션 통합값. 요약카드와 계산 일치)
       const tl = getTimeline(g);
@@ -5655,6 +5725,10 @@ export default function App() {
       reportSelPrein: [...(reportSelPrein || [])],
       reportSelSrein: [...(reportSelSrein || [])],
       reportReinfSchedule: reportReinfSchedule || "",
+      reportReinfType: reportReinfType || "",
+      reportPromptStart: reportPromptStart || "",
+      reportPromptNow: reportPromptNow || "",
+      reportNextPlans: [...(reportNextPlans || [])],
       reportBehaviors: JSON.parse(JSON.stringify(reportBehaviors || [])),
       reportFields: Array.isArray(reportFields) ? [...reportFields] : ["", "", "", "", ""],
       domainAvgs: [...(domainAvgs || [])],
@@ -5715,6 +5789,10 @@ export default function App() {
       reportSelPrein: [...(reportSelPrein || [])],
       reportSelSrein: [...(reportSelSrein || [])],
       reportReinfSchedule: reportReinfSchedule || "",
+      reportReinfType: reportReinfType || "",
+      reportPromptStart: reportPromptStart || "",
+      reportPromptNow: reportPromptNow || "",
+      reportNextPlans: [...(reportNextPlans || [])],
       reportBehaviors: JSON.parse(JSON.stringify(reportBehaviors || [])),
       reportFields: Array.isArray(reportFields) ? [...reportFields] : ["", "", "", "", ""],
       domainAvgs: [...(domainAvgs || [])],
@@ -8721,6 +8799,10 @@ export default function App() {
             reportSelPrein={reportSelPrein}
             reportSelSrein={reportSelSrein}
             reportReinfSchedule={reportReinfSchedule}
+            reportReinfType={reportReinfType}
+            reportPromptStart={reportPromptStart}
+            reportPromptNow={reportPromptNow}
+            reportNextPlans={reportNextPlans}
             reportBehaviors={reportBehaviors}
             reportSections={reportSections}
             dailyMemos={dailyMemos}
@@ -14089,7 +14171,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, setTaskDayOX, resetT
   );
 }
 
-function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, bInter, domAvgs, reinfSchedule, dailyMemos, archiveList, finalMode = false }) {
+function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, bInter, domAvgs, reinfSchedule, reinfType, promptStart, promptNow, nextPlans, behaviors, dailyMemos, archiveList, finalMode = false }) {
   const fn = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
   const jEunNeun = (n) => josa은는(n);
   const jIGa = (n) => josa이가(n);
@@ -14176,8 +14258,12 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     return null;
   };
 
+  // ★ [수정] %를 다루는 계산은 모두 O·X 목표를 뺀 rated 집합만 쓴다.
+  //    (개수를 세는 계산 — done/total/highRate — 은 O·X도 실제 달성이므로 active 그대로.)
+  const rated = active.filter(s => !s.isOX);
+
   const growthMap = {};
-  stos.forEach(s => {
+  rated.forEach(s => {
     if (!s.points || s.points.length < 2) return;
     const first = s.points[0], last = s.points[s.points.length - 1];
     const diff = last.value - first.value;
@@ -14195,7 +14281,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   //    영역별로 과제들의 시작·마지막 값을 평균 내 실제 영역 변화를 구한다.
   const domGrowth = (() => {
     const bucket = {};
-    stos.forEach(st => {
+    rated.forEach(st => {
       const pts = (st.points || []).filter(x => x && x.value !== null);
       if (pts.length < 2) return;
       const key = cleanDomainKey(st.domain || "");
@@ -14218,13 +14304,16 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   const funcTxt = REPORT_FUNCS.filter(f => funcs.includes(f.k)).map(f => f.l).join(", ");
   const stratTxt = (selStrats || []).slice(0, 3).join(", ") || "DTT, NET";
 
+  // ★ [수정] 표지 요약(buildSummary)과 같은 계산으로 통일 — O·X 제외, 0% 포함.
+  //    기존 `lastV > 0` 조건은 0%로 기록된 목표(예: 8회 전부 0%)를 통째로 빼서 평균을 부풀렸다.
+  //    0%는 '측정 안 함'이 아니라 실제 데이터다.
   let lastSum = 0, lastCnt = 0, firstSum = 0, firstCnt = 0;
-  active.forEach(s => {
+  rated.forEach(s => {
     if (!s.points || s.points.length === 0) return;
     const lastV = s.points[s.points.length - 1].value;
     const firstV = s.points[0].value;
-    if (!isNaN(lastV) && lastV > 0) { lastSum += lastV; lastCnt++; }
-    if (!isNaN(firstV) && firstV > 0) { firstSum += firstV; firstCnt++; }
+    if (typeof lastV === "number" && !isNaN(lastV)) { lastSum += lastV; lastCnt++; }
+    if (typeof firstV === "number" && !isNaN(firstV)) { firstSum += firstV; firstCnt++; }
   });
   const lastAvg = lastCnt > 0 ? Math.round(lastSum / lastCnt) : 0;
   const firstAvg = firstCnt > 0 ? Math.round(firstSum / firstCnt) : 0;
@@ -14237,12 +14326,24 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     return lastTwo.every(p => p.value >= 80);
   });
   const masteredDomains = (domAvgs || []).filter(d => d.avg >= 80);
-  const acceleratingTrend = active.some(s => {
-    const pts = s.points || [];
-    if (pts.length < 3) return false;
-    const recent = pts.slice(-3);
-    return (recent[recent.length - 1].value - recent[0].value) > 10;
-  });
+
+  // ★ [수정] 가속 판정을 목표 단위 .some() → 전체 추이의 최근 구간 기울기로 교체.
+  //    기존엔 목표가 20개면 그 중 하나만 최근 3점에서 +10을 넘어도 참이 돼,
+  //    전체 평균이 내려가는 기간에도 "최근 회기에서 더 빠르게 올라가고 있습니다"가 붙었다.
+  const acceleratingTrend = (() => {
+    const byDate = {};
+    rated.forEach(s => (s.points || []).forEach(p => {
+      if (!p || !p.date || typeof p.value !== "number") return;
+      (byDate[p.date] = byDate[p.date] || []).push(p.value);
+    }));
+    const series = Object.keys(byDate).sort()
+      .map(d => byDate[d].reduce((a, b) => a + b, 0) / byDate[d].length);
+    if (series.length < 6) return false;
+    const mean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+    const recent3 = mean(series.slice(-3));
+    const prev3 = mean(series.slice(-6, -3));
+    return (recent3 - prev3) > 10;
+  })();
 
   let _vi = 0, _ai = 0, _gi = 0;
   const PV = [
@@ -14271,12 +14372,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   const pa = () => PA[_ai++ % PA.length];
   const pg = () => PG[_gi++ % PG.length];
 
-  const lvl = (avg) =>
-    avg >= 90 ? "숙달 수준으로 수행하며" :
-    avg >= 80 ? "안정적으로 수행하고 있으며" :
-    avg >= 60 ? "수행이 단계적으로 진행되고 있으며" :
-    avg >= 40 ? "수행이 점진적으로 형성되고 있으며" :
-    "기초 수준의 수행이 관찰되며";
+  // ★ [삭제] lvl() 헬퍼 제거 — '다음 목표'의 삭제된 문장에서만 쓰이던 수준 서술어 사전.
 
   const langStos = active.filter(s => match(s, langK));
   const socStos = active.filter(s => match(s, socK));
@@ -14329,14 +14425,10 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     return { weeks, byDomain: result };
   })();
 
-  const reinfStage = (() => {
-    const s = (reinfSchedule || "").toLowerCase().replace(/\s/g, "");
-    if (!s) return "default";
-    if (s.includes("자연") || s.includes("natural")) return "natural";
-    if (/(vr|vi|fr[2-9]|fr1[0-9]|thin)/.test(s)) return "variable";
-    if (/(fr1|crf|연속|매번)/.test(s)) return "continuous";
-    return "default";
-  })();
+  // ★ [삭제] 강화 스케줄 자유입력 파싱(reinfStage) 제거.
+  //    'fr3'(고정비율)를 정규식 fr[2-9]로 잡아 "가변 비율(점진적 fading)"이라 안내하던 오분류가 있었고,
+  //    자유 텍스트를 임상 용어로 자동 해석하는 것 자체가 근거가 약하다.
+  //    강화 스케줄 안내는 드롭다운 키워드 선택으로 이관한다.
 
   const pauseRecommendation = (() => {
     if (paused.length === 0) return null;
@@ -14430,19 +14522,54 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
 
   if (curFields[2] && curFields[2].trim()) {
     sec1Parts.push(curFields[2]);
-  } else if (bName && bName.trim()) {
-    const it = bInter && bInter.trim() ? bInter : "기능적 의사소통 훈련(FCT)";
-    sec1Parts.push(`${bName}의 빈도는 중재 시작 이후 줄고 있습니다. ${it}${josa을를(it)} 적용한 뒤 대체 행동이 자발적으로 늘었습니다.${funcTxt ? ` 행동 기능은 ${funcTxt}${josa으로(funcTxt)} 확인되었고, 그에 맞춰 환경과 강화 전략을 조정하고 있습니다.` : ""}`);
+  } else {
+    // ★ [3단계] 등록된 문제행동 전체를 반영한다(기존엔 reportBehaviors[0]만 나갔다).
+    //    빈도 추세는 키워드 입력값이 있을 때만 쓴다 — '미측정'이거나 미선택이면 문장을 만들지 않는다.
+    const TREND_TEXT = {
+      decrease: "중재 시작 이후 빈도가 줄어드는 양상입니다.",
+      same: "중재 시작 이후 빈도는 비슷하게 유지되고 있습니다.",
+      increase: "중재 시작 이후 빈도가 늘어, 기능 분석과 중재 계획을 다시 점검하고 있습니다."
+    };
+    const bList = (behaviors && behaviors.length > 0)
+      ? behaviors
+      : (bName && bName.trim() ? [{ name: bName, funcs: selFuncs, intervention: bInter }] : []);
+    bList.filter(b => b && (b.name || "").trim()).forEach(b => {
+      const nm = b.name.trim();
+      const fTxt = REPORT_FUNCS.filter(f => (b.funcs || []).includes(f.k)).map(f => f.l).join(", ");
+      const iv = b.intervention === "__custom__" ? (b.interventionCustom || "") : (b.intervention || "");
+      const bParts = [];
+      if (fTxt) bParts.push(`'${nm}'의 행동 기능은 ${fTxt}${josa으로(fTxt)} 확인되었습니다.`);
+      else bParts.push(`'${nm}' 행동에 대한 중재를 진행하고 있습니다.`);
+      if (iv && iv.trim()) bParts.push(`${iv.trim()}${josa을를(iv.trim())} 적용하고 있습니다.`);
+      if (b.severity) bParts.push(`현재 빈도·강도는 '${b.severity}' 수준입니다.`);
+      if (TREND_TEXT[b.trend]) bParts.push(TREND_TEXT[b.trend]);
+      sec1Parts.push(bParts.join(" "));
+    });
   }
   // ★ [수정] 문제행동 데이터가 없을 때 넣던 "문제행동은 낮은 수준으로 유지" 상투구 제거.
   //    기록이 없는 아동에게도 무조건 나가서 사실과 다를 수 있었다.
 
+  // ★ [3단계] 촉구 수준 변화 — 앱이 측정하지 않으므로 키워드(시작/현재)를 고른 경우에만 쓴다.
+  if (promptStart && promptNow) {
+    const iS = PROMPT_LEVELS.indexOf(promptStart);
+    const iN = PROMPT_LEVELS.indexOf(promptNow);
+    if (iS >= 0 && iN >= 0) {
+      if (iN < iS) sec1Parts.push(`촉구 수준은 '${promptStart}'에서 '${promptNow}'${josa으로(promptNow)} 낮아졌습니다.`);
+      else if (iN === iS) sec1Parts.push(`촉구 수준은 '${promptNow}'${josa을를(promptNow)} 유지하고 있습니다.`);
+      else sec1Parts.push(`촉구 수준은 '${promptStart}'에서 '${promptNow}'${josa으로(promptNow)} 조정했습니다.`);
+    }
+  }
+
   if (curFields[3] && curFields[3].trim()) {
     sec1Parts.push(curFields[3]);
   } else if (done.length > 0 && highRate.length > 0) {
-    const exemplar = shortTaskName(done[0]?.name || done[0]?.goalName || "주요 목표");
+    // ★ [수정] task명은 길어서 28자에서 잘렸다('"어떻게"와 같은 의문사를 자발적으로 사용하여 질문…').
+    //    보고서 카드 제목과 같은 goalName을 쓴다('"어떻게" 이용 맨드').
+    const exemplar = shortTaskName(done[0]?.goalName || done[0]?.name || "주요 목표");
     // ★ [수정] 뒤쪽 "80% 이상 연속 / DTT·NET 독립 반응" 문장 제거 — 앞 문장과 중복이고 근거 데이터가 없다.
-    sec1Parts.push(`'${exemplar}' 등 ${done.length}개 목표에서 촉구(prompt) 수준을 줄였고, 리스트도 상향했습니다.`);
+    // ★ [수정] "촉구(prompt) 수준을 줄였고" 삭제 — 촉구 수준은 앱에서 측정하지 않는다(키워드 입력으로 이관).
+    //    리스트 상향은 listGroup 이동 기록으로 확인되는 사실이라 유지.
+    sec1Parts.push(`'${exemplar}' 등 ${done.length}개 목표에서 리스트를 상향했습니다.`);
   } else if (lastAvg > 0) {
     if (lastAvg >= 80) {
       sec1Parts.push(`진행 중인 ${prog.length}개 목표에서 평균 ${lastAvg}%의 정반응률을 보이고 있습니다.`);
@@ -14573,33 +14700,48 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   //    초기 단계 아동을 전제한 내용이라 발달 수준이 높은 아동에게는 맞지 않았다.
   //    이 섹션은 키워드 선택으로 작성하고, 자동 부분은 데이터에서 나오는 주의사항만 남긴다.
   const cautions = [];
-  if (bName && bName.trim()) {
-    const bn = bName.trim();
-    if (funcs.includes("escape")) {
-      cautions.push(`${fn}${josa이가(fn)} '${bn}' 행동을 할 때 과제를 바로 중단하시면 회피(escape) 기능이 강화돼서 행동이 더 자주 나옵니다. 과제를 더 작게 나눠 짧게라도 끝낸 다음 휴식을 주세요. "다 했어, 잘했어"라고 짧게 칭찬하시고 휴식 시간을 주시면 됩니다.`);
-    }
-    if (funcs.includes("attention")) {
-      cautions.push(`${fn}${josa이가(fn)} '${bn}' 행동을 할 때 바로 반응(혼내기, 달래기, 시선 주기)하시면 관심 획득(attention) 기능이 강화됩니다. 안전한 상황이라면 그 행동에는 시선과 말을 줄이시고, 적절한 방법(이름 부르기, 손 들기, 어깨 두드리기 등)으로 관심을 요청할 때 바로 반응해 주세요.`);
-    }
-    if (funcs.includes("sensory")) {
-      cautions.push(`'${bn}' 행동이 자기자극(감각) 기능일 때는 못 하게 막는 것보다 같은 감각을 채워줄 수 있는 대체 활동을 주는 게 효과적입니다. 손으로 두드리는 행동이면 촉감 장난감이나 찰흙, 몸을 흔드는 행동이면 그네나 트램펄린을 일과 중에 넣어 주세요.`);
-    }
-    if (funcs.includes("access")) {
-      cautions.push(`${fn}${josa이가(fn)} 원하는 걸 얻으려고 '${bn}' 행동을 할 때 그걸 들어주시면 그 행동이 의사소통 수단으로 학습됩니다. 적절한 표현(가리키기, 사인, 그림 카드, 단어 등)을 사용할 때 바로 원하는 걸 주시면 됩니다.`);
-    }
-    if (funcs.length === 0) {
-      cautions.push(`${fn}${josa이가(fn)} '${bn}' 행동을 할 때 바로 반응(들어주기, 혼내기, 달래기)하시면 의도와 다르게 그 행동이 강화될 수 있습니다. 적절한 표현이 나올 때만 반응하시고, '${bn}' 행동에는 중립적으로 대해 주세요.`);
-    }
+  // ★ [수정] 등록된 문제행동 전체를 반영 (기존엔 첫 번째 행동만).
+  const cautionBehaviors = (behaviors && behaviors.length > 0)
+    ? behaviors.filter(b => b && (b.name || "").trim())
+    : (bName && bName.trim() ? [{ name: bName, funcs: selFuncs || [] }] : []);
+  if (cautionBehaviors.length > 0) {
+    cautionBehaviors.forEach(b => {
+      const bn = (b.name || "").trim();
+      const bf = b.funcs || [];
+      if (bf.includes("escape")) {
+        cautions.push(`${fn}${josa이가(fn)} '${bn}' 행동을 할 때 과제를 바로 중단하시면 회피(escape) 기능이 강화돼서 행동이 더 자주 나옵니다. 과제를 더 작게 나눠 짧게라도 끝낸 다음 휴식을 주세요. "다 했어, 잘했어"라고 짧게 칭찬하시고 휴식 시간을 주시면 됩니다.`);
+      }
+      if (bf.includes("attention")) {
+        cautions.push(`${fn}${josa이가(fn)} '${bn}' 행동을 할 때 바로 반응(혼내기, 달래기, 시선 주기)하시면 관심 획득(attention) 기능이 강화됩니다. 안전한 상황이라면 그 행동에는 시선과 말을 줄이시고, 적절한 방법(이름 부르기, 손 들기, 어깨 두드리기 등)으로 관심을 요청할 때 바로 반응해 주세요.`);
+      }
+      if (bf.includes("sensory")) {
+        cautions.push(`'${bn}' 행동이 자기자극(감각) 기능일 때는 못 하게 막는 것보다 같은 감각을 채워줄 수 있는 대체 활동을 주는 게 효과적입니다. 손으로 두드리는 행동이면 촉감 장난감이나 찰흙, 몸을 흔드는 행동이면 그네나 트램펄린을 일과 중에 넣어 주세요.`);
+      }
+      if (bf.includes("access")) {
+        cautions.push(`${fn}${josa이가(fn)} 원하는 걸 얻으려고 '${bn}' 행동을 할 때 그걸 들어주시면 그 행동이 의사소통 수단으로 학습됩니다. 적절한 표현(가리키기, 사인, 그림 카드, 단어 등)을 사용할 때 바로 원하는 걸 주시면 됩니다.`);
+      }
+      // ★ [버그수정] 기존엔 funcs.length === 0 일 때만 기본 문장이 나가서,
+      //    기능을 '기타'로만 고르면 그 행동에 대한 안내가 한 줄도 없었다.
+      const hasKnownFunc = ["escape", "attention", "sensory", "access"].some(k => bf.includes(k));
+      if (!hasKnownFunc) {
+        cautions.push(`${fn}${josa이가(fn)} '${bn}' 행동을 할 때 바로 반응(들어주기, 혼내기, 달래기)하시면 의도와 다르게 그 행동이 강화될 수 있습니다. 적절한 표현이 나올 때만 반응하시고, '${bn}' 행동에는 중립적으로 대해 주세요.`);
+      }
+    });
   } else {
     cautions.push(`강화제는 ${fn}${josa이가(fn)} 적절한 행동을 한 직후(3초 이내)에 주셔야 효과적입니다. 늦으면 어떤 행동이 강화되는지 ${fn}${josa이가(fn)} 연결하기 어렵습니다.`);
   }
-  if (reinfStage === "continuous") {
-    cautions.push(`지금 ${fn}의 강화 스케줄은 연속 강화(매번 강화) 단계입니다. 가정에서도 적절한 행동을 할 때마다 강화해 주세요. 학습이 안정되기 전에 띄엄띄엄 강화하면 행동 빈도가 줄어듭니다.`);
-  } else if (reinfStage === "variable") {
-    cautions.push(`지금 ${fn}의 강화 스케줄은 가변 비율(점진적 fading) 단계입니다. 가정에서는 매번 강화하지 마시고, 적절한 행동을 여러 번 한 다음 그 중 한두 번만 강화하시면 행동이 더 오래 유지됩니다. 단, 어려운 과제를 처음 시도할 때는 초반 몇 번은 매번 강화해 주시고, 익숙해지면 줄여 주세요.`);
-  } else if (reinfStage === "natural") {
-    cautions.push(`지금 ${fn}의 강화 스케줄은 자연 강화 단계입니다. 가정에서는 인위적인 강화제(과자, 스티커 등)보다 ${fn}의 행동이 만들어내는 자연스러운 결과(또래의 반응, 원하는 활동 시작, 칭찬)에 집중해 주세요. 이 단계는 일반화가 핵심이라 다양한 환경과 사람과의 상호작용 기회를 늘려 주시는 게 중요합니다.`);
-  }
+
+  // ★ [3단계] 강화 스케줄 안내 — 자유 텍스트 파싱을 없애고 드롭다운 선택값(reinfType)으로만 만든다.
+  //    고르지 않으면 문장이 나가지 않는다.
+  const REINF_TEXT = {
+    crf: `지금 ${fn}의 강화 스케줄은 연속 강화(CRF) 단계입니다. 가정에서도 적절한 행동이 나올 때마다 강화해 주세요. 학습이 안정되기 전에 띄엄띄엄 강화하면 행동 빈도가 줄어듭니다.`,
+    fr: `지금 ${fn}의 강화 스케줄은 고정비율(FR) 단계입니다. 정해진 횟수를 채울 때마다 강화하는 방식이라, 가정에서도 같은 횟수를 기준으로 일정하게 주시는 게 중요합니다. 횟수를 늘릴 때는 한 번에 크게 올리지 마시고 조금씩 조정해 주세요.`,
+    vr: `지금 ${fn}의 강화 스케줄은 가변비율(VR) 단계입니다. 가정에서는 매번 강화하지 마시고, 적절한 행동을 여러 번 한 다음 그중 한두 번만 강화하시면 행동이 더 오래 유지됩니다. 단, 어려운 과제를 처음 시도할 때는 초반 몇 번은 매번 강화해 주시고 익숙해지면 줄여 주세요.`,
+    fi: `지금 ${fn}의 강화 스케줄은 고정간격(FI) 단계입니다. 정해진 시간이 지난 뒤 나오는 적절한 행동에 강화를 주는 방식이라, 가정에서도 타이머 등으로 간격을 일정하게 유지해 주세요.`,
+    vi: `지금 ${fn}의 강화 스케줄은 가변간격(VI) 단계입니다. 시간 간격을 들쭉날쭉하게 두고 강화하는 방식이라 행동이 오래 유지됩니다. 가정에서는 정해진 시각보다 '가끔씩 살펴보고 칭찬하기'로 생각하시면 됩니다.`,
+    natural: `지금 ${fn}의 강화 스케줄은 자연 강화 단계입니다. 가정에서는 인위적인 강화제(과자, 스티커 등)보다 ${fn}의 행동이 만들어내는 자연스러운 결과(원하는 활동 시작, 상대의 반응, 칭찬)에 집중해 주세요. 이 단계는 일반화가 핵심이라 다양한 환경과 사람을 만나는 기회를 늘려 주시는 게 중요합니다.`
+  };
+  if (REINF_TEXT[reinfType]) cautions.push(REINF_TEXT[reinfType]);
   cautions.push(`가정에서도 같은 방식으로 일관되게 해 주시는 게 중요합니다. ABA의 핵심은 일관성이라, 가정과 센터에서 같게 대응할 때 행동이 안정적으로 유지됩니다. 가정에서 관찰한 점이나 어려운 점은 담당 치료사에게 편하게 말씀해 주세요.`);
 
   r["가정 협력 방안"] = `[주의사항]\n${cautions.map((c,i) => `${i+1}. ${c}`).join("\n")}`;
@@ -14608,40 +14750,46 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
 
   const sentences = [];
 
-  const bestSto = stableMasteredList[0] || recentMastery[0];
-  const bestDomain = best.domain !== "—" && best.avg >= 70 ? best.domain : null;
-  if (bestSto || bestDomain) {
-    // ★ [수정] refName에 과제명이 들어가는데 뒤에 영역 평균(%)을 붙여 "'1음절 : 아/이/우'(96%) 영역"처럼
-    //    과제명과 없는 영역 점수가 섮였다. 영역명으로 통일한다.
-    const refDomain = bestDomain
-      ? cleanDomainKey(bestDomain)
-      : (bestSto ? cleanDomainKey(bestSto.domain) : null);
-    if (refDomain) {
-      const refSuffix = bestDomain && best.avg > 0 ? `(${best.avg}%)` : "";
-      sentences.push(`${fn}${josa이가(fn)} 잘하는 '${refDomain}' 영역${refSuffix}을 동기 유발 도구로 활용해 학습을 통합적으로 진행할 계획입니다.`);
-    } else {
-      sentences.push(`${fn}의 강점 영역을 동기 유발 도구로 활용해 학습을 통합적으로 진행할 계획입니다.`);
-    }
-  } else {
-    sentences.push(`${fn}의 현재 발달 단계에 맞춰 개별화된 학습 목표를 운영하고, 데이터를 보면서 효과를 확인할 예정입니다.`);
+  // ★ [삭제] "강점 영역을 동기 유발 도구로 활용", "촉구를 단계적으로 줄이고 시도 횟수를 조정",
+  //    "과제를 더 작게 나누고 Shaping", "VB-MAPP 장벽 평가" 문장 제거.
+  //    전부 앱에 기록이 없는 '방법 선언'이라 아동과 무관하게 늘 같은 문장이 나갔다.
+  //    다음 기간 계획은 키워드 다중선택으로 이관하고, 여기서는 데이터로 확인되는 사실만 적는다.
+
+  // 숙달 도달 영역 → 일반화 시점 (80% 이상, 데이터 근거 있음)
+  if (best.domain !== "—" && best.avg >= 80) {
+    sentences.push(`'${cleanDomainKey(best.domain)}' 영역(${best.avg}%)은 숙달 기준에 도달했습니다.`);
   }
 
-  // 강점으로 이미 언급한 영역은 약점(focus) 후보에서 제외 (중복 방지)
-  const strengthDomainName = (best.domain !== "—" && best.avg >= 70) ? cleanDomainKey(best.domain) : null;
-  const focusList = domAvgs.filter(d => d.avg >= 60 && d.avg < 80 && cleanDomainKey(d.domain) !== strengthDomainName).slice(0, 1);
-  const emerging = domAvgs.filter(d => d.avg >= 40 && d.avg < 60 && cleanDomainKey(d.domain) !== strengthDomainName);
-  if (focusList.length > 0) {
-    const tgt = focusList[0];
-    sentences.push(`'${cleanDomainKey(tgt.domain)}' 영역(${tgt.avg}%)은 ${lvl(tgt.avg)} 촉구(prompt)를 단계적으로 줄이고 시도 횟수를 조정해서 숙달 수준에 닿게 할 예정입니다.`);
-  } else if (emerging.length > 0) {
-    const tgt = emerging[0];
-    sentences.push(`'${cleanDomainKey(tgt.domain)}' 영역은 ${lvl(tgt.avg)} 시도 횟수를 늘리고 촉구(prompt)를 조정해 숙달 수준까지 끌어올릴 계획입니다.`);
+  // ★ [수정] worst.avg !== 0 가드 제거 — 8회 전부 0%처럼 '기록된 0'까지 빠져
+  //    정작 가장 지원이 필요한 영역이 다음 목표에서 통째로 누락됐다.
+  //    데이터가 없는 영역만 걸러낸다.
+  const lowDomains = (domAvgs || [])
+    .filter(d => d.avg < 60 && (d.count == null || d.count > 0))
+    .sort((a, b) => a.avg - b.avg)
+    .slice(0, 3);
+  if (lowDomains.length > 0) {
+    const txt = lowDomains.map(d => `${cleanDomainKey(d.domain)} ${d.avg}%`).join(", ");
+    sentences.push(`다음 보고 기간에 집중 지도가 필요한 영역은 ${txt}입니다.`);
   }
 
-  if (worst.domain !== "—" && worst.avg < 60 && worst.avg !== 0) {
-    const linkPhrase = bestSto || bestDomain ? `강점 영역의 동기를 활용해서, ` : "";
-    sentences.push(`${linkPhrase}'${cleanDomainKey(worst.domain)}' 영역은 ${fn}의 발달 단계에 맞춰 과제를 더 작게 나누고, 행동 형성(Shaping)으로 단계적으로 올리겠습니다.`);
-    sentences.push(`VB-MAPP 장벽 평가(Barriers Assessment)로 학습을 막는 요인을 점검하고 단계별로 다루겠습니다.`);
+  // 진행 예정(기록 없는) 목표 — 다음 기간에 실제로 시작할 것
+  const upcoming = stos.filter(s => s.status !== "중단" && (!s.points || s.points.length === 0));
+  if (upcoming.length > 0) {
+    const names = upcoming.slice(0, 3).map(s => `'${shortTaskName(s.goalName || s.name)}'`).join(", ");
+    sentences.push(`${names}${upcoming.length > 3 ? ` 등 ${upcoming.length}개 목표` : ""}는 다음 보고 기간부터 지도를 시작합니다.`);
+  }
+
+  // 장기 정체 목표 — 회기가 쌓였는데 준거에 못 닿은 목표를 짚어준다
+  const stalled = stos.filter(s => {
+    if (s.status !== "진행중") return false;
+    const pts = s.points || [];
+    if (pts.length < 8) return false;
+    const recent = pts.slice(-8);
+    return recent.every(p => p.value < 80);
+  }).sort((a, b) => (b.points || []).length - (a.points || []).length);
+  if (stalled.length > 0) {
+    const s0 = stalled[0];
+    sentences.push(`'${shortTaskName(s0.goalName || s0.name)}'${josa은는(shortTaskName(s0.goalName || s0.name))} ${(s0.points || []).length}회기 동안 준거에 닿지 않아, 과제 난이도와 지도 방법을 다시 점검하겠습니다.`);
   }
 
   if (paused.length > 0) {
@@ -14660,7 +14808,12 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     }
   }
 
-  sentences.push(`강점 영역은 활용하고 약한 영역은 보완하면서, 가정과 센터가 같은 방식으로 가도록 진행하겠습니다.`);
+  // ★ [3단계] 다음 기간 계획 — 삭제한 방법 선언을 선택식으로 되살린다. 고른 게 없으면 문장이 없다.
+  if (Array.isArray(nextPlans) && nextPlans.length > 0) {
+    sentences.push(`다음 보고 기간에는 ${nextPlans.join(", ")}${josa을를(nextPlans[nextPlans.length - 1])} 중심으로 진행하겠습니다.`);
+  }
+
+  // ★ [삭제] "강점 영역은 활용하고 약한 영역은 보완하면서…" 마무리 문장 제거 — 정보 없는 상투구.
 
   r["다음 목표"] = sentences.join(" ");
   r["다음 목표 제안"] = sentences.join(" "); // 호환용
@@ -14676,7 +14829,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   return r;
 }
 
-function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domainLevelOverrides, getTimeline, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, awaitingNewData, askConfirm, reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportBehaviors, reportSections, dailyMemos, setReportField, setReportPatch, setInfo, archiveList, cutoffDisabled, setCutoffDisabled, reportMode, setReportMode, onArchiveSave, onArchiveDelete, onArchiveView, onPrev, onPreview, onPrint }) {
+function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domainLevelOverrides, getTimeline, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, awaitingNewData, askConfirm, reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportReinfType, reportPromptStart, reportPromptNow, reportNextPlans, reportBehaviors, reportSections, dailyMemos, setReportField, setReportPatch, setInfo, archiveList, cutoffDisabled, setCutoffDisabled, reportMode, setReportMode, onArchiveSave, onArchiveDelete, onArchiveView, onPrev, onPreview, onPrint }) {
   const [showReportHelp, setShowReportHelp] = useState(false); // ★ 인쇄 안내 박스 접기 (기본 접힘)
   const visibleArchiveList = useMemo(() => {
     if (!archiveList || archiveList.length === 0) return [];
@@ -15090,10 +15243,8 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
         // ★ 컷오프·보고 기간과 동일한 날짜 집합(allDates)으로 제한 — 이전 차수 데이터 제거.
         const allowedDates = new Set(allDates);
         (goals || []).filter(g => g.includeInIep).forEach(g => {
-          // ★ [추가] O·X 목표는 영역 평균에서 제외 (0/100 값이 평균을 왜곡)
-          const gIsOX = (g.tasks || []).some(t => Object.keys(t.daily || {}).length > 0)
-            && (g.tasks || []).every(t => Object.keys(t.daily || {}).every(d => dayIsOX(t.daily[d])));
-          if (gIsOX) return;
+          // ★ [수정] 인라인 판정을 공용 헬퍼로 교체 (goalIsOX)
+          if (goalIsOX(g)) return;
           const dom = g.domain || "(영역 없음)";
           const series = (typeof getTimeline === "function") ? getTimeline(g) : [];
           series.forEach(pt => {
@@ -15988,6 +16139,10 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
           reportSelPrein={reportSelPrein}
           reportSelSrein={reportSelSrein}
           reportReinfSchedule={reportReinfSchedule}
+          reportReinfType={reportReinfType}
+          reportPromptStart={reportPromptStart}
+          reportPromptNow={reportPromptNow}
+          reportNextPlans={reportNextPlans}
           reportBehaviors={reportBehaviors}
           reportSections={reportSections}
           setReportField={setReportField}
@@ -16430,6 +16585,7 @@ function GrowthHistoryChart({ list }) {
 function ReportGeneratorSection({
   info, stos, domAvgs, reportPeriodStart, reportPeriodEnd, awaitingNewData,
   reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule,
+  reportReinfType, reportPromptStart, reportPromptNow, reportNextPlans,
   reportBehaviors, reportSections,
   setReportField, setReportPatch, setInfo,
   dailyMemos, archiveList, reportMode
@@ -16468,6 +16624,13 @@ function ReportGeneratorSection({
         bInter: firstBInter,
         domAvgs: domAvgs || [],
         reinfSchedule: reportReinfSchedule || "",
+        // ★ [3단계] 키워드 입력 전달 — 값이 있을 때만 해당 문장이 생성된다.
+        reinfType: reportReinfType || "",
+        promptStart: reportPromptStart || "",
+        promptNow: reportPromptNow || "",
+        nextPlans: reportNextPlans || [],
+        // ★ [수정] 기존엔 reportBehaviors[0]만 문장에 반영돼 두 번째 행동부터 누락됐다. 배열 전체를 넘긴다.
+        behaviors: reportBehaviors || [],
         dailyMemos: dailyMemos || {},
         archiveList: archiveList || [],
         finalMode: reportMode === "final"
@@ -16767,7 +16930,7 @@ function ReportGeneratorSection({
             <div style={{ fontSize: 12, fontWeight: 700, color: PKD }}>⚠️ 주요 문제행동</div>
             <button
               onClick={() => {
-                const next = [...reportBehaviors, { name: "", severity: "", funcs: [], funcOther: "", intervention: "", interventionCustom: "" }];
+                const next = [...reportBehaviors, { name: "", severity: "", trend: "", funcs: [], funcOther: "", intervention: "", interventionCustom: "" }];
                 setReportPatch({ reportBehaviors: next });
               }}
               style={{ fontSize: 10, padding: "3px 8px", background: PKL, color: PKD, border: `1px solid ${PK}`, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>
@@ -16853,6 +17016,19 @@ function ReportGeneratorSection({
                   <option value="낮음">낮음</option>
                   <option value="중간">중간</option>
                   <option value="높음">높음</option>
+                </select>
+
+                {/* ★ [3단계] 빈도 추세 — 앱이 빈도를 측정하지 않으므로 여기서 고른 값만 문장이 된다.
+                     고르지 않거나 '미측정'이면 보고서에 추세 문장이 나가지 않는다. */}
+                <div style={{ fontSize: 10, color: "#767676", marginBottom: 4 }}>빈도 추세 (중재 시작 대비)</div>
+                <select
+                  value={b.trend || ""}
+                  onChange={e => updateB({ trend: e.target.value })}
+                  style={{ ...IS, padding: "5px 8px", fontSize: 11.5, marginBottom: 6 }}>
+                  <option value="">선택 안 함 (문장 생략)</option>
+                  {BEHAVIOR_TRENDS.map(t => (
+                    <option key={t.k} value={t.k}>{t.l}</option>
+                  ))}
                 </select>
 
                 {/* 사용 중인 중재 기법 (드롭다운 + 직접입력) */}
@@ -16945,15 +17121,70 @@ function ReportGeneratorSection({
         </div>
       </div>
 
-      {/* W-19: 강화 스케줄 */}
+      {/* W-19: 강화 스케줄 — ★ [3단계] 자유입력 파싱 대신 드롭다운 선택 */}
       <div style={{ padding: 10, background: "#fff", borderRadius: 10, border: "1px solid #f0e0e5", marginBottom: 14 }}>
         <div style={{ fontSize: 11.5, fontWeight: 700, color: PKD, marginBottom: 6 }}>강화 스케줄</div>
+        <select
+          value={reportReinfType}
+          onChange={e => setReportPatch({ reportReinfType: e.target.value })}
+          style={{ ...IS, padding: "6px 10px", fontSize: 11.5, marginBottom: 6 }}>
+          <option value="">선택 안 함 (가정 안내 문장 생략)</option>
+          {REINF_SCHEDULES.map(r => (
+            <option key={r.k} value={r.k}>{r.l}</option>
+          ))}
+        </select>
+        <div style={{ fontSize: 10, color: "#767676", marginBottom: 4 }}>세부 메모 (선택 · 보고서 문장에는 쓰이지 않음)</div>
         <textarea
-          placeholder="예: FR1 → VR3 thin"
+          placeholder="예: FR3 → VR5로 thin 중"
           rows={2}
           style={{ ...IS, padding: "6px 10px", fontSize: 11.5, fontFamily: "inherit", resize: "vertical" }}
           value={reportReinfSchedule}
           onChange={e => setReportPatch({ reportReinfSchedule: e.target.value })} />
+      </div>
+
+      {/* ★ [3단계 신규] 촉구 수준 · 다음 기간 계획 */}
+      <div className="responsive-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+        <div style={{ padding: 10, background: "#fff", borderRadius: 10, border: "1px solid #f0e0e5" }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: PKD, marginBottom: 2 }}>촉구 수준</div>
+          <div style={{ fontSize: 10, color: "#767676", marginBottom: 6 }}>둘 다 고르면 종합 현황에 변화 문장이 들어갑니다</div>
+          <div style={{ fontSize: 10, color: "#767676", marginBottom: 3 }}>보고 기간 시작 시점</div>
+          <select
+            value={reportPromptStart}
+            onChange={e => setReportPatch({ reportPromptStart: e.target.value })}
+            style={{ ...IS, padding: "5px 8px", fontSize: 11.5, marginBottom: 6 }}>
+            <option value="">선택</option>
+            {PROMPT_LEVELS.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <div style={{ fontSize: 10, color: "#767676", marginBottom: 3 }}>현재</div>
+          <select
+            value={reportPromptNow}
+            onChange={e => setReportPatch({ reportPromptNow: e.target.value })}
+            style={{ ...IS, padding: "5px 8px", fontSize: 11.5 }}>
+            <option value="">선택</option>
+            {PROMPT_LEVELS.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+
+        <div style={{ padding: 10, background: "#fff", borderRadius: 10, border: "1px solid #f0e0e5" }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: PKD, marginBottom: 2 }}>다음 기간 계획</div>
+          <div style={{ fontSize: 10, color: "#767676", marginBottom: 6 }}>고른 항목만 '다음 목표'에 들어갑니다</div>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            {NEXT_PLANS.map(p => {
+              const on = (reportNextPlans || []).includes(p);
+              return (
+                <button key={p}
+                  onClick={() => {
+                    const cur = reportNextPlans || [];
+                    const next = cur.includes(p) ? cur.filter(x => x !== p) : [...cur, p];
+                    setReportPatch({ reportNextPlans: next });
+                  }}
+                  style={{ padding: "3px 8px", fontSize: 10, fontFamily: "inherit", border: `1px solid ${on ? PK : "#ddd"}`, background: on ? PKL : "#fff", color: on ? PKD : "#888", borderRadius: 8, cursor: "pointer", fontWeight: on ? 700 : 500 }}>
+                  {p}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {/* ═ 미러링 상태 요약 ═ */}
@@ -17560,10 +17791,13 @@ function StageCumulativeChart({ goals, dates }) {
 
 function GrowthLineChart({ goals, dates, getTimeline }) {
   const calcDayRate = calcDayRateGlobal;
+  // ★ [수정] O·X 목표 제외 — 화면의 '영역별 진전도 추이'에만 적용돼 있던 제외 규칙을
+  //    인쇄용 성장 추이에도 동일 적용한다. 이걸 빼야 표지 요약·영역별 균형과 모집단이 같아진다.
+  const chartGoals = useMemo(() => (goals || []).filter(g => !goalIsOX(g)), [goals]);
   const points = useMemo(() => {
     return dates.map(date => {
       let sum = 0, n = 0;
-      goals.forEach(g => {
+      chartGoals.forEach(g => {
         const taskRates = [];
         (g.tasks || []).forEach(t => {
           const r = calcDayRate(t.daily?.[date], t.plannedTrials);
@@ -17586,7 +17820,7 @@ function GrowthLineChart({ goals, dates, getTimeline }) {
       });
       return { date, avg: n > 0 ? Math.round(sum / n) : null, n };
     }).filter(p => p.avg !== null);
-  }, [goals, dates]);
+  }, [chartGoals, dates]);
 
   if (points.length === 0) return <div style={{ padding: 20, textAlign: "center", fontSize: 12, color: "#aaa" }}>데이터 없음</div>;
 
@@ -17667,8 +17901,20 @@ function GoalDashboard({ stos }) {
   });
 
   // ★ [신규] O·X 스트립 — 회기별 O·X 칸 + 요약 한 줄
-  const OXStrip = ({ points }) => {
-    if (!points || points.length === 0) return null;
+  const OXStrip = ({ points: src }) => {
+    if (!src || src.length === 0) return null;
+    // ★ [버그수정] 같은 날짜 중복 칸 병합.
+    //    한 목표에 여러 단계(L4·L5·L6)가 있으면 goalsForReport가 단계별 point를 각각 담아
+    //    같은 날짜가 두 칸으로 찍혔다(예: 받아쓰기 7.15·7.20·8.17·8.26 두 번씩, 31회기인데 32칸).
+    //    그날 한 단계라도 성공했으면 O로 본다.
+    const points = (() => {
+      const byDate = new Map();
+      src.forEach(p => {
+        const prev = byDate.get(p.date);
+        if (!prev || p.value > prev.value) byDate.set(p.date, p);
+      });
+      return [...byDate.values()].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    })();
     // ★ [수정] X를 회색조로 낮춤 — 기록은 그대로 두되 강조만 뺀다.
     //    O만 초록으로 남아 진전이 눈에 들어온다.
     const OX_GREEN = "#38680F", OX_GREEN_BG = "#E4F0D6";
