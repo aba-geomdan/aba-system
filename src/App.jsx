@@ -11266,7 +11266,7 @@ cleanedHTML + '\n' +
                 <PrintSection num={nextSn()} title="성장 추이 (전체 목표 평균)">
                   <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                     ※ 보고 기간 동안 날짜별 전체 목표의 평균 정반응률 추이입니다.<br/>
-                    ※ 우상향 = 전반적 성장, 평탄 = 숙달 안정기.
+                    ※ 우상향 = 전반적 성장, 평탄 = 숙달 안정기. 새로 시작한 목표는 낮은 값에서 출발하므로, 목표를 추가한 시점에는 전체 평균이 일시적으로 내려갈 수 있습니다.
                   </div>
                   <div style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                     <GrowthLineChart goals={goals} dates={allDates} getTimeline={null} />
@@ -15302,7 +15302,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
           <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 12, color: PKD }}>성장 추이 (전체 목표 평균)</h3>
           <GrowthLineChart goals={goals} dates={allDates} getTimeline={getTimeline} />
           <div style={{ marginTop: 10, padding: "8px 12px", background: PKL, borderRadius: 8, fontSize: 11, color: PKD, lineHeight: 1.6 }}>
-            💡 날짜별 전체 목표의 평균 정반응률 추이입니다. 우상향 = 전반적 성장, 평탄 = 숙달 안정기.
+            💡 날짜별 전체 목표의 평균 정반응률 추이입니다. 우상향 = 전반적 성장, 평탄 = 숙달 안정기. 새로 시작한 목표는 낮은 값에서 출발하므로, 목표를 추가한 시점에는 전체 평균이 일시적으로 내려갈 수 있습니다.
           </div>
         </div>
       )}
