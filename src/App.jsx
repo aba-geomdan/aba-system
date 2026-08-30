@@ -6250,43 +6250,24 @@ export default function App() {
 
   const currentAvgs = useMemo(() => {
     if (!needsReportCalc) return [];
-    const cutoffDate = reportCutoffDate;
-    const grouped = {};
-    includedGoals.forEach(g => {
-      // ★ [수정] O·X 목표 제외 — 0/100 환산값이 영역 평균을 부풀린다.
-      //    (예: '회기당 1회 성공'인 맨드 목표 4개의 마지막 O가 각각 100%로 잡혀 청자 영역이 96%가 됨)
-      if (goalIsOX(g)) return;
-      // ★ [55-1] 현재 단계가 O·X이거나 단계별 측정 방식이 섞인 목표도 제외 —
-      //    문장 쪽(buildGoalSeries.quotable)과 같은 집합을 보게 한다.
-      if (!goalQuotableForAvg(g)) return;
-      // ★ 요약카드(summary.avg)와 동일 기준으로 통일 — goal 통합 시계열의 최근 값 사용.
-      //   (기존: task별 독립 최신값 평균 → goal 최근 세션 통합값. 요약카드와 계산 일치)
-      // ★ [48-1] getTimeline → getRatedGoalSeries. O·X 단계가 섞인 목표에서
-      //    O·X 단계의 0/100 환산값이 영역 평균에 새어 들어가던 문제.
-      const tl = getRatedGoalSeries(g);
-      // ★ [57-11] 목표값을 '마지막 한 점' → '최근 N회기 평균'으로 바꾼다.
-      //    막대(최종 달성률)와 '시작 vs 종결 비교'의 종결 열이 서로 다른 통계라
-      //    같은 영역이 100% / 88%처럼 두 숫자로 실렸다. 비교 섹션과 같은 창을 쓴다.
-      //    한 회기 잘한 것으로 숙달 판정이 서지 않는 부수 효과가 있다 —
-      //    이 값이 masteredDomainsOf·막대 색·'숙달 → 일반화' 문장의 근거가 된다.
-      const goalValue = (() => {
-        if (tl.length === 0) return null;
-        const n = compareEdgeSize(tl.length);
-        const tail = tl.slice(-n);
-        return Math.round(tail.reduce((a, b) => a + b.rate, 0) / tail.length);
-      })();
-      if (goalValue === null) return;
-      // ★ [55-3] 막대도 재매핑 영역으로 묶는다 — 문장·카드와 같은 이름을 쓴다.
-      const dom = reportDomainOf(g);
-      if (!grouped[dom]) grouped[dom] = { sum: 0, n: 0 };
-      grouped[dom].sum += goalValue;
-      grouped[dom].n += 1;
-    });
-    return Object.entries(grouped).map(([domain, v]) => ({
-      domain, avg: v.n > 0 ? Math.round(v.sum / v.n) : 0, count: v.n,
-      short: shortDomain(domain)
+    // ★ [57-12] 막대를 '시작 vs 종결 비교'와 같은 계산에서 뽑는다.
+    //    57-11에서 창 크기(3회기)만 맞췄더니 여전히 값이 갈렸다 —
+    //    계산 경로가 달랐기 때문이다.
+    //      · 옛 막대: includedGoals → getRatedGoalSeries(단계 통합 시계열).
+    //                보고 기간 필터 없음. showInDaily 무관.
+    //      · 비교 섹션: stosForReport → buildGoalSeries.
+    //                보고 기간 필터 있음. 같은 날은 상위 단계 우선.
+    //    그 결과 성윤준 맨드가 막대 57% / 비교 49%, 청자 반응이 81% / 75%로 나갔다.
+    //    (인쇄 문구에 "비교의 종결 값과 같은 기준"이라고 적어놨는데 사실이 아니었다.)
+    //    이제 buildStartEndCompare의 lastAvg를 그대로 쓴다 — 두 숫자가 구조적으로 같아진다.
+    const cmp = buildStartEndCompare(stosForReport, includedGoals);
+    return cmp.quotableRows.map(r => ({
+      domain: r.domain,
+      avg: r.lastAvg,
+      count: r.quotableGoals,
+      short: shortDomain(r.domain)
     }));
-  }, [includedGoals, effectiveArchiveList, needsReportCalc]);
+  }, [stosForReport, includedGoals, needsReportCalc]);
 
   const baselineAvgs = currentAvgs;
   const domainAvgs = currentAvgs;
