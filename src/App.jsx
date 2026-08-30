@@ -2514,6 +2514,17 @@ function dayIsOX(day) {
 //    O·X 기록은 calcDayRateGlobal에서 0 또는 100으로 환산되므로, %를 평균 내는 모든 지표
 //    (표지 요약 / 영역별 균형 / 성장 추이 / 자동 문장)에서 제외해야 한다.
 //    제외하지 않으면 "회기당 1회 성공"이 "정반응률 100%"로 잡혀 평균이 부풀려진다.
+// ★ [신규] 회기 시간 표기 — 회차마다 시간이 다르면 "100분 · 50분"으로, 같으면 "100분"으로.
+//    sMinList가 비어 있으면 기존 sMin 하나를 쓴다(기존 아동 데이터 호환).
+function sessionMinText(info) {
+  const list = Array.isArray(info?.sMinList) ? info.sMinList.filter(x => x !== "" && x != null) : [];
+  const uniq = [...new Set(list)];
+  if (list.length > 1 && uniq.length > 1) return list.map(m => `${m}분`).join(" · ");
+  if (list.length > 0) return `${list[0]}분`;
+  const one = info?.sMin || info?.sessionMin;
+  return one ? `${one}분` : "";
+}
+
 function taskIsOX(t) {
   const daily = (t && t.daily) || {};
   const keys = Object.keys(daily);
@@ -3331,6 +3342,9 @@ const blankChild = () => ({
     ownerName: "",  // 이 아동을 담당하는 선생님 이름 (빈 문자열 = 미지정)
     isPinned: false,
     sWeek: "", sMin: "", sTotal: "",  // 주 N회, N분, 총 세션
+    // ★ [신규] 회차마다 시간이 다른 아동용 (예: 주 2회 · 100분/50분).
+    //    비어 있으면 sMin 하나를 그대로 쓴다.
+    sMinList: [], sMinPerSession: false,
     fn: "",  // 보고서에 쓰일 아동 호칭 (기본 info.name 사용)
     pStart: "", pEnd: "",  // 보고 기간
     iepObservations: { eyeContact: "", requesting: "", following: "", attention: "", imitation: "", selfCare: "" },
@@ -9532,7 +9546,7 @@ function ArchiveViewModal({ item, onClose }) {
                     if (!ps && !pe) return null;
                     return <><br /><b style={{ color: PKD }}>기간:</b> {ps || "—"} ~ {pe || "—"}</>;
                   })()}
-                  {snapshot.info.sWeek && <> · <b style={{ color: PKD }}>치료 강도:</b> 주 {snapshot.info.sWeek}회 × {snapshot.info.sMin || "—"}분</>}
+                  {snapshot.info.sWeek && <> · <b style={{ color: PKD }}>치료 강도:</b> 주 {snapshot.info.sWeek}회 × {sessionMinText(snapshot.info) || "—"}</>}
                 </div>
               )}
               {/* 영역별 평균 */}
@@ -10790,8 +10804,8 @@ cleanedHTML + '\n' +
 
           const sessionCellContent = (() => {
             // ★ 총 세션수는 결석·보강으로 부정확하므로 표시하지 않음. 회기 시간(분)만 표시.
-            const minVal = info.sMin || info.sessionMin;
-            return <span>{minVal ? `${minVal}분` : "—"}</span>;
+            const minVal = sessionMinText(info);
+            return <span>{minVal || "—"}</span>;
           })();
           return (
             <table className="info-table-main" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 16 }}>
@@ -14498,9 +14512,8 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   const socDoneCount = socStos.filter(s => s.status === "완료").length;
 
   const sessionInfo = (() => {
-    const sMin = info?.sMin || info?.sessionMin;
     const sWeek = info?.sWeek || info?.weeklyFreq;
-    const minPart = sMin ? `${sMin}분` : "";
+    const minPart = sessionMinText(info);
     const wkPart = sWeek ? `주 ${sWeek}회` : "";
     const parts = [wkPart, minPart].filter(Boolean);
     if (parts.length === 0) return "";
@@ -15523,12 +15536,20 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
               </select>
             </div>
             <div>
-              <label style={{ fontSize: 10.5, color: "#5a8c1f", fontWeight: 500, display: "block", marginBottom: 4 }}>회기 시간 (분)</label>
+              <label style={{ fontSize: 10.5, color: "#5a8c1f", fontWeight: 500, display: "block", marginBottom: 4 }}>
+                회기 시간 (분)
+                {Array.isArray(info.sMinList) && info.sMinList.filter(Boolean).length > 1 && (
+                  <span style={{ fontSize: 9, color: "#888", fontWeight: 400, marginLeft: 5 }}>
+                    회차별 설정됨 ({sessionMinText(info)})
+                  </span>
+                )}
+              </label>
               <input
                 type="number"
                 placeholder="예: 50"
                 value={info.sMin || ""}
-                onChange={e => setInfo(prev => ({ ...prev, sMin: e.target.value }))}
+                // ★ [수정] 여기서 값을 바꾸면 회차별 설정(sMinList)을 지운다 — 두 값이 어긋나지 않도록.
+                onChange={e => setInfo(prev => ({ ...prev, sMin: e.target.value, sMinList: [], sMinPerSession: false }))}
                 style={{ width: "100%", padding: "5px 8px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 11.5, fontFamily: "inherit", boxSizing: "border-box" }}
               />
             </div>
@@ -16871,7 +16892,7 @@ function ReportGeneratorSection({
     <strong>생년월일:</strong> ${info.birth || "—"} &nbsp;&nbsp;
     <strong>치료사:</strong> ${info.therapist || "—"}<br/>
     <strong>보고 기간:</strong> ${reportPeriodStart || info.pStart || "—"} ~ ${reportPeriodEnd || info.pEnd || "—"} &nbsp;&nbsp;
-    <strong>치료 강도:</strong> 주 ${info.sWeek || "—"}회 / ${info.sMin || "—"}분<br/>
+    <strong>치료 강도:</strong> 주 ${info.sWeek || "—"}회 / ${sessionMinText(info) || "—"}<br/>
     <strong>발행일:</strong> ${today} &nbsp;&nbsp;
     <strong>슈퍼바이저:</strong> ${SUPERVISOR_NAME} (${SUPERVISOR_CERT})
   </div>
@@ -17040,36 +17061,81 @@ function ReportGeneratorSection({
           </div>
           <div>
             <label style={{ ...LS, fontSize: 10 }}>회당 N분</label>
-            {/* W-13: 드롭다운(50분/100분/직접입력) — 직접입력 선택 시 숫자 입력란으로 전환 */}
+            {/* ★ [수정] 회차마다 시간이 다른 아동(예: 주 2회인데 100분 / 50분)을 담지 못했다.
+                 '주 N회'에서 고른 수만큼 칸을 만들고, 회차별로 시간을 지정할 수 있게 한다.
+                 sMinList가 비어 있으면 기존 sMin 하나를 그대로 쓴다(기존 아동 데이터 호환). */}
             {(() => {
-              const v = info.sMin || "";
-              const isPreset = v === "50" || v === "100";
-              const isCustom = v !== "" && !isPreset;
-              const selectValue = isPreset ? v : (isCustom ? "custom" : "");
+              const weekN = Math.max(1, Math.min(7, parseInt(info.sWeek, 10) || 1));
+              const list = Array.isArray(info.sMinList) ? info.sMinList : [];
+              const perSession = weekN > 1 && (info.sMinPerSession === true || list.some(x => x && x !== list[0]));
+
+              const setOne = (idx, val) => {
+                const next = Array.from({ length: weekN }, (_, i) => (i === idx ? val : (list[i] || info.sMin || "")));
+                setInfo(prev => ({ ...prev, sMinList: next, sMin: next[0] || "" }));
+              };
+
+              const MinSelect = ({ value, onChange, label }) => {
+                const isPreset = value === "50" || value === "100";
+                const isCustom = value !== "" && !isPreset;
+                const selectValue = isPreset ? value : (isCustom ? "custom" : "");
+                return (
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    {label && <span style={{ fontSize: 10, color: "#888", whiteSpace: "nowrap", minWidth: 34 }}>{label}</span>}
+                    <select
+                      style={{ ...IS, padding: "5px 6px", fontSize: 11.5, flex: isCustom ? "0 0 64px" : 1 }}
+                      value={selectValue}
+                      onChange={e => onChange(e.target.value === "custom" ? "" : e.target.value)}>
+                      <option value="">선택</option>
+                      <option value="50">50분</option>
+                      <option value="100">100분</option>
+                      <option value="custom">직접입력</option>
+                    </select>
+                    {(isCustom || selectValue === "custom") && (
+                      <input type="text" placeholder="예: 40"
+                        style={{ ...IS, padding: "5px 8px", fontSize: 11.5, flex: 1 }}
+                        value={value}
+                        onChange={e => onChange(e.target.value)} />
+                    )}
+                  </div>
+                );
+              };
+
+              if (!perSession) {
+                return (
+                  <div>
+                    <MinSelect
+                      value={info.sMin || ""}
+                      onChange={val => setInfo(prev => ({ ...prev, sMin: val, sMinList: [] }))}
+                    />
+                    {weekN > 1 && (
+                      <button
+                        onClick={() => setInfo(prev => ({
+                          ...prev,
+                          sMinPerSession: true,
+                          sMinList: Array.from({ length: weekN }, () => prev.sMin || "")
+                        }))}
+                        style={{ marginTop: 4, padding: "2px 7px", fontSize: 9.5, fontFamily: "inherit", background: "#fff", color: PKD, border: `1px solid ${PK}`, borderRadius: 5, cursor: "pointer" }}>
+                        + 회차마다 다르게
+                      </button>
+                    )}
+                  </div>
+                );
+              }
+
               return (
-                <div style={{ display: "flex", gap: 4 }}>
-                  <select
-                    style={{ ...IS, padding: "5px 6px", fontSize: 11.5, flex: isCustom ? "0 0 64px" : 1 }}
-                    value={selectValue}
-                    onChange={e => {
-                      const next = e.target.value;
-                      if (next === "custom") {
-                        setInfo(prev => ({ ...prev, sMin: "" }));
-                      } else {
-                        setInfo(prev => ({ ...prev, sMin: next }));
-                      }
-                    }}>
-                    <option value="">선택</option>
-                    <option value="50">50분</option>
-                    <option value="100">100분</option>
-                    <option value="custom">직접입력</option>
-                  </select>
-                  {(isCustom || selectValue === "custom") && (
-                    <input type="text" placeholder="예: 40" autoFocus={selectValue === "custom" && !isCustom}
-                      style={{ ...IS, padding: "5px 8px", fontSize: 11.5, flex: 1 }}
-                      value={v}
-                      onChange={e => setInfo(prev => ({ ...prev, sMin: e.target.value }))} />
-                  )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {Array.from({ length: weekN }, (_, i) => (
+                    <MinSelect key={i}
+                      label={`${i + 1}회차`}
+                      value={list[i] || ""}
+                      onChange={val => setOne(i, val)}
+                    />
+                  ))}
+                  <button
+                    onClick={() => setInfo(prev => ({ ...prev, sMinPerSession: false, sMinList: [] }))}
+                    style={{ alignSelf: "flex-start", padding: "2px 7px", fontSize: 9.5, fontFamily: "inherit", background: "#fff", color: "#888", border: "1px solid #ddd", borderRadius: 5, cursor: "pointer" }}>
+                    − 모두 같은 시간으로
+                  </button>
                 </div>
               );
             })()}
