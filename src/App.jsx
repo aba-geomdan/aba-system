@@ -2480,6 +2480,30 @@ function cleanDomainKey(domain) {
   return domain.replace(/^[Ⅰ-Ⅺ\dIVX]+\s*[·.]?\s*/, "").trim();
 }
 
+// ★ [55-3] 보고서 집계용 영역 재매핑.
+//    ELCAR의 로마숫자 章은 언어행동 기능 분류가 아니라 평가 진행 순서다.
+//    「Ⅶ 청자」 밑에 A 음성지시 / B 초기 화자(에코익) / C 맨드 / D 정보 맨드가 같이 들어 있어서,
+//    목표를 담을 때 상위 章 이름만 goal.domain에 박히는 구조상 에코익도 맨드도 전부 '청자'로 집계됐다.
+//    (도겸 '단음절어 에코'·'인트라버벌 맨드' → 청자 36% → "청자 집중 지도" 문장까지 이어짐)
+//    저장 데이터와 커리큘럼 트리는 그대로 두고, 보고서에 나가는 이름만 여기서 바꾼다.
+//    키: cleanDomainKey(상위 영역) → 하위영역 머리글자 → 보고서 영역명.
+//    표에 없는 영역·하위영역은 손대지 않는다(빈 표 = 55단계 이전과 동일 동작).
+const REPORT_DOMAIN_MAP = {
+  "언어행동기초": { "A": "맨드", "B·C": "모방", "D": "시각 변별·매칭" },
+  "청자":         { "A": "청자", "B": "에코익", "C": "맨드", "D": "맨드" },
+  "화자":         { "E": "택트", "F": "택트", "H": "인트라버벌" },
+  "자기관리":     { "A": "자기관리", "B": "사회성" },
+};
+function reportDomainOf(goal) {
+  const domain = (goal && goal.domain) || "";
+  if (!domain) return domain;
+  const table = REPORT_DOMAIN_MAP[cleanDomainKey(domain)];
+  if (!table) return domain;
+  const code = String((goal && goal.subDomain) || "").trim().split(/\s+/)[0];
+  if (!code) return domain;
+  return table[code] || domain;
+}
+
 // 받침 유무에 따라 은/는 조사를 붙임
 function withTopicParticle(word) {
   if (!word) return word;
@@ -5842,7 +5866,11 @@ export default function App() {
       return {
         id: g.id,
         name: g.item,                    // 영역목표 이름
-        domain: g.domain,
+        // ★ [55-3] 집계·문장·카드 라벨에 쓰는 영역은 재매핑본.
+        //    rawDomain은 평가도구(ELCAR/VB-MAPP/ESDM) 분류에만 쓴다 —
+        //    classifyCurriculum이 영역 이름으로 판정하므로 원본을 남겨야 ELCAR 카드가 '기타'로 새지 않는다.
+        domain: reportDomainOf(g),
+        rawDomain: g.domain,
         subDomain: g.subDomain,
         status,
         rate: latestPoint ? latestPoint.value : 0,
@@ -5880,9 +5908,11 @@ export default function App() {
       const tl = getRatedGoalSeries(g);
       const goalValue = tl.length > 0 ? tl[tl.length - 1].rate : null;
       if (goalValue === null) return;
-      if (!grouped[g.domain]) grouped[g.domain] = { sum: 0, n: 0 };
-      grouped[g.domain].sum += goalValue;
-      grouped[g.domain].n += 1;
+      // ★ [55-3] 막대도 재매핑 영역으로 묶는다 — 문장·카드와 같은 이름을 쓴다.
+      const dom = reportDomainOf(g);
+      if (!grouped[dom]) grouped[dom] = { sum: 0, n: 0 };
+      grouped[dom].sum += goalValue;
+      grouped[dom].n += 1;
     });
     return Object.entries(grouped).map(([domain, v]) => ({
       domain, avg: v.n > 0 ? Math.round(v.sum / v.n) : 0, count: v.n,
@@ -15655,7 +15685,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
         (goals || []).filter(g => g.includeInIep).forEach(g => {
           // ★ [수정] 인라인 판정을 공용 헬퍼로 교체 (goalIsOX)
           if (goalIsOX(g)) return;
-          const dom = g.domain || "(영역 없음)";
+          const dom = reportDomainOf(g) || "(영역 없음)";  // ★ [55-3] 보고서와 같은 영역 이름
           const series = (typeof getTimeline === "function") ? getTimeline(g) : [];
           series.forEach(pt => {
             if (pt.rate == null || isNaN(pt.rate)) return;
@@ -18385,7 +18415,9 @@ function GoalDashboard({ stos }) {
   stos.forEach(s => {
     if (s.status === "중단") return;
     const dom = (s.domain || "기타").replace(/^[Ⅰ-Ⅺ]\s*/, "");
-    const curr = classifyCurriculum(dom);
+    // ★ [55-3] 평가도구 분류는 원본 영역명으로 — 재매핑된 이름('에코익', '모방' 등)은
+    //    classifyCurriculum의 ELCAR 목록과 안 맞아 전부 '기타 목표'로 빠진다.
+    const curr = classifyCurriculum((s.rawDomain || s.domain || "기타").replace(/^[Ⅰ-Ⅺ]\s*/, ""));
     if (!currGroups[curr][dom]) {
       currGroups[curr][dom] = [];
       currOrder[curr].push(dom);
