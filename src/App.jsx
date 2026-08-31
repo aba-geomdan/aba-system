@@ -7016,7 +7016,7 @@ export default function App() {
   };
 
   if (view === "iep-print") {
-    return <PrintView info={info} goals={includedGoals} domainAvgs={domainAvgs} domainLevelOverrides={domainLevelOverrides} reportSections={reportSections}
+    return <PrintView info={info} goals={includedGoals} domainAvgs={domainAvgs} balanceBarRows={balanceBarRows} domainLevelOverrides={domainLevelOverrides} reportSections={reportSections}
       reportSelStrats={reportSelStrats} reportSelStratsCustom={reportSelStratsCustom}
       reportSelPrein={reportSelPrein} reportSelSrein={reportSelSrein} reportReinfSchedule={reportReinfSchedule}
       reportBehaviors={reportBehaviors} stosForReport={stosForReport} goalsForReport={goalsForReport}
@@ -7026,7 +7026,7 @@ export default function App() {
       mode="iep" onBack={() => { setAutoPrintAction(""); setView("edit"); }} />;
   }
   if (view === "print") {
-    return <PrintView info={effectiveInfo} goals={includedGoals} domainAvgs={domainAvgs} domainLevelOverrides={domainLevelOverrides} reportSections={reportSections}
+    return <PrintView info={effectiveInfo} goals={includedGoals} domainAvgs={domainAvgs} balanceBarRows={balanceBarRows} domainLevelOverrides={domainLevelOverrides} reportSections={reportSections}
       reportSelStrats={reportSelStrats} reportSelStratsCustom={reportSelStratsCustom}
       reportSelPrein={reportSelPrein} reportSelSrein={reportSelSrein} reportReinfSchedule={reportReinfSchedule}
       reportBehaviors={reportBehaviors} stosForReport={stosForReport} goalsForReport={goalsForReport}
@@ -9789,7 +9789,7 @@ export default function App() {
         {tab === "report" && (
           <ReportTab 
             currentUser={currentUser}
-            info={effectiveInfo} goals={includedGoals} currentAvgs={currentAvgs} baselineAvgs={baselineAvgs}
+            info={effectiveInfo} goals={includedGoals} currentAvgs={currentAvgs} balanceBarRows={balanceBarRows} baselineAvgs={baselineAvgs}
             domainLevelOverrides={domainLevelOverrides}
             getTimeline={getTimeline}
             stosForReport={stosForReport}
@@ -11634,7 +11634,7 @@ function VbmappGrid({ goals }) {
   );
 }
 
-function PrintView({ info, goals, domainAvgs, domainLevelOverrides, reportSections, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportBehaviors, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, archiveList, dailyMemos, mode, onBack, autoPrint = "", onAutoPrintDone }) {
+function PrintView({ info, goals, domainAvgs, balanceBarRows = [], domainLevelOverrides, reportSections, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportBehaviors, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, archiveList, dailyMemos, mode, onBack, autoPrint = "", onAutoPrintDone }) {
   const isIepMode = mode === "iep";
   const isFinalMode = mode === "final";  // ★ 종결보고서 모드
   const grouped = useMemo(() => {
@@ -16357,7 +16357,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   return r;
 }
 
-function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domainLevelOverrides, getTimeline, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, awaitingNewData, askConfirm, reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportReinfType, reportPromptStart, reportPromptNow, reportNextPlans, reportBehaviors, reportSections, dailyMemos, setReportField, setReportPatch, setInfo, archiveList, cutoffDisabled, setCutoffDisabled, reportMode, setReportMode, onArchiveSave, onArchiveDelete, onArchiveView, onPrev, onPreview, onPrint }) {
+function ReportTab({ currentUser, info, goals, currentAvgs, balanceBarRows = [], baselineAvgs, domainLevelOverrides, getTimeline, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, awaitingNewData, askConfirm, reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportReinfType, reportPromptStart, reportPromptNow, reportNextPlans, reportBehaviors, reportSections, dailyMemos, setReportField, setReportPatch, setInfo, archiveList, cutoffDisabled, setCutoffDisabled, reportMode, setReportMode, onArchiveSave, onArchiveDelete, onArchiveView, onPrev, onPreview, onPrint }) {
   const [showReportHelp, setShowReportHelp] = useState(false); // ★ 인쇄 안내 박스 접기 (기본 접힘)
   const visibleArchiveList = useMemo(() => {
     if (!archiveList || archiveList.length === 0) return [];
