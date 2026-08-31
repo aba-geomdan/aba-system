@@ -375,9 +375,12 @@ function classifyCurriculum(domain) {
       if (elcClean && (cleanDom === elcClean || (e.d || "").trim() === domain.trim())) return "elcar";
     }
   }
-  if (typeof ESDM_DOMAINS !== "undefined" && ESDM_DOMAINS) {
-    for (const lvl of Object.keys(ESDM_DOMAINS)) {
-      if (ESDM_DOMAINS[lvl] && Object.keys(ESDM_DOMAINS[lvl]).includes(cleanDom)) return "esdm";
+  // ★ [59-2] ESDM_DOMAINS는 배열인데 레벨→영역 객체처럼 훑고 있었다.
+  //    Object.keys(배열)은 "0","1"… 이고 그 원소의 키는 d·s라, 이 분기는 한 번도 걸리지 않았다.
+  //    (실제 분류는 아래 문자열 포함 검사가 대신 하고 있었다 — 영역명이 늘면 놓친다)
+  if (typeof ESDM_DOMAINS !== "undefined" && Array.isArray(ESDM_DOMAINS)) {
+    for (const e of ESDM_DOMAINS) {
+      if ((e.d || "").trim() === cleanDom || (e.d || "").trim() === (domain || "").trim()) return "esdm";
     }
   }
   const d = (domain || "").toLowerCase();
@@ -659,64 +662,96 @@ function findVbmappGridMapping(domClean, stoName, stoKey) {
   return null;
 }
 
+// ★ [59-1] ESDM 영역·레벨 구조를 실제 체크리스트(Rogers & Dawson / 정경미 역, 인싸이트)에 맞춤.
+//    기존 구조는 실제와 여러 군데 어긋나 있었다 —
+//    · '행동' 영역이 통째로 없었다 (레벨1)
+//    · 합동 주시 행동이 레벨1에 있었다 (실제는 레벨2에만)
+//    · 모방이 레벨3에 있었다 (실제는 레벨1·2까지)
+//    · 사회기술·소근육·대근육이 레벨1부터 있어야 하는데 레벨2부터였다
+//    · 레벨2의 사회기술(어른 혹은 친구 / 친구)·놀이(표상 / 독립적 놀이) 세분이 없었다
+//    · 자조 계열이 레벨3에서 '개인적 독립', 레벨4에서 '자조 기술'로 이름이 바뀌는 것이 반영 안 됐다
+//    영역명·레벨 표기는 원문 그대로 쓴다. 책을 펴놓고 옮길 때 이름이 어긋나지 않게.
+//    항목(i)은 비워 둔다 — 기존에 들어 있던 103개는 실제 체크리스트 문항이 아니라
+//    그럴듯하게 요약된 문장이었다. 실제 문항은 사용자가 직접 채운다.
 const ESDM_DOMAINS = [
-  { d: "수용 언어", s: [
-    { n: "레벨1 (12-18개월)", i: ["이름 부르면 쳐다보기", "고개 돌려 말하는 사람 바라보기", "간단한 일상적 지시 따르기"] },
-    { n: "레벨2 (19-24개월)", i: ["기초적인 공간개념 이해", "2단계 지시 따르기", "신체 부위 명명에 반응", "다양한 사물 명명에 반응"] },
-    { n: "레벨3 (25-36개월)", i: ["형용사·수량 개념 이해", "3단계 관련 지시 따르기", "부정문·질문문 이해"] },
-    { n: "레벨4 (37-48개월)", i: ["복잡한 문장 이해", "이야기 듣고 질문에 답하기", "추상 개념 이해"] }
-  ]},
-  { d: "표현 언어", s: [
-    { n: "레벨1 (12-18개월)", i: ["요청 의미로 손 뻗기", "의도적으로 소리 내기", "초기 단어 5가지"] },
-    { n: "레벨2 (19-24개월)", i: ["명사+동사 2단어 조합", "다양한 자음 소리 자발적", "10가지 이상 명명"] },
-    { n: "레벨3 (25-36개월)", i: ["WH질문에 대답", "문장으로 표현 (3-4단어)", "감정·필요 표현"] },
-    { n: "레벨4 (37-48개월)", i: ["이야기 만들어 말하기", "과거·미래 시제 사용", "복합문 구사"] }
-  ]},
-  { d: "합동 주시 행동", s: [
-    { n: "레벨1 (12-18개월)", i: ["'이거 봐' 물건 제시 반응", "시선 따라가기", "함께 주의 공유"] },
-    { n: "레벨2 (19-24개월)", i: ["'저기 봐' 멀리 가리키면 반응", "교사 눈 쳐다보며 물건 주고받기", "자발적으로 물건 보여주기"] }
-  ]},
-  { d: "사회기술: 어른/친구", s: [
-    { n: "레벨2 (19-24개월)", i: ["인사에 반응하기", "눈맞춤 유지", "상대방 요구 시 물건 공유"] },
-    { n: "레벨3 (25-36개월)", i: ["놀이시 차례 지키기", "간단한 대화 시작", "친구 이름 부르기"] },
-    { n: "레벨4 (37-48개월)", i: ["협동 놀이 참여", "상호작용 오래 유지", "도움 주고받기"] }
-  ]},
-  { d: "모방", s: [
-    { n: "레벨1 (12-18개월)", i: ["물체 활동 8~10가지 모방", "간단한 동작 모방", "소리 모방 시도"] },
-    { n: "레벨2 (19-24개월)", i: ["볼 수 있는 동작 10가지 모방", "구강-얼굴 동작 모방", "단어 모방"] },
-    { n: "레벨3 (25-36개월)", i: ["여러 단계 연쇄 모방", "복잡한 동작 순서 모방", "지연 모방"] }
-  ]},
-  { d: "인지", s: [
-    { n: "레벨1 (12-18개월)", i: ["원인-결과 이해", "사물 영속성 이해", "단순 짝 맞추기"] },
-    { n: "레벨2 (19-24개월)", i: ["같은 사물끼리 짝 맞추기", "색깔·도형 분류", "기초 수 개념"] },
-    { n: "레벨3 (25-36개월)", i: ["범주에 따라 분류", "반대어 이해", "크기·양 개념"] },
-    { n: "레벨4 (37-48개월)", i: ["수 세기 10까지", "순서 짓기", "추론·문제 해결"] }
-  ]},
-  { d: "놀이", s: [
-    { n: "레벨1 (12-18개월)", i: ["장난감 기능에 맞게 놀기", "다양한 장난감 탐색", "기초적 인과놀이"] },
-    { n: "레벨2 (19-24개월)", i: ["놀이 끝내고 치우기", "독립적 놀이 10분", "간단한 가작놀이"] },
-    { n: "레벨3 (25-36개월)", i: ["놀이 주제 따라 행동", "역할놀이 참여", "또래와 평행놀이"] }
-  ]},
-  { d: "소근육 운동", s: [
-    { n: "레벨2 (19-24개월)", i: ["크레파스로 낙서·선·마크", "블록 쌓기 (5개 이상)", "단추 끼우기"] },
-    { n: "레벨3 (25-36개월)", i: ["가위로 종이 자르기", "퍼즐 혼자 맞추기", "간단한 모양 그리기"] },
-    { n: "레벨4 (37-48개월)", i: ["블록·레고 따라 만들기", "글자 따라 쓰기", "세밀한 조작"] }
-  ]},
-  { d: "대근육 운동", s: [
-    { n: "레벨2 (19-24개월)", i: ["공 던지기·받기", "계단 오르내리기", "달리기"] },
-    { n: "레벨3 (25-36개월)", i: ["한 발로 서기", "점프하기", "세발자전거 타기"] },
-    { n: "레벨4 (37-48개월)", i: ["목표 지점으로 공차기", "평균대 걷기", "스킵·갤롭"] }
-  ]},
-  { d: "자조: 식사", s: [
-    { n: "레벨2 (19-24개월)", i: ["스스로 컵·숟가락 사용", "다양한 음식 먹기", "식사 독립적으로"] },
-    { n: "레벨3 (25-36개월)", i: ["포크·칼 사용", "흘리지 않고 먹기", "식탁 예절 지키기"] }
-  ]},
-  { d: "자조: 옷입기·위생", s: [
-    { n: "레벨2 (19-24개월)", i: ["간단한 옷 벗기", "손 씻기 시도", "양치 협조"] },
-    { n: "레벨3 (25-36개월)", i: ["단순한 옷 입기", "손 혼자 씻기", "화장실 사용 요청"] },
-    { n: "레벨4 (37-48개월)", i: ["완전히 혼자 옷입기", "양치 혼자", "코 풀기·세수"] }
-  ]}
+  { d: "수용 언어", s: [{ n: "레벨 1 (12~18개월)", i: [] }, { n: "레벨 2 (19~24개월)", i: [] }, { n: "레벨 3 (25~36개월)", i: [] }, { n: "레벨 4 (37~48개월)", i: [] }] },
+  { d: "표현 언어", s: [{ n: "레벨 1 (12~18개월)", i: [] }, { n: "레벨 2 (19~24개월)", i: [] }, { n: "레벨 3 (25~36개월)", i: [] }, { n: "레벨 4 (37~48개월)", i: [] }] },
+  { d: "합동 주시 행동", s: [{ n: "레벨 2 (19~24개월)", i: [] }] },
+  { d: "사회기술", s: [{ n: "레벨 1 (12~18개월)", i: [] }] },
+  { d: "사회기술: 어른 혹은 친구", s: [{ n: "레벨 2 (19~24개월)", i: [] }] },
+  { d: "사회기술: 친구", s: [{ n: "레벨 2 (19~24개월)", i: [] }] },
+  { d: "사회기술: 어른과 동료", s: [{ n: "레벨 3 (25~36개월)", i: [] }] },
+  { d: "사회 기술", s: [{ n: "레벨 4 (37~48개월)", i: [] }] },
+  { d: "모방", s: [{ n: "레벨 1 (12~18개월)", i: [] }, { n: "레벨 2 (19~24개월)", i: [] }] },
+  { d: "인지", s: [{ n: "레벨 1 (12~18개월)", i: [] }, { n: "레벨 2 (19~24개월)", i: [] }, { n: "레벨 3 (25~36개월)", i: [] }, { n: "레벨 4 (37~48개월)", i: [] }] },
+  { d: "놀이", s: [{ n: "레벨 1 (12~18개월)", i: [] }, { n: "레벨 3 (25~36개월)", i: [] }, { n: "레벨 4 (37~48개월)", i: [] }] },
+  { d: "놀이: 표상", s: [{ n: "레벨 2 (19~24개월)", i: [] }] },
+  { d: "놀이: 독립적 놀이", s: [{ n: "레벨 2 (19~24개월)", i: [] }] },
+  { d: "소근육 운동", s: [{ n: "레벨 1 (12~18개월)", i: [] }, { n: "레벨 2 (19~24개월)", i: [] }] },
+  { d: "소근육", s: [{ n: "레벨 3 (25~36개월)", i: [] }, { n: "레벨 4 (37~48개월)", i: [] }] },
+  { d: "대근육 운동", s: [{ n: "레벨 1 (12~18개월)", i: [] }, { n: "레벨 2 (19~24개월)", i: [] }] },
+  { d: "대근육", s: [{ n: "레벨 3 (25~36개월)", i: [] }, { n: "레벨 4 (37~48개월)", i: [] }] },
+  { d: "행동", s: [{ n: "레벨 1 (12~18개월)", i: [] }] },
+  { d: "자조기술: 식사", s: [{ n: "레벨 1 (12~18개월)", i: [] }, { n: "레벨 2 (19~24개월)", i: [] }] },
+  { d: "자조기술: 의생활", s: [{ n: "레벨 1 (12~18개월)", i: [] }, { n: "레벨 2 (19~24개월)", i: [] }] },
+  { d: "자조기술: 위생", s: [{ n: "레벨 1 (12~18개월)", i: [] }, { n: "레벨 2 (19~24개월)", i: [] }] },
+  { d: "자조기술: 집안일", s: [{ n: "레벨 1 (12~18개월)", i: [] }] },
+  { d: "자조기술: 가사", s: [{ n: "레벨 2 (19~24개월)", i: [] }] },
+  { d: "개인적 독립: 의생활", s: [{ n: "레벨 3 (25~36개월)", i: [] }] },
+  { d: "개인적 독립: 위생", s: [{ n: "레벨 3 (25~36개월)", i: [] }] },
+  { d: "개인적 독립: 가사", s: [{ n: "레벨 3 (25~36개월)", i: [] }] },
+  { d: "자조 기술", s: [{ n: "레벨 4 (37~48개월)", i: [] }] }
 ];
+// ★ [59-4] 구조(코드) + 항목(저장 데이터) 병합. 원본 배열은 건드리지 않는다.
+//    저장에 없는 영역·레벨은 빈 항목으로 남고, 구조에 없는 저장 키는 무시한다.
+function mergeEsdmItems(userItems) {
+  const src = (userItems && typeof userItems === "object") ? userItems : {};
+  return ESDM_DOMAINS.map(d => ({
+    d: d.d,
+    s: d.s.map(sub => ({
+      n: sub.n,
+      i: Array.isArray(src[d.d] && src[d.d][sub.n]) ? src[d.d][sub.n].filter(x => String(x || "").trim()) : []
+    }))
+  }));
+}
+
+// ★ [59-5] 레벨 통째 붙여넣기 파서.
+//    OCR로 뽑은 레벨 전체 텍스트를 그대로 받아 영역별로 나눈다.
+//    규칙: 영역 제목과 같은 줄(공백 무시 비교)이 나오면 그 아래 줄들은 그 영역 소속.
+//    "1 " "1. " "1)" 같은 앞머리 번호는 뗀다. 번호 없이 시작하는 줄은
+//    OCR 줄바꿈으로 잘린 것으로 보고 바로 앞 항목에 이어 붙인다.
+//    첫 제목 전에 나온 줄과 어디에도 못 넣은 줄은 unmatched로 돌려줘 사용자가 확인한다.
+function esdmNormName(x) { return String(x || "").replace(/\s+/g, "").replace(/[::]/g, ":"); }
+function parseEsdmBulk(levelName, text) {
+  const domainsAtLevel = ESDM_DOMAINS.filter(d => d.s.some(sub => sub.n === levelName)).map(d => d.d);
+  const headerMap = {};
+  domainsAtLevel.forEach(d => { headerMap[esdmNormName(d)] = d; });
+  const byDomain = {};
+  const unmatched = [];
+  let cur = null;
+  const lines = String(text || "").split(/\r?\n/);
+  for (let raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    const asHeader = headerMap[esdmNormName(line)];
+    if (asHeader) { cur = asHeader; if (!byDomain[cur]) byDomain[cur] = []; continue; }
+    const m = line.match(/^\d+\s*[.)]?\s+(.*)$/);
+    if (m && m[1].trim()) {
+      if (!cur) { unmatched.push(line); continue; }
+      byDomain[cur].push(m[1].trim());
+    } else {
+      // 번호 없는 줄 — 앞 항목의 이어짐으로 본다
+      if (cur && byDomain[cur] && byDomain[cur].length > 0) {
+        byDomain[cur][byDomain[cur].length - 1] += " " + line;
+      } else {
+        unmatched.push(line);
+      }
+    }
+  }
+  return { byDomain, unmatched, domainsAtLevel };
+}
+
+
 
 const VBMAPP_RECOMMEND = {
   "Mand": {
@@ -2733,14 +2768,36 @@ const REPORT_DOMAIN_MAP = {
   "화자":         { "E": "택트", "F": "택트", "H": "인트라버벌" },
   "자기관리":     { "A": "자기관리", "B": "사회성" },
 };
+// ★ [59-3] ESDM은 같은 영역인데 레벨마다 책에 적힌 이름이 다르다.
+//    레벨1·2 「소근육 운동」 = 레벨3·4 「소근육」, 자조 계열은 레벨1·2 「자조기술: 위생」 /
+//    레벨3 「개인적 독립: 위생」 / 레벨4 「자조 기술」로 갈린다.
+//    목표를 고르는 화면은 책과 같아야 헷갈리지 않으므로 커리큘럼 이름은 원문 그대로 두고,
+//    보고서에 찍히는 이름만 여기서 하나로 묶는다. 안 묶으면 영역별 막대·완료 현황에서
+//    같은 영역이 두 줄로 나뉜다(유찬 '화자'/'화자 언어 작동'과 같은 모양).
+//    레벨1·2 이름을 대표로 삼는다 — 아이가 낮은 레벨부터 올라오므로 먼저 쓰이는 이름이다.
+const ESDM_REPORT_ALIAS = {
+  "소근육": "소근육 운동",
+  "대근육": "대근육 운동",
+  "개인적 독립: 의생활": "자조기술: 의생활",
+  "개인적 독립: 위생": "자조기술: 위생",
+  "개인적 독립: 가사": "자조기술: 가사",
+  "자조 기술": "자조기술",
+  "사회 기술": "사회기술",
+  "사회기술: 어른과 동료": "사회기술: 어른 혹은 친구"
+};
 function reportDomainOf(goal) {
   const domain = (goal && goal.domain) || "";
   if (!domain) return domain;
   const table = REPORT_DOMAIN_MAP[cleanDomainKey(domain)];
-  if (!table) return domain;
-  const code = String((goal && goal.subDomain) || "").trim().split(/\s+/)[0];
-  if (!code) return domain;
-  return table[code] || domain;
+  if (table) {
+    const code = String((goal && goal.subDomain) || "").trim().split(/\s+/)[0];
+    if (code && table[code]) return table[code];
+    return domain;
+  }
+  // ESDM 레벨별 이름 흔들림 통일 (위 표에 걸리지 않은 영역만)
+  const alias = ESDM_REPORT_ALIAS[domain.trim()];
+  if (alias) return alias;
+  return domain;
 }
 
 // 받침 유무에 따라 은/는 조사를 붙임
@@ -3773,6 +3830,12 @@ const BACKUP_HISTORY_KEY = "gd-aba-backup-history";  // 최근 10개 백업 기�
 
 const AUTH_ADMIN_PW_KEY = "gd-aba-admin-pw";       // 관리자 비밀번호 (해시)
 const AUTH_TEACHERS_KEY = "gd-aba-teachers";       // 선생님 목록 (JSON 배열)
+// ★ [59-4] ESDM 항목 저장 키 — 문항은 코드가 아니라 데이터로 산다.
+//    관리자가 항목 편집 화면에서 직접 입력하면 Supabase(aba_data)에 저장되고,
+//    모든 선생님의 커리큘럼 화면에 ELCAR와 같은 방식으로 나타난다.
+//    형식: { "영역명": { "레벨명": ["항목", ...] } }
+const ESDM_ITEMS_KEY = "gd-aba-esdm-items";
+
 const AUTH_CURRENT_USER_KEY = "gd-aba-current-user";  // 현재 로그인 정보 {role, name}
 
 function simpleHash(str) {
@@ -4808,7 +4871,12 @@ export default function App() {
   const [lastChangeAt, setLastChangeAt] = useState(null);
   const [now, setNow] = useState(() => Date.now());
 
-  const [autoBackupEnabled, setAutoBackupEnabled] = useState(true);  // 기본 ON
+  // ★ [59-8] 자동 파일 백업 OFF.
+  //    클라우드 저장 도입 전에 만든 기능으로, 60분마다 전체 데이터를 JSON으로 '다운로드'했다.
+  //    화면에선 버튼·배너를 숨겼지만 기본값이 ON이라 뒤에서 계속 돌아, 패드 다운로드 폴더에
+  //    한 시간마다 백업 파일이 쌓였다. 데이터는 이미 Supabase에 실시간 저장되므로 끈다.
+  //    수동 백업(exportAllChildren)은 그대로 남아 필요할 때 버튼으로 받을 수 있다.
+  const [autoBackupEnabled, setAutoBackupEnabled] = useState(false);
   const [autoBackupInterval, setAutoBackupInterval] = useState(60);  // 분 단위, 기본 60분
   
   const defaultTemplates = [
@@ -4855,6 +4923,31 @@ export default function App() {
   const [assignOwnerDialog, setAssignOwnerDialog] = useState(null);
 
   // ★ [신규] 등록된 선생님 목록 (App 컴포넌트에서도 필요 — 담당자 드롭다운/모달용)
+  // ★ [59-4] ESDM 항목 — 관리자가 입력한 문항 (Supabase 공유 저장)
+  const [esdmUserItems, setEsdmUserItems] = useState(null);
+  const [showEsdmEditor, setShowEsdmEditor] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(ESDM_ITEMS_KEY, true);
+        if (res?.value) setEsdmUserItems(JSON.parse(res.value));
+      } catch (e) { /* 없으면 빈 상태로 시작 */ }
+    })();
+  }, []);
+  const esdmCatalog = useMemo(() => mergeEsdmItems(esdmUserItems), [esdmUserItems]);
+  const saveEsdmItems = async (draft) => {
+    try {
+      const json = JSON.stringify(draft || {});
+      const r = await window.storage.set(ESDM_ITEMS_KEY, json, true);
+      if (!r) { alert("저장에 실패했습니다. 네트워크를 확인하고 다시 시도해 주세요."); return false; }
+      setEsdmUserItems(draft || {});
+      return true;
+    } catch (e) {
+      alert("저장 중 오류: " + (e?.message || String(e)));
+      return false;
+    }
+  };
+
   const [teachers, setTeachers] = useState([]);
   useEffect(() => {
     // ★ [58-9] 삭제한 선생님이 담당 선택 목록에 계속 뜨던 문제.
@@ -4969,7 +5062,7 @@ export default function App() {
   const archiveCandidates = useMemo(() => {
     const now = new Date();
     const threshold = 90; // 3개월 기준 (90일)
-    return children.filter(c => {
+    return liveChildren(children).filter(c => {      // ★ [59-6] 삭제된 아동은 후보에서 제외
       if (c.info?.archivedAt) return false;          // 이미 아카이브됨
       const endDate = c.info?.finalEndDate;
       if (!endDate) return false;                     // 종결되지 않음
@@ -5109,7 +5202,10 @@ export default function App() {
     const trimmedName = (name || "").trim() || "새 아동";
 
     // 중복 이름 체크는 그대로 (관리자가 추가하기 전에 먼저 검사)
-    const sameNameChildren = children.filter(c => c.info?.name === trimmedName);
+    // ★ [59-6] 삭제는 배열에서 빼지 않고 deletedAt 표식만 다는 방식이라(tombstone),
+    //    raw children으로 검사하면 예전에 지운 아동이 "이미 있다"고 나온다.
+    //    (김주현: 삭제한 아동인데 같은 이름 추가 시 경고에 잡힘 — 삭제한 선생님 건과 같은 모양)
+    const sameNameChildren = liveChildren(children).filter(c => c.info?.name === trimmedName);
 
     // 실제 아동 추가 처리 함수 (담당자 결정 후 호출)
     const doAdd = (ownerName) => {
@@ -5349,8 +5445,16 @@ export default function App() {
   }, []);
 
   const saveTimerRef = useRef(null);
+  // ★ [59-7] 원격 변경을 조용히 받아올 때 쓰는 표식.
+  //    remoteAppliedRef: 이 children 참조는 클라우드에서 받아온 것 → 되쓰지 않는다
+  //      (되쓰면 lastEditor가 관리자로 바뀌어 누가 고쳤는지가 흐려진다)
+  //    lastLocalEditRef: 마지막 로컬 편집 시각 → 편집 중엔 자동 반영을 미룬다
+  const remoteAppliedRef = useRef(null);
+  const lastLocalEditRef = useRef(0);
   useEffect(() => {
     if (!loaded) return;  // 로드 완료 전에는 저장하지 않음
+    const fromRemote = remoteAppliedRef.current === children;
+    if (!fromRemote) lastLocalEditRef.current = Date.now();
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       try {
@@ -5359,6 +5463,7 @@ export default function App() {
           if (activeChildId) localStorage.setItem(ACTIVE_KEY, activeChildId);
         }
       } catch (e) {}
+      if (fromRemote) return;  // 클라우드에서 온 것은 로컬에만 저장하고 끝
       try {
         if (typeof window !== "undefined" && window.storage) {
           // ★ 저장 직전 클라우드 최신본과 병합 → 다른 사람이 수정한 아동을 덮어쓰지 않음
@@ -5570,12 +5675,22 @@ export default function App() {
           const isRecent = Date.now() - parsed.lastEditTime < 30000;  // 30초 이내
           
           if (isOtherUser && isNewer && isRecent) {
-            // ★ [옵션2] 자동 덮어쓰기 절대 안 함 — 작업 중 데이터가 사라지는 일 방지
-            //    다른 사람 변경은 화면을 자동으로 바꾸지 않고, 사용자가 직접 새로고침할 때만 반영됨.
-            // ★ 알림은 '관리자'에게만 표시 — 치료사끼리는 서로의 수정을 알 필요 없음
-            if (currentUser?.role === "admin") {
-              setCollaboratorAlert({ editor: parsed.lastEditor, timestamp: parsed.lastEditTime });
-              setTimeout(() => setCollaboratorAlert(null), 4000);
+            // ★ [59-7] 예전엔 여기서 관리자에게 "다른 사용자가 수정했습니다" 팝업을 띄웠다.
+            //    관리자는 열람 위주라 하루 종일 뜨는 팝업이 소음이었고, 팝업을 그냥 끄면
+            //    새로고침 전까지 옛 화면을 보게 된다(다른 사람 변경은 저장할 때만 병합됐다).
+            //    → 팝업 대신 조용히 병합해 화면에 반영한다. 아동별로 updatedAt이 최신인 쪽을 고르므로
+            //      관리자가 방금 고친 아동은 지켜진다. 그래도 편집 직후 30초는 미뤄 덮어쓰기 위험을 없앤다.
+            //    치료사끼리는 같은 아동을 만질 일이 없어 알림도 자동 반영도 하지 않는다 — 기존과 같음.
+            if (currentUser?.role === "admin" && Array.isArray(parsed.children)) {
+              const editingNow = Date.now() - lastLocalEditRef.current < 30000;
+              if (!editingNow) {
+                const cloudList = parsed.children.map(migrateChild);
+                setChildren(prev => {
+                  const merged = mergeChildren(prev, cloudList);
+                  remoteAppliedRef.current = merged;
+                  return merged;
+                });
+              }
             }
           }
           
@@ -5614,9 +5729,9 @@ export default function App() {
 
   const currentCatalog = useMemo(() => {
     if (curriculum === "VB-MAPP") return VBMAPP_DOMAINS;
-    if (curriculum === "ESDM") return ESDM_DOMAINS;
+    if (curriculum === "ESDM") return esdmCatalog;  // ★ [59-4] 관리자 입력 항목 병합본
     return ELCAR;
-  }, [curriculum]);
+  }, [curriculum, esdmCatalog]);
 
   const currentDomain = currentCatalog[selDomainIdx] || currentCatalog[0];
 
@@ -8558,8 +8673,11 @@ export default function App() {
 
             {/* ★ [IEP 신규] 의뢰 사유 / 보호자 협력 / 권고사항 — 칩+자동 생성 3섹션 */}
             {(() => {
-              const MARKER_RE = /\n*<!--SELECTED:([^>]*)-->\s*$/;
-              const stripMarker = (s) => (s || "").replace(MARKER_RE, "").trim();
+              // ★ [59-9] 입력칸 값에서 마커를 풀 때 .trim()·탐욕 \n*가 끝 공백·줄바꿈을 삼켜
+              //    스페이스/엔터가 입력 즉시 사라졌다 (보고서 탭 '다음 목표'와 같은 버그).
+              //    마커 앞에는 항상 \n\n을 붙이므로 풀 때도 딱 그만큼만 뗀다. trim 하지 않는다.
+              const MARKER_RE = /\n{0,2}<!--SELECTED:([^>]*)-->\s*$/;
+              const stripMarker = (s) => (s || "").replace(MARKER_RE, "");
 
               const sections = [
                 {
@@ -8799,7 +8917,7 @@ export default function App() {
                   });
                 });
                 
-                ESDM_DOMAINS.forEach(domain => {
+                esdmCatalog.forEach(domain => {
                   domain.s.forEach(section => {
                     section.i.forEach(item => {
                       if (item.toLowerCase().includes(q) || section.n.toLowerCase().includes(q) || domain.d.toLowerCase().includes(q)) {
@@ -8928,7 +9046,7 @@ export default function App() {
                   { k: "ESDM", label: "ESDM", colorBg: "#4a7316", colorLight: "#eaf3de", colorText: "#4a7316" }
                 ].map(c => {
                   const isActive = curriculum === c.k;
-                  const catalog = c.k === "ELCAR" ? ELCAR : c.k === "VB-MAPP" ? VBMAPP_DOMAINS : ESDM_DOMAINS;
+                  const catalog = c.k === "ELCAR" ? ELCAR : c.k === "VB-MAPP" ? VBMAPP_DOMAINS : esdmCatalog;
                   const totalInCatalog = catalog.reduce((sum, d) => sum + d.s.reduce((s2, sub) => s2 + sub.i.length, 0), 0);
                   const iepInCat = goals.filter(g => g.source === c.k && g.includeInIep).length;
                   return (
@@ -8971,7 +9089,17 @@ export default function App() {
                   {curriculum === "VB-MAPP" && "VB-MAPP 영역"}
                   {curriculum === "ESDM" && "ESDM 발달 영역"}
                 </h3>
-                <div style={{ fontSize: 11, color: "#767676" }}>💡 항목을 클릭하면 [IEP 포함]이 토글됩니다.</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {/* ★ [59-4] 항목은 관리자가 편집 화면에서 입력 — 저장하면 전 선생님에게 반영 */}
+                  {curriculum === "ESDM" && currentUser?.role === "admin" && (
+                    <button onClick={() => setShowEsdmEditor(true)}
+                      style={{ padding: "5px 12px", fontSize: 10.5, border: "1px solid #5a8c1f", borderRadius: 6, background: "#f5f7f0", color: "#3d6014", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+                      title="영역·레벨별 항목을 입력합니다 (관리자 전용)">
+                      ✏️ ESDM 항목 입력
+                    </button>
+                  )}
+                  <div style={{ fontSize: 11, color: "#767676" }}>💡 항목을 클릭하면 [IEP 포함]이 토글됩니다.</div>
+                </div>
               </div>
               <div className="responsive-tab-scroll" style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
                 {currentCatalog.map((d, i) => {
@@ -9689,6 +9817,15 @@ export default function App() {
         )}
       </div>
 
+      {/* ═══ [59-4] ESDM 항목 편집 모달 (관리자) ═══ */}
+      {showEsdmEditor && currentUser?.role === "admin" && (
+        <EsdmItemEditorModal
+          items={esdmUserItems || {}}
+          onSave={saveEsdmItems}
+          onClose={() => setShowEsdmEditor(false)}
+        />
+      )}
+
       {/* ═══ 외부 목표 추가 모달 ═══ */}
       {showExtForm && (
         <ExternalGoalModal
@@ -10089,6 +10226,202 @@ function AddChildModal({ name, setName, onClose, onSubmit }) {
             <button onClick={onSubmit} disabled={!canSubmit}
               style={{ ...BP, fontSize: 12, padding: "8px 18px", opacity: canSubmit ? 1 : 0.4, fontWeight: 600 }}>
               + 등록하기
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ★ [59-4] ESDM 항목 편집 (관리자 전용).
+//    영역·레벨을 고르고 한 줄에 한 항목씩 붙여넣는다. 저장하면 즉시 커리큘럼 화면에 반영.
+function EsdmItemEditorModal({ items, onSave, onClose }) {
+  const [domIdx, setDomIdx] = useState(0);
+  const [draft, setDraft] = useState(() => JSON.parse(JSON.stringify(items || {})));
+  const [saving, setSaving] = useState(false);
+  // ★ [59-5] 레벨 통째 붙여넣기 모드
+  const [mode, setMode] = useState("bulk");             // "bulk" | "domain"
+  const LEVEL_NAMES = ["레벨 1 (12~18개월)", "레벨 2 (19~24개월)", "레벨 3 (25~36개월)", "레벨 4 (37~48개월)"];
+  const [bulkLevel, setBulkLevel] = useState(LEVEL_NAMES[0]);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkResult, setBulkResult] = useState(null);   // parseEsdmBulk 결과 미리보기
+  const dom = ESDM_DOMAINS[domIdx];
+
+  const runBulkParse = () => {
+    setBulkResult(parseEsdmBulk(bulkLevel, bulkText));
+  };
+  const applyBulk = () => {
+    if (!bulkResult) return;
+    setDraft(prev => {
+      const next = { ...prev };
+      Object.entries(bulkResult.byDomain).forEach(([dName, arr]) => {
+        next[dName] = { ...(next[dName] || {}) };
+        next[dName][bulkLevel] = arr;
+      });
+      return next;
+    });
+    setBulkResult(null);
+    setBulkText("");
+    alert("초안에 반영했습니다. 아래 [💾 저장]을 눌러야 실제로 저장됩니다.\n(영역별 입력 탭에서 내용을 확인·수정할 수 있습니다)");
+  };
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  // ★ [59-9] 편집 중에는 입력칸 원문(문자열)을 그대로 들고 있는다.
+  //    타이핑마다 줄을 나누고 빈 줄을 버리면 엔터를 치는 순간 사라진다(다른 칸들과 같은 버그).
+  //    줄 나누기·공백 정리는 저장할 때 한 번만 한다.
+  const toArr = (v) => Array.isArray(v) ? v : String(v || "").split("\n").map(x => x.trim()).filter(Boolean);
+  const textOf = (dName, lvName) => {
+    const v = draft[dName] && draft[dName][lvName];
+    return Array.isArray(v) ? v.join("\n") : (v || "");
+  };
+  const setText = (dName, lvName, text) => {
+    setDraft(prev => {
+      const next = { ...prev, [dName]: { ...(prev[dName] || {}) } };
+      next[dName][lvName] = text;  // 원문 유지
+      return next;
+    });
+  };
+  const countOf = (dName) => {
+    const d = draft[dName] || {};
+    return Object.values(d).reduce((a, v) => a + toArr(v).length, 0);
+  };
+  const totalCount = ESDM_DOMAINS.reduce((a, d) => a + countOf(d.d), 0);
+  const normalizeDraft = (dr) => {
+    const out = {};
+    Object.entries(dr || {}).forEach(([dName, lv]) => {
+      out[dName] = {};
+      Object.entries(lv || {}).forEach(([lvName, v]) => { out[dName][lvName] = toArr(v); });
+    });
+    return out;
+  };
+
+  const handleSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    const ok = await onSave(normalizeDraft(draft));
+    setSaving(false);
+    if (ok) onClose();
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(40,20,30,0.45)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 680, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(74,115,22,0.3)", fontFamily: "'Pretendard','Noto Sans KR','Malgun Gothic',sans-serif" }}>
+        <div style={{ background: "linear-gradient(135deg, #5a8c1f 0%, #4a7316 100%)", color: "#fff", padding: "16px 22px", borderRadius: "16px 16px 0 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>ESDM 항목 입력 <span style={{ fontSize: 10, fontWeight: 500, opacity: 0.85 }}>(관리자)</span></div>
+            <div style={{ fontSize: 10.5, opacity: 0.88, marginTop: 3 }}>한 줄에 한 항목씩 입력·붙여넣기 · 저장하면 모든 선생님의 커리큘럼 화면에 반영됩니다 · 현재 {totalCount}개</div>
+          </div>
+          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", width: 30, height: 30, borderRadius: 8, fontSize: 16, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }} title="닫기 (ESC)">✕</button>
+        </div>
+        <div style={{ padding: "16px 22px", overflow: "auto", flex: 1 }}>
+          {/* ★ [59-5] 입력 모드 전환 */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+            {[["bulk", "📋 레벨 통째로 붙여넣기"], ["domain", "✏️ 영역별 입력·수정"]].map(([k, label]) => (
+              <button key={k} onClick={() => setMode(k)}
+                style={{ flex: 1, padding: "8px 10px", fontSize: 11.5, fontWeight: 600, borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+                  border: `1.5px solid ${mode === k ? "#5a8c1f" : "#ddd"}`,
+                  background: mode === k ? "#5a8c1f" : "#fff", color: mode === k ? "#fff" : "#666" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {mode === "bulk" && (
+            <div>
+              <div style={{ fontSize: 11, color: "#555", background: "#f5f7f0", border: "1px solid #d4e5ba", borderRadius: 8, padding: "9px 11px", marginBottom: 12, lineHeight: 1.7 }}>
+                체크리스트 한 레벨 분량의 텍스트를 통째로 붙여넣으세요. <b>영역 제목 줄</b>(예: 수용 언어)과
+                <b> 번호로 시작하는 항목 줄</b>을 알아서 구분해 영역별로 나눕니다. 앞머리 번호는 자동으로 떼고,
+                번호 없이 시작하는 줄은 앞 항목이 줄바꿈으로 잘린 것으로 보고 이어 붙입니다.
+              </div>
+              <label htmlFor="esdm-bulk-level" style={{ fontSize: 11, fontWeight: 600, color: "#555", display: "block", marginBottom: 5 }}>레벨 선택</label>
+              <select id="esdm-bulk-level" value={bulkLevel} onChange={e => { setBulkLevel(e.target.value); setBulkResult(null); }}
+                style={{ width: "100%", padding: "9px 12px", border: "1px solid #cfe0b8", borderRadius: 8, fontSize: 13, fontFamily: "inherit", marginBottom: 10, background: "#fff" }}>
+                {LEVEL_NAMES.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
+              <textarea
+                value={bulkText}
+                onChange={e => { setBulkText(e.target.value); setBulkResult(null); }}
+                placeholder={"이 레벨의 텍스트를 통째로 붙여넣으세요.\n\n(형태 예시)\n수용 언어\n1 항목 내용…\n2 항목 내용…\n표현 언어\n1 항목 내용…"}
+                rows={12}
+                style={{ width: "100%", padding: "10px 12px", border: "1px solid #d4e5ba", borderRadius: 8, fontSize: 12, fontFamily: "inherit", lineHeight: 1.7, resize: "vertical", boxSizing: "border-box", marginBottom: 10 }}
+              />
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+                <button onClick={runBulkParse} disabled={!bulkText.trim()}
+                  style={{ padding: "8px 16px", border: "1px solid #5a8c1f", borderRadius: 8, background: bulkText.trim() ? "#f5f7f0" : "#f0f0f0", color: bulkText.trim() ? "#3d6014" : "#aaa", fontSize: 12, fontWeight: 600, cursor: bulkText.trim() ? "pointer" : "not-allowed", fontFamily: "inherit" }}>
+                  🔍 나누기 미리보기
+                </button>
+                {bulkResult && (
+                  <button onClick={applyBulk}
+                    style={{ padding: "8px 16px", border: "none", borderRadius: 8, background: "#5a8c1f", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                    ✔ 이대로 초안에 넣기
+                  </button>
+                )}
+              </div>
+              {bulkResult && (
+                <div style={{ border: "1px solid #e0e8d4", borderRadius: 8, padding: "10px 12px", background: "#fbfcf8" }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, color: "#3d6014", marginBottom: 6 }}>나누기 결과</div>
+                  {bulkResult.domainsAtLevel.map(dName => {
+                    const n = (bulkResult.byDomain[dName] || []).length;
+                    return (
+                      <div key={dName} style={{ fontSize: 11, color: n > 0 ? "#333" : "#bbb", lineHeight: 1.8 }}>
+                        {n > 0 ? "✔" : "—"} {dName}: {n}개
+                      </div>
+                    );
+                  })}
+                  {bulkResult.unmatched.length > 0 && (
+                    <div style={{ marginTop: 8, fontSize: 10.5, color: "#a86400", background: "#fff8e8", border: "1px solid #f0dcb0", borderRadius: 6, padding: "7px 9px", lineHeight: 1.6 }}>
+                      ⚠ 어느 영역에도 못 넣은 줄 {bulkResult.unmatched.length}개 — 영역 제목이 이 레벨의 이름과 정확히 같은지 확인해 주세요.
+                      <div style={{ marginTop: 4, maxHeight: 90, overflow: "auto", color: "#7a5a00" }}>
+                        {bulkResult.unmatched.slice(0, 8).map((l, i) => <div key={i}>· {l}</div>)}
+                        {bulkResult.unmatched.length > 8 && <div>… 외 {bulkResult.unmatched.length - 8}줄</div>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {mode === "domain" && (<>
+          <label htmlFor="esdm-editor-domain" style={{ fontSize: 11, fontWeight: 600, color: "#555", display: "block", marginBottom: 5 }}>영역 선택</label>
+          <select id="esdm-editor-domain" value={domIdx} onChange={e => setDomIdx(Number(e.target.value))}
+            style={{ width: "100%", padding: "9px 12px", border: "1px solid #cfe0b8", borderRadius: 8, fontSize: 13, fontFamily: "inherit", marginBottom: 14, background: "#fff" }}>
+            {ESDM_DOMAINS.map((d, i) => (
+              <option key={d.d} value={i}>{d.d}{countOf(d.d) > 0 ? ` — ${countOf(d.d)}개` : ""}</option>
+            ))}
+          </select>
+          {dom.s.map(sub => (
+            <div key={sub.n} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: "#3d6014", marginBottom: 5 }}>
+                {sub.n}
+                <span style={{ fontSize: 10, fontWeight: 500, color: "#888", marginLeft: 6 }}>
+                  {toArr(draft[dom.d] && draft[dom.d][sub.n]).length}개
+                </span>
+              </div>
+              <textarea
+                value={textOf(dom.d, sub.n)}
+                onChange={e => setText(dom.d, sub.n, e.target.value)}
+                placeholder={"한 줄에 한 항목씩 입력하세요"}
+                rows={6}
+                style={{ width: "100%", padding: "9px 11px", border: "1px solid #d4e5ba", borderRadius: 8, fontSize: 12, fontFamily: "inherit", lineHeight: 1.7, resize: "vertical", boxSizing: "border-box" }}
+              />
+            </div>
+          ))}
+          </>)}
+        </div>
+        <div style={{ padding: "12px 22px", borderTop: "1px solid #e8f0dc", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 10, color: "#999" }}>저장 전까지는 반영되지 않습니다 · 다른 영역으로 이동해도 작성 중인 내용은 유지됩니다</span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onClose} style={{ padding: "8px 16px", border: "1px solid #ccc", borderRadius: 8, background: "#fff", color: "#666", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+            <button onClick={handleSave} disabled={saving}
+              style={{ padding: "8px 18px", border: "none", borderRadius: 8, background: saving ? "#aaa" : "#5a8c1f", color: "#fff", fontSize: 12, fontWeight: 600, cursor: saving ? "wait" : "pointer", fontFamily: "inherit" }}>
+              {saving ? "저장 중..." : "💾 저장"}
             </button>
           </div>
         </div>
@@ -16517,11 +16850,11 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                 ["감각 처리 어려움", "adapt"]
               ];
 
-              const MARKER_RE = /\n*<!--SELECTED:([^>]*)-->\s*$/;
+              const MARKER_RE = /\n{0,2}<!--SELECTED:([^>]*)-->\s*$/;
               const currentValue = info.finalReferralReason || "";
               const markerMatch = currentValue.match(MARKER_RE);
               const selected = markerMatch ? markerMatch[1].split("|").filter(Boolean) : [];
-              const visibleText = currentValue.replace(MARKER_RE, "").trim();
+              const visibleText = currentValue.replace(MARKER_RE, "");  // ★ [59-9] 끝 공백·줄바꿈 보존 — 입력 즉시 잘리던 버그
               const selectedSet = new Set(selected);
 
               const toggle = (label) => {
@@ -16654,11 +16987,11 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
             {(() => {
               const END_CHIPS = ["IEP 목표 달성", "일반화 안정화", "다음 단계 이행", "보호자 의사", "가족 사정", "치료 기간 만료"];
 
-              const MARKER_RE_END = /\n*<!--SELECTED:([^>]*)-->\s*$/;
+              const MARKER_RE_END = /\n{0,2}<!--SELECTED:([^>]*)-->\s*$/;
               const currentValueEnd = info.finalEndReason || "";
               const markerMatchEnd = currentValueEnd.match(MARKER_RE_END);
               const selectedEnd = markerMatchEnd ? markerMatchEnd[1].split("|").filter(Boolean) : [];
-              const visibleTextEnd = currentValueEnd.replace(MARKER_RE_END, "").trim();
+              const visibleTextEnd = currentValueEnd.replace(MARKER_RE_END, "");  // ★ [59-9] 끝 공백·줄바꿈 보존 — 입력 즉시 잘리던 버그
               const selectedSetEnd = new Set(selectedEnd);
 
               const toggleEnd = (label) => {
@@ -16867,11 +17200,11 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
               "특이 문제행동 없음"
             ];
 
-            const MARKER_RE = /\n*<!--SELECTED:([^>]*)-->\s*$/;
+            const MARKER_RE = /\n{0,2}<!--SELECTED:([^>]*)-->\s*$/;
             const currentValue = info.finalBehaviorChange || "";
             const markerMatch = currentValue.match(MARKER_RE);
             const selected = markerMatch ? markerMatch[1].split("|").filter(Boolean) : [];
-            const visibleText = currentValue.replace(MARKER_RE, "").trim();
+            const visibleText = currentValue.replace(MARKER_RE, "");  // ★ [59-9] 끝 공백·줄바꿈 보존 — 입력 즉시 잘리던 버그
             const selectedSet = new Set(selected);
 
             const toggle = (label) => {
@@ -16987,11 +17320,11 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
               "시각적 일정표·사진 단서 활용"
             ];
 
-            const MARKER_RE = /\n*<!--SELECTED:([^>]*)-->\s*$/;
+            const MARKER_RE = /\n{0,2}<!--SELECTED:([^>]*)-->\s*$/;
             const currentValue = info.finalHomeMaintenance || "";
             const markerMatch = currentValue.match(MARKER_RE);
             const selected = markerMatch ? markerMatch[1].split("|").filter(Boolean) : [];
-            const visibleText = currentValue.replace(MARKER_RE, "").trim();
+            const visibleText = currentValue.replace(MARKER_RE, "");  // ★ [59-9] 끝 공백·줄바꿈 보존 — 입력 즉시 잘리던 버그
             const selectedSet = new Set(selected);
 
             const toggle = (label) => {
@@ -17106,11 +17439,11 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
               "촉구 단계적 소거 효과"
             ];
 
-            const MARKER_RE = /\n*<!--SELECTED:([^>]*)-->\s*$/;
+            const MARKER_RE = /\n{0,2}<!--SELECTED:([^>]*)-->\s*$/;
             const currentValue = info.finalHandover || "";
             const markerMatch = currentValue.match(MARKER_RE);
             const selected = markerMatch ? markerMatch[1].split("|").filter(Boolean) : [];
-            const visibleText = currentValue.replace(MARKER_RE, "").trim();
+            const visibleText = currentValue.replace(MARKER_RE, "");  // ★ [59-9] 끝 공백·줄바꿈 보존 — 입력 즉시 잘리던 버그
             const selectedSet = new Set(selected);
 
             const toggle = (label) => {
@@ -17221,11 +17554,11 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
               "필요 시 BCBA 컨설팅 재개"
             ];
 
-            const MARKER_RE = /\n*<!--SELECTED:([^>]*)-->\s*$/;
+            const MARKER_RE = /\n{0,2}<!--SELECTED:([^>]*)-->\s*$/;
             const currentValue = info.finalRecommendations || "";
             const markerMatch = currentValue.match(MARKER_RE);
             const selected = markerMatch ? markerMatch[1].split("|").filter(Boolean) : [];
-            const visibleText = currentValue.replace(MARKER_RE, "").trim();
+            const visibleText = currentValue.replace(MARKER_RE, "");  // ★ [59-9] 끝 공백·줄바꿈 보존 — 입력 즉시 잘리던 버그
             const selectedSet = new Set(selected);
 
             const toggle = (label) => {
@@ -18639,14 +18972,19 @@ function ReportGeneratorSection({
               //    기존엔 ✨를 누르면 목표 개수·영역 평균 같은 계산 결과가 사라지고
               //    고정 문구만 남아서, 숫자를 지키려면 칩을 아예 못 쓰는 상태였다.
               //    원본 데이터 문단을 AUTOBASE 마커에 보관해 두고, 칩 문단은 그 뒤에 잇는다.
-              const MARKER_RE = /\n*<!--SELECTED:([^>]*)-->\s*$/;
-              const AUTOBASE_RE = /\n*<!--AUTOBASE:([\s\S]*?)-->\s*/;
+              // ★ [59-9] 칩이 있는 섹션(다음 목표 등)은 입력칸이 '보이는 글'과 '숨은 마커'를 합쳐 저장한다.
+              //    그 합친 값을 다시 풀 때 .trim()과 탐욕적인 \n*가 글 끝의 공백·줄바꿈을 삼켰다.
+              //    입력칸은 글자 하나 칠 때마다 저장→풀기를 거치므로, 스페이스나 엔터를 치는 순간
+              //    "끝 공백"으로 잘려 나가 다음 글자가 그대로 붙었다 (띄어쓰기·줄바꿈이 안 되던 원인).
+              //    packStored가 항상 정확히 \n\n을 붙이므로 풀 때도 딱 그만큼만 뗀다.
+              const MARKER_RE = /\n{0,2}<!--SELECTED:([^>]*)-->\s*$/;
+              const AUTOBASE_RE = /\n{0,2}<!--AUTOBASE:([\s\S]*?)-->/;
               const rawValue = reportSections[key] || "";
               const markerMatch = rawValue.match(MARKER_RE);
               const selected = markerMatch ? markerMatch[1].split("|").filter(Boolean) : [];
               const autoMatch = rawValue.match(AUTOBASE_RE);
               const autoBase = autoMatch ? autoMatch[1] : "";
-              const visibleText = rawValue.replace(MARKER_RE, "").replace(AUTOBASE_RE, "").trim();
+              const visibleText = rawValue.replace(MARKER_RE, "").replace(AUTOBASE_RE, "");
               const selectedSet = new Set(selected);
 
               const packStored = (text, arr, base) =>
