@@ -1053,8 +1053,16 @@ function buildSummary(stosForReport, info) {
   //    종결값은 71%로 같은데 시작값만 65% / 62%로 갈렸다.
   //    영역마다 목표 수가 달라(학습능력 21개, 자기관리 5개) 가중치가 다른 게 원인.
   //    개수(total/done)는 아래에서 STO 단위로 따로 센다.
+  // ★ [60-3] 측정 3회기 미만 영역을 평균에서 뺀다.
+  //    59-10에서 막대는 "3회기가 안 쌓인 영역은 아직 평가 값이 아니다"라고 회색으로 뺐는데,
+  //    표지 요약은 그 영역의 0%를 그대로 평균에 넣고 있었다. 같은 페이지 안에서 어긋난다.
+  //      · 보겸 — 막대는 청자 73 / 택트 57 / 학습능력 33 + 회색 3개(시각변별·신체발달·자기관리)
+  //        표지는 (73+57+33+0+0+0)/6 = 27%. 회색 3개를 빼면 54%다.
+  //    전부 3회기 미만인 아동(치료 초기)은 뺄 게 없으므로 원래 집합으로 되돌린다.
   const _cmp = buildStartEndCompare(stosForReport, []);
-  const _q = _cmp.quotableRows;
+  const _qAll = _cmp.quotableRows;
+  const _qEdge = _qAll.filter(r => (r.maxSessions || 0) >= COMPARE_EDGE_N);
+  const _q = _qEdge.length > 0 ? _qEdge : _qAll;
   const lastAvg = _q.length > 0 ? Math.round(_q.reduce((a, r) => a + r.lastAvg, 0) / _q.length) : 0;
   const firstAvg = _q.length > 0 ? Math.round(_q.reduce((a, r) => a + r.firstAvg, 0) / _q.length) : 0;
   const diff = lastAvg - firstAvg;
@@ -1622,9 +1630,15 @@ function buildInterimStrengths(domAvgs, stos, info) {
       title: "여러 영역의 향상",
       desc: `${withGrowth.length}개 목표에서 초기 대비 향상이 보여, ${fn}의 학습 진행이 데이터로 확인됩니다.`
     });
-  } else if (withGrowth.length >= 1) {
-    // ★ [48-1] 시계열 재구성 제거 — buildGoalSeries가 이미 목표 단위로 묶어 준다.
-    const ex = withGrowth[0];
+  } else if (withGrowth.length >= 2) {
+    // ★ [60-4] 향상 목표가 1개뿐일 때 이 항목을 빼면 바로 아래 '주요 변화'와 겹치지 않는다.
+    //    buildInterimHighlights도 withGrowth[0]을 뽑기 때문에, 향상 목표가 하나면
+    //    같은 목표·같은 수치가 같은 페이지에 두 번 나갔다.
+    //      보겸 — "▸ 구체적 향상 사례: '단단어 자극 택트'에서 0%에서 70%로 향상돼…"
+    //             "▸ '단단어 자극 택트'의 향상: 초기 0%에서 최근 70%까지 올라가…"
+    //    (usedNames는 함수 안에서만 돌아 두 생성기 사이를 못 막는다.)
+    //    2개 이상일 때는 여기서 2번째를 써서 '주요 변화'가 쓰는 1번째와 갈라 놓는다.
+    const ex = withGrowth[1];
     strengths.push({
       title: "구체적 향상 사례",
       desc: `'${ex.name}'에서 ${ex.first}%에서 ${ex.last}%로 향상돼, ${fn}의 학습 진행이 데이터로 확인됩니다.`
@@ -1696,6 +1710,11 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
     });
   }
 
+  // ★ [60-4] STO를 goalName으로 매핑한 뒤 중복 제거 없이 잘라서, 한 목표의 두 단계가
+  //    모두 마스터되면 같은 이름이 두 번 나갔다.
+  //      보겸 — "'글자 이름 식별', '글자 이름 식별' 등 여러 목표에서 준거를 달성해…"
+  //    (L2 라-바, L3 아-카가 둘 다 완료된 경우) 인쇄되는 이름 기준으로 걸러낸다.
+  const _mrSeen = new Set();
   const masteredRecent = activeStos
     .filter(s => s.status === "완료" && s.points && s.points.length > 0)
     .map(s => {
@@ -1703,6 +1722,12 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
       return { name: s.goalName || s.name, finalRate: lastPt?.value || 0, domain: s.domain };
     })
     .sort((a, b) => b.finalRate - a.finalRate)
+    .filter(m => {
+      const k = shortTaskName(m.name);
+      if (!k || _mrSeen.has(k)) return false;
+      _mrSeen.add(k);
+      return true;
+    })
     .slice(0, 2);
 
   masteredRecent.forEach(m => usedNames.add(shortTaskName(m.name)));
@@ -2959,7 +2984,10 @@ function buildStartEndCompare(stos, goals) {
   }).filter(r => r.total > 0 || r.quotableGoals > 0);
 
   const quotableRows = rows.filter(r => r.quotable);
-  const changes = quotableRows.map(r => r.change);
+  // ★ [60-3] 평균 변화도 표지 요약과 같은 기준 — 측정 3회기 미만 영역은 뺀다.
+  //    (시작 단계 영역은 first=last라 change 0으로 들어와 평균을 0 쪽으로 끌어내린다)
+  const _edgeRows = quotableRows.filter(r => (r.maxSessions || 0) >= COMPARE_EDGE_N);
+  const changes = (_edgeRows.length > 0 ? _edgeRows : quotableRows).map(r => r.change);
   const totalTasks = rows.reduce((s, r) => s + r.total, 0);
   const totalMastered = rows.reduce((s, r) => s + r.mastered, 0);
   const totalPaused = rows.reduce((s, r) => s + r.paused, 0);
@@ -6569,6 +6597,14 @@ export default function App() {
     //    (인쇄 문구에 "비교의 종결 값과 같은 기준"이라고 적어놨는데 사실이 아니었다.)
     //    이제 buildStartEndCompare의 lastAvg를 그대로 쓴다 — 두 숫자가 구조적으로 같아진다.
     const cmp = buildStartEndCompare(stosForReport, includedGoals);
+    // ★ [60-2] quotableRows만 넘기면 %로 환산 못 하는 영역이 막대에서 통째로 사라진다.
+    //    회색 '시작 단계'로도 안 나오고 흔적이 없어서, 같은 보고서의 다른 페이지와 어긋났다.
+    //      · 준우 맨드 — 완료 현황 "2/2 마스터 100%" / 균형 분석에는 없음
+    //      · 보겸 맨드 — 종합 현황 "청자·맨드·택트 6개 중 1개" / 균형 분석에는 없음
+    //        (인트라버벌 맨드가 L2=정반응률·L3=O·X 혼재라 quotable=false)
+    //      · 준우 학습 — 3개 STO 전부 다음 기간 시작 예정
+    //    이제 rows 전체를 넘기고, %가 없는 영역은 그 사유(noRateReason)를 회색으로 적는다.
+    //    각주가 약속한 '측정 3회기 미만은 회색'과 같은 자리에서 처리된다.
     return cmp.quotableRows.map(r => ({
       domain: r.domain,
       avg: r.lastAvg,
@@ -6581,6 +6617,28 @@ export default function App() {
 
   const baselineAvgs = currentAvgs;
   const domainAvgs = currentAvgs;
+
+  // ★ [60-2] 막대 전용 행 — currentAvgs(quotable만)와 달리 %가 없는 영역도 포함한다.
+  //    currentAvgs는 종합 소견·강점·다음 목표가 avg로 최대/최소를 뽑아 쓰므로
+  //    null 섞인 행을 넣으면 그쪽이 깨진다. 그래서 막대에만 별도로 넘긴다.
+  const balanceBarRows = useMemo(() => {
+    if (!needsReportCalc) return [];
+    const cmp = buildStartEndCompare(stosForReport, includedGoals);
+    return cmp.rows.map(r => ({
+      domain: r.domain,
+      avg: r.quotable ? r.lastAvg : null,   // null = %로 말할 수 없는 영역
+      quotable: r.quotable,
+      // 내부 사유 문자열("O·X·측정방식 혼재 2개 — % 환산 제외")은 보호자 문서에 그대로 쓰기엔
+      // 용어가 무겁다. 뜻은 같게, 표기만 카드 각주와 같은 말로 바꾼다.
+      noRateReason: r.quotable ? null
+        : (r.total > 0 && r.paused === r.total) ? "전 과제 중단"
+        : (r.excludedGoals > 0) ? "O·X 기록 · 달성률 산출 제외"
+        : "본 보고 기간 기록 없음",
+      total: r.total,
+      sessions: r.maxSessions,
+      short: shortDomain(r.domain)
+    }));
+  }, [stosForReport, includedGoals, needsReportCalc]);
 
   useEffect(() => {
     if (!activeChildId) { setArchiveList([]); return; }
@@ -8813,9 +8871,9 @@ export default function App() {
                               padding: "5px 12px", fontSize: 10.5,
                               border: `1px solid ${PKD}`,
                               borderRadius: 6,
-                              background: selectedSet.size === 0 ? "#f0f0f0" : PKD,
-                              color: selectedSet.size === 0 ? "#aaa" : "#fff",
-                              cursor: selectedSet.size === 0 ? "not-allowed" : "pointer",
+                              background: selectedSet.size === 0 ? `${PKD}22` : PKD,
+                              color: selectedSet.size === 0 ? "#8a8a8a" : "#fff",
+                              cursor: selectedSet.size === 0 ? "default" : "pointer",
                               fontFamily: "inherit", fontWeight: 600
                             }}>
                             ✨ 자동 생성
@@ -11399,14 +11457,22 @@ function RadarChart({ data }) {
 //       기준은 COMPARE_EDGE_N(3회기) 미만. 최근 3회기 평균이라는 이 그래프의 정의상
 //       3회기가 안 쌓인 영역은 아직 평가 값이 아니다.
 //    ③ 정렬: 규칙 없던 순서를 높은 순으로. 시작 단계는 맨 아래.
+// ★ [60-2] ④ %로 환산할 수 없는 영역(전 목표 O·X / 측정방식 혼재 / 전 과제 중단 / 기록 없음)도
+//    회색 행으로 남긴다. 기존엔 이런 영역이 배열에 아예 안 들어와 막대에서 사라졌다.
+//    '시작 단계'와 같은 회색 그룹으로 묶어 맨 아래에 이름순으로 둔다.
 function sortBarRows(data) {
-  const rows = (data || []).map(d => ({
-    ...d,
-    starting: (d.sessions != null) && d.sessions < COMPARE_EDGE_N
-  }));
+  const rows = (data || []).map(d => {
+    const noRate = (d.quotable === false) || d.avg == null;
+    return {
+      ...d,
+      noRate,
+      starting: !noRate && (d.sessions != null) && d.sessions < COMPARE_EDGE_N
+    };
+  });
+  const muted = (r) => r.noRate || r.starting;
   return rows.sort((a, b) => {
-    if (a.starting !== b.starting) return a.starting ? 1 : -1;
-    if (a.starting) return (a.domain || "").localeCompare(b.domain || "", "ko");
+    if (muted(a) !== muted(b)) return muted(a) ? 1 : -1;
+    if (muted(a)) return (a.domain || "").localeCompare(b.domain || "", "ko");
     return (b.avg || 0) - (a.avg || 0);
   });
 }
@@ -11422,15 +11488,20 @@ function BarChart({ data }) {
         const y = 10 + i * (rowH + gap);
         const label = (d.total != null ? `${d.domain} (${d.total}개)` : d.domain);
         const shown = label.length > 30 ? label.substring(0, 29) + "…" : label;
-        if (d.starting) {
-          const w = Math.max(4, (Math.min(d.avg || 0, 100) / 100) * barAreaW);
+        if (d.noRate || d.starting) {
+          // ★ [60-2] 회색 행 두 종류 — 아직 값이 아닌 것(시작 단계)과 %로 환산 못 하는 것(O·X 등).
+          const w = d.noRate ? 4 : Math.max(4, (Math.min(d.avg || 0, 100) / 100) * barAreaW);
+          const note = d.noRate
+            ? (d.noRateReason || "정반응률 기록 없음")
+            : `시작 단계 · ${d.sessions}회기`;
+          const noteShown = note.length > 26 ? note.substring(0, 25) + "…" : note;
           return (
             <g key={i}>
               <text x={labelW - 12} y={y + rowH / 2 + 4} textAnchor="end" fontSize="12" fill="#888" fontWeight="500">{shown}</text>
               <rect x={labelW} y={y + 4} width={barAreaW} height={rowH - 8} fill="#F5F5F5" rx="4" />
               <rect x={labelW} y={y + 4} width={w} height={rowH - 8} fill={GRAY} rx="4" opacity=".7" />
               <text x={labelW + w + 8} y={y + rowH / 2 + 4} fontSize="11.5" fill="#888" fontWeight="500">
-                시작 단계 · {d.sessions}회기
+                {noteShown}
               </text>
             </g>
           );
@@ -12488,15 +12559,15 @@ cleanedHTML + '\n' +
             })()}
 
             {/* PDF-10: 영역별 균형 분석 (= 레이더 + 막대) (PDF 5페이지) */}
-            {domainAvgs.length > 0 && (
+            {balanceBarRows.length > 0 && (
               <PrintSection num={nextSn()} title="영역별 균형 분석">
                 <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                  ※ 영역별 최근 {COMPARE_EDGE_N}회기 평균 달성률 · 괄호는 목표 수 · 회색은 측정 {COMPARE_EDGE_N}회기 미만(시작 단계)<br />
+                  ※ 영역별 최근 {COMPARE_EDGE_N}회기 평균 달성률 · 괄호는 단기 목표(STO) 수 · 회색은 달성률로 볼 수 없는 영역<br />
                   ※ 초록 80% 이상 숙달 · 파랑 60~79% 진전 · 주황 60% 미만 집중 지도
                 </div>
                 <div style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                   <div style={{ fontSize: 11, color: "#666", marginBottom: 6, textAlign: "center", fontWeight: 500 }}>평균 달성률(%)</div>
-                  <BarChart data={domainAvgs.map(d => ({ ...d, domain: cleanDomainKey(d.domain) }))} />
+                  <BarChart data={balanceBarRows.map(d => ({ ...d, domain: cleanDomainKey(d.domain) }))} />
                 </div>
               </PrintSection>
             )}
@@ -15667,23 +15738,28 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   //      예2) 화자 = 단단어 택트 L8(10→80) + L9(60→50) + 동물소리 L1(0→100) → "+54%p"
   //           실제 영역 최종은 75%.
   //    이제 목표 단위 첫 값 → 마지막 값으로 계산해 차트와 같은 기준을 쓴다.
-  const domGrowthGoals = buildGoalSeries(active);
-  const domGrowth = (() => {
-    const bucket = {};
-    domGrowthGoals.forEach(g => {
-      if (!g.quotable || g.series.length < 2) return;
-      const key = cleanDomainKey(g.domain || "");
-      if (!key) return;
-      if (!bucket[key]) bucket[key] = { first: [], last: [] };
-      bucket[key].first.push(g.first);
-      bucket[key].last.push(g.last);
-    });
-    const avg = (arr) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
-    return Object.entries(bucket).map(([label, v]) => {
-      const f = avg(v.first), l = avg(v.last);
-      return { domainLabel: label, first: f, last: l, diff: l - f, masteredFromStart: f >= 80 && l >= 80, count: v.first.length };
-    }).sort((a, b) => b.diff - a.diff);
-  })();
+  // ★ [60-1] 치료사 종합 소견만 아직 다른 계산을 쓰고 있었다.
+  //    여긴 목표 시계열의 '양 끝 1점'(g.first / g.last)이고,
+  //    영역별 균형 막대·종결 종합 평가는 buildStartEndCompare의 '앞뒤 3점 평균'이다.
+  //      · 준우 언어행동 — 소견 "+100%p" / 막대 87% / 종결 "0%에서 87%로"
+  //        (시계열 0,0,0,20,80,100,20,20,40,60,100,100 → 양끝 0→100 vs 3점평균 0→87)
+  //      · 준우 학습능력 — 소견 "+25%p" / 종결 "+10%p"
+  //      · 보겸 택트   — 소견 "+70%p" / 막대 57%
+  //    57-4에서 비교 섹션·표지·막대를 한 계산으로 합쳤는데 이 경로만 남아 있었다.
+  //    이제 같은 행을 쓴다 — 소견의 %p와 막대의 %가 구조적으로 어긋날 수 없다.
+  const domGrowth = buildStartEndCompare(stos || [], []).quotableRows
+    .map(r => ({
+      domainLabel: cleanDomainKey(r.domain || ""),
+      first: r.firstAvg,
+      last: r.lastAvg,
+      diff: r.change,
+      masteredFromStart: r.firstAvg >= 80 && r.lastAvg >= 80,
+      count: r.quotableGoals,
+      sessions: r.maxSessions
+    }))
+    // 기존 조건(목표 시계열 2점 이상) 유지 — 1회기 영역은 first=last라 "+0%p"로 잡힌다.
+    .filter(d => d.domainLabel && d.sessions >= 2)
+    .sort((a, b) => b.diff - a.diff);
   const recentMastery = done.filter(s => s.masteryDate).sort((a,b) => (b.masteryDate||"").localeCompare(a.masteryDate||"")).slice(0, 5);
 
   const best = domAvgs.length > 0 ? domAvgs.reduce((a,b) => a.avg > b.avg ? a : b, { domain: "—", avg: 0 }) : { domain: "—", avg: 0 };
@@ -16734,12 +16810,12 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
       </div>
 
       {/* 영역별 평균 비교 */}
-      {!awaitingNewData && currentAvgs.length > 0 && (
+      {!awaitingNewData && balanceBarRows.length > 0 && (
         <div style={CS}>
           <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 12, color: PKD }}>영역별 수행 현황</h3>
           <div>
             <div style={{ fontSize: 11, color: "#888", marginBottom: 4, textAlign: "center" }}>영역별 현재 수행률 (%)</div>
-            <BarChart data={currentAvgs.map(d => ({ ...d, domain: cleanDomainKey(d.domain) }))} />
+            <BarChart data={balanceBarRows.map(d => ({ ...d, domain: cleanDomainKey(d.domain) }))} />
           </div>
           <div style={{ marginTop: 10, padding: "8px 12px", background: PKL, borderRadius: 8, fontSize: 11, color: PKD, lineHeight: 1.6 }}>
             💡 이 그래프는 [③ 데일리 데이터]에서 기록한 <b>정반응률의 최근 수치</b>를 영역별로 평균한 것입니다. 데일리 기록이 아직 없는 목표는 평균에 포함되지 않습니다.
@@ -16976,9 +17052,9 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                         padding: "6px 14px", fontSize: 11,
                         border: "1px solid #5a8c1f",
                         borderRadius: 6,
-                        background: selectedSet.size === 0 ? "#f0f0f0" : "#5a8c1f",
-                        color: selectedSet.size === 0 ? "#aaa" : "#fff",
-                        cursor: selectedSet.size === 0 ? "not-allowed" : "pointer",
+                        background: selectedSet.size === 0 ? "#5a8c1f22" : "#5a8c1f",
+                        color: selectedSet.size === 0 ? "#8a8a8a" : "#fff",
+                        cursor: selectedSet.size === 0 ? "default" : "pointer",
                         fontFamily: "inherit", fontWeight: 600
                       }}>
                       ✨ 자동 생성
@@ -17075,9 +17151,9 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                         padding: "6px 14px", fontSize: 11,
                         border: "1px solid #5a8c1f",
                         borderRadius: 6,
-                        background: selectedSetEnd.size === 0 ? "#f0f0f0" : "#5a8c1f",
-                        color: selectedSetEnd.size === 0 ? "#aaa" : "#fff",
-                        cursor: selectedSetEnd.size === 0 ? "not-allowed" : "pointer",
+                        background: selectedSetEnd.size === 0 ? "#5a8c1f22" : "#5a8c1f",
+                        color: selectedSetEnd.size === 0 ? "#8a8a8a" : "#fff",
+                        cursor: selectedSetEnd.size === 0 ? "default" : "pointer",
                         fontFamily: "inherit", fontWeight: 600
                       }}>
                       ✨ 자동 생성
@@ -17290,9 +17366,9 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                       padding: "6px 14px", fontSize: 11,
                       border: "1px solid #5a8c1f",
                       borderRadius: 6,
-                      background: selectedSet.size === 0 ? "#f0f0f0" : "#5a8c1f",
-                      color: selectedSet.size === 0 ? "#aaa" : "#fff",
-                      cursor: selectedSet.size === 0 ? "not-allowed" : "pointer",
+                      background: selectedSet.size === 0 ? "#5a8c1f22" : "#5a8c1f",
+                      color: selectedSet.size === 0 ? "#8a8a8a" : "#fff",
+                      cursor: selectedSet.size === 0 ? "default" : "pointer",
                       fontFamily: "inherit", fontWeight: 600
                     }}>
                     ✨ 자동 생성
@@ -17408,9 +17484,9 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                       padding: "6px 14px", fontSize: 11,
                       border: "1px solid #5a8c1f",
                       borderRadius: 6,
-                      background: selectedSet.size === 0 ? "#f0f0f0" : "#5a8c1f",
-                      color: selectedSet.size === 0 ? "#aaa" : "#fff",
-                      cursor: selectedSet.size === 0 ? "not-allowed" : "pointer",
+                      background: selectedSet.size === 0 ? "#5a8c1f22" : "#5a8c1f",
+                      color: selectedSet.size === 0 ? "#8a8a8a" : "#fff",
+                      cursor: selectedSet.size === 0 ? "default" : "pointer",
                       fontFamily: "inherit", fontWeight: 600
                     }}>
                     ✨ 자동 생성
@@ -17527,9 +17603,9 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                       padding: "6px 14px", fontSize: 11,
                       border: "1px solid #5a8c1f",
                       borderRadius: 6,
-                      background: selectedSet.size === 0 ? "#f0f0f0" : "#5a8c1f",
-                      color: selectedSet.size === 0 ? "#aaa" : "#fff",
-                      cursor: selectedSet.size === 0 ? "not-allowed" : "pointer",
+                      background: selectedSet.size === 0 ? "#5a8c1f22" : "#5a8c1f",
+                      color: selectedSet.size === 0 ? "#8a8a8a" : "#fff",
+                      cursor: selectedSet.size === 0 ? "default" : "pointer",
                       fontFamily: "inherit", fontWeight: 600
                     }}>
                     ✨ 자동 생성
@@ -17673,9 +17749,9 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
                       padding: "6px 14px", fontSize: 11,
                       border: "1px solid #5a8c1f",
                       borderRadius: 6,
-                      background: selectedSet.size === 0 ? "#f0f0f0" : "#5a8c1f",
-                      color: selectedSet.size === 0 ? "#aaa" : "#fff",
-                      cursor: selectedSet.size === 0 ? "not-allowed" : "pointer",
+                      background: selectedSet.size === 0 ? "#5a8c1f22" : "#5a8c1f",
+                      color: selectedSet.size === 0 ? "#8a8a8a" : "#fff",
+                      cursor: selectedSet.size === 0 ? "default" : "pointer",
                       fontFamily: "inherit", fontWeight: 600
                     }}>
                     ✨ 자동 생성
@@ -19086,9 +19162,9 @@ function ReportGeneratorSection({
                         padding: "6px 14px", fontSize: 11,
                         border: `1px solid ${PKD}`,
                         borderRadius: 6,
-                        background: selectedSet.size === 0 ? "#f0f0f0" : PKD,
-                        color: selectedSet.size === 0 ? "#aaa" : "#fff",
-                        cursor: selectedSet.size === 0 ? "not-allowed" : "pointer",
+                        background: selectedSet.size === 0 ? `${PKD}22` : PKD,
+                        color: selectedSet.size === 0 ? "#8a8a8a" : "#fff",
+                        cursor: selectedSet.size === 0 ? "default" : "pointer",
                         fontFamily: "inherit", fontWeight: 600
                       }}>
                       ✨ 자동 생성
@@ -20124,31 +20200,61 @@ function DomainCompletionSection({ goals }) {
   if (!goals || goals.length === 0) return null;
 
   const byDomain = {};
+  // ★ [60-6] 착수 전 과제를 '진행중'과 구분한다.
+  //    listGroup만 보고 나누면(2=마스터 / paused=중단 / 나머지=진행중) 지도를 시작도
+  //    안 한 과제가 주황 '진행중'으로 찍힌다. 준우 종결 — 곱셈·나눗셈 3개가
+  //    "종결 시점에 3개 진행중"으로 읽히는데 실제로는 착수 전이다.
+  //    (중간보고서 세부 목표 카드는 '진행 예정'으로 이미 구분하고 있었다.)
+  //    판정은 16294와 같이 목표(goal) 단위 — task 단위로 보면 진행 중인 목표에
+  //    새 단계(L3)를 막 추가한 경우까지 '착수 전'으로 잡힌다.
+  //    분모(total)는 그대로 둔다. 표지 요약의 'N개 STO 중 M개'와 어긋나지 않게.
+  const goalHasRecord = (g) => (
+    (g.tasks || []).some(t => Object.keys(t.daily || {}).length > 0)
+    || Object.keys(g.daily || {}).length > 0
+  );
   goals.forEach(g => {
     if (!g.includeInIep) return;
     // ★ [57-8 / 55-3 마무리] 여기만 원본 영역으로 묶고 라벨에서 로마숫자만 떼고 있었다.
     //    그래서 '시작 vs 종결 비교'·종합 평가는 '택트'라고 쓰는데
     //    이 표만 '화자'라고 써서 같은 보고서 안에서 영역 이름이 갈렸다.
     const dom = reportDomainOf(g) || "(영역 없음)";
-    if (!byDomain[dom]) byDomain[dom] = { total: 0, mastered: 0, paused: 0, ongoing: 0 };
+    if (!byDomain[dom]) byDomain[dom] = { total: 0, mastered: 0, paused: 0, ongoing: 0, upcoming: 0, masteredList: [] };
+    const started = goalHasRecord(g);
+    const doneTasks = [];
     (g.tasks || []).forEach(t => {
       const lg = t.listGroup || "1";
       byDomain[dom].total++;
-      if (lg === "2") byDomain[dom].mastered++;
+      if (lg === "2") { byDomain[dom].mastered++; doneTasks.push(t.name); }
       else if (lg === "paused") byDomain[dom].paused++;
+      else if (!started) byDomain[dom].upcoming++;
       else byDomain[dom].ongoing++;
     });
+    // ★ [60-7] 종결모드는 '영역별 세부 학습 목표'를 이 섹션으로 통째 대체한다.
+    //    그래서 종결보고서 전체에 목표 이름이 한 번도 안 나왔다 — 유치원·학교·후속
+    //    치료 기관에 넘길 때 "무엇을 습득했는지"를 읽을 수 없는 문서가 된다.
+    //    막대 아래에 마스터한 목표·단계만 이름으로 적는다(진행중·중단은 제외).
+    if (doneTasks.length > 0) {
+      byDomain[dom].masteredList.push({ goal: g.name || "(목표명 없음)", tasks: doneTasks.filter(Boolean) });
+    }
   });
 
   const domains = Object.entries(byDomain)
     .filter(([, d]) => d.total > 0)
-    .sort(([, a], [, b]) => (b.mastered / b.total) - (a.mastered / a.total));
+    // ★ [60-5] 비율만 보면 동률(맨드 2/2, 언어행동 2/2)의 순서가 목표 입력 순서에 좌우돼
+    //    같은 아동을 다시 인쇄할 때 줄 순서가 바뀐다. 과제 수 → 이름으로 동률을 깬다.
+    .sort(([na, a], [nb, b]) => {
+      const ra = a.mastered / a.total, rb = b.mastered / b.total;
+      if (rb !== ra) return rb - ra;
+      if (b.total !== a.total) return b.total - a.total;
+      return String(na).localeCompare(String(nb), "ko");
+    });
 
   if (domains.length === 0) return null;
 
   const totalAll = domains.reduce((s, [, d]) => s + d.total, 0);
   const masteredAll = domains.reduce((s, [, d]) => s + d.mastered, 0);
   const pausedAll = domains.reduce((s, [, d]) => s + d.paused, 0);
+  const upcomingAll = domains.reduce((s, [, d]) => s + (d.upcoming || 0), 0);
 
   return (
     <div>
@@ -20166,6 +20272,7 @@ function DomainCompletionSection({ goals }) {
         <div style={{ fontWeight: 600, marginBottom: 4 }}>
           📊 전체 종결 시점 — {domains.length}개 영역, 총 {totalAll}개 과제 중 <span style={{ color: "#3a6014", fontSize: 13 }}>{masteredAll}개 마스터</span>
           {pausedAll > 0 && <span style={{ color: "#a87108", marginLeft: 6 }}>· {pausedAll}개 중단</span>}
+          {upcomingAll > 0 && <span style={{ color: "#7A736A", marginLeft: 6 }}>· {upcomingAll}개 진행 예정</span>}
         </div>
         <div style={{ fontSize: 10, color: "#5a8c1f" }}>
           마스터율: {Math.round((masteredAll / totalAll) * 100)}%
@@ -20178,8 +20285,11 @@ function DomainCompletionSection({ goals }) {
           const masterPct = (d.mastered / d.total) * 100;
           const ongoingPct = (d.ongoing / d.total) * 100;
           const pausedPct = (d.paused / d.total) * 100;
+          const upcomingPct = ((d.upcoming || 0) / d.total) * 100;
           return (
-            <div key={dom}>
+            // ★ [60-5] 라벨·막대·세부 분류 세 줄이 한 덩어리다. 영역이 많은 아동에서
+            //    페이지 경계에 걸리면 막대만 다음 장으로 넘어가 숫자와 그림이 갈라진다.
+            <div key={dom} style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
                 <div style={{ fontSize: 11.5, fontWeight: 600, color: "#333" }}>{cleanDomainKey(dom)}</div>
                 <div style={{ fontSize: 11, color: "#5a8c1f", fontWeight: 600 }}>
@@ -20232,17 +20342,62 @@ function DomainCompletionSection({ goals }) {
                     {pausedPct >= 12 && `${d.paused}`}
                   </div>
                 )}
+                {(d.upcoming || 0) > 0 && (
+                  <div style={{
+                    width: `${upcomingPct}%`,
+                    background: "#CFCBC4",
+                    color: "#4a4640",
+                    fontSize: 10,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontWeight: 600
+                  }}>
+                    {upcomingPct >= 12 && `${d.upcoming}`}
+                  </div>
+                )}
               </div>
               {/* 세부 분류 (작은 글씨) */}
               <div style={{ fontSize: 9.5, color: "#888", marginTop: 3, display: "flex", gap: 10 }}>
                 {d.mastered > 0 && <span style={{ color: "#5a8c1f" }}>✓ 마스터 {d.mastered}</span>}
                 {d.ongoing > 0 && <span style={{ color: "#a87108" }}>● 진행중 {d.ongoing}</span>}
                 {d.paused > 0 && <span style={{ color: "#967040" }}>⏸ 중단 {d.paused}</span>}
+                {(d.upcoming || 0) > 0 && <span style={{ color: "#7A736A" }}>◦ 진행 예정 {d.upcoming}</span>}
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* ★ [60-7] 마스터한 과제 목록 — 인계용. 영역별 막대 순서를 그대로 따른다. */}
+      {masteredAll > 0 && (
+        <div style={{ marginTop: 16, pageBreakInside: "avoid", breakInside: "avoid" }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: "#3d6014", marginBottom: 6 }}>
+            ✓ 종결 시점까지 습득한 과제 ({masteredAll}개)
+          </div>
+          <div style={{ border: "1px solid #d4e5ba", borderRadius: 6, overflow: "hidden" }}>
+            {domains.filter(([, d]) => (d.masteredList || []).length > 0).map(([dom, d], i) => (
+              <div key={dom} style={{
+                display: "flex", gap: 10, padding: "7px 12px", fontSize: 11, lineHeight: 1.65,
+                background: i % 2 === 0 ? "#f9fbf5" : "#fff",
+                borderTop: i === 0 ? "none" : "1px solid #e8f0da",
+                pageBreakInside: "avoid", breakInside: "avoid"
+              }}>
+                <div style={{ minWidth: 78, fontWeight: 600, color: "#5a8c1f" }}>{cleanDomainKey(dom)}</div>
+                <div style={{ color: "#333", flex: 1 }}>
+                  {d.masteredList.map((m, mi) => (
+                    <span key={mi}>
+                      {mi > 0 && <span style={{ color: "#bbb" }}> · </span>}
+                      {m.goal}
+                      {m.tasks.length > 0 && <span style={{ color: "#888" }}> ({m.tasks.join(", ")})</span>}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
