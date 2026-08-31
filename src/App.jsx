@@ -12548,8 +12548,8 @@ cleanedHTML + '\n' +
               return (
                 <PrintSection num={nextSn()} title="성장 추이 (전체 목표 평균)">
                   <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                    ※ 보고 기간 동안 날짜별 전체 목표의 평균 정반응률 추이입니다.<br/>
-                    ※ 우상향 = 전반적 성장, 평탄 = 숙달 안정기. 새로 시작한 목표는 낮은 값에서 출발하므로, 목표를 추가한 시점에는 전체 평균이 일시적으로 내려갈 수 있습니다.<br/>
+                    ※ 보고 기간 동안 진행 중인 전체 목표의 평균 정반응률 추이입니다. 그날 측정하지 않은 목표는 가장 최근 값을 사용합니다.<br/>
+                    ※ 우상향 = 전반적 성장, 평탄 = 숙달 안정기. 새 목표는 낮은 값에서 출발하므로 추가된 날(+새 목표)에는 평균이 한 번 내려갈 수 있습니다.<br/>
                     {/* ★ [50-5] 선은 모든 회기를 잇지만 날짜·수치 라벨은 겹침 방지를 위해 일부만 표시된다.
                         라벨 개수를 회기 수로 오해해 "회기가 빠졌다"고 읽히던 문제. */}
                     ※ 날짜와 수치 라벨은 겹침 방지를 위해 일부만 표시되며, 선은 보고 기간의 모든 평가 회기를 잇습니다.
@@ -16485,6 +16485,62 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
         );
       })()}
 
+      {/* ★ [59-13] 영역별 진전도 추이 — 탭 맨 위로. 선생님이 먼저 보는 진단용 화면이라 위에 두고,
+          인쇄본에 안 실린다는 걸 제목 옆에 적는다. */}
+      {awaitingNewData ? (
+        <div style={CS}>
+          <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 12, color: PKD }}>📈 영역별 진전도 추이 <span style={{ fontSize: 10, fontWeight: 500, color: "#888", background: "#f1f1f1", borderRadius: 4, padding: "2px 7px", marginLeft: 6, verticalAlign: "middle" }}>화면 전용 · 보고서에는 포함되지 않습니다</span></h3>
+          <div style={{ padding: "40px 20px", textAlign: "center", color: "#999", background: "#FAFAFA", borderRadius: 10, border: "1px dashed #ddd" }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>⏳</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#888", marginBottom: 4 }}>새 데이터 입력 대기중</div>
+            <div style={{ fontSize: 11, color: "#aaa", lineHeight: 1.6 }}>
+              직전 보고서를 저장(컷오프)했습니다.<br />
+              다음 회기 데이터를 입력하면 이 기간의 그래프가 새로 그려집니다.
+            </div>
+          </div>
+        </div>
+      ) : (() => {
+        const TREND_COLORS = ["#C97B92", "#B5895F", "#8E7BB0", "#7089A0", "#7BA05B", "#5A9AAA", "#C99A5B", "#A87088"];
+        // 영역별로 목표를 묶고, 날짜별 평균 정반응률 계산
+        const domainMap = {};  // domain -> { date -> [rate들] }
+        // ★ 컷오프·보고 기간과 동일한 날짜 집합(allDates)으로 제한 — 이전 차수 데이터 제거.
+        const allowedDates = new Set(allDates);
+        (goals || []).filter(g => g.includeInIep).forEach(g => {
+          // ★ [수정] 인라인 판정을 공용 헬퍼로 교체 (goalIsOX)
+          if (goalIsOX(g)) return;
+          const dom = reportDomainOf(g) || "(영역 없음)";  // ★ [55-3] 보고서와 같은 영역 이름
+          const series = (typeof getTimeline === "function") ? getTimeline(g) : [];
+          series.forEach(pt => {
+            if (pt.rate == null || isNaN(pt.rate)) return;
+            if (allowedDates.size > 0 && !allowedDates.has(pt.date)) return;  // ★ 컷오프/기간 밖 제외
+            if (!domainMap[dom]) domainMap[dom] = {};
+            if (!domainMap[dom][pt.date]) domainMap[dom][pt.date] = [];
+            domainMap[dom][pt.date].push(Number(pt.rate));
+          });
+        });
+        const trendSeries = Object.keys(domainMap).map((dom, i) => ({
+          domain: dom,
+          color: TREND_COLORS[i % TREND_COLORS.length],
+          points: Object.keys(domainMap[dom]).sort().map(date => {
+            const arr = domainMap[dom][date];
+            const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+            return { date, rate: Math.round(avg) };
+          })
+        })).filter(s => s.points.length > 0);
+
+        if (trendSeries.length === 0) return null;
+
+        return (
+          <div style={CS}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 4, color: PKD }}>📈 영역별 진전도 추이 <span style={{ fontSize: 10, fontWeight: 500, color: "#888", background: "#f1f1f1", borderRadius: 4, padding: "2px 7px", marginLeft: 6, verticalAlign: "middle" }}>화면 전용 · 보고서에는 포함되지 않습니다</span></h3>
+            <div style={{ fontSize: 11, color: "#888", marginBottom: 12 }}>
+              영역마다 정반응률 추이를 따로 보여줍니다. 제목의 숫자는 시작 {COMPARE_EDGE_N}회기 → 최근 {COMPARE_EDGE_N}회기 평균이며, 변화가 큰 영역이 앞에 옵니다. 초록 점선은 숙달 80%입니다.
+            </div>
+            <DomainTrendChart series={trendSeries} />
+          </div>
+        );
+      })()}
+
       {/* ★ [v19 신규] 활동 사진 갤러리 (중간/종결 보고서) */}
       {(() => {
         const mediaList = info.mediaList || [];
@@ -16697,60 +16753,6 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
         </div>
       )}
 
-      {/* 영역별 진전도 추이 (시간축 다중 꺾은선) */}
-      {awaitingNewData ? (
-        <div style={CS}>
-          <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 12, color: PKD }}>📈 영역별 진전도 추이</h3>
-          <div style={{ padding: "40px 20px", textAlign: "center", color: "#999", background: "#FAFAFA", borderRadius: 10, border: "1px dashed #ddd" }}>
-            <div style={{ fontSize: 28, marginBottom: 8 }}>⏳</div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#888", marginBottom: 4 }}>새 데이터 입력 대기중</div>
-            <div style={{ fontSize: 11, color: "#aaa", lineHeight: 1.6 }}>
-              직전 보고서를 저장(컷오프)했습니다.<br />
-              다음 회기 데이터를 입력하면 이 기간의 그래프가 새로 그려집니다.
-            </div>
-          </div>
-        </div>
-      ) : (() => {
-        const TREND_COLORS = ["#C97B92", "#B5895F", "#8E7BB0", "#7089A0", "#7BA05B", "#5A9AAA", "#C99A5B", "#A87088"];
-        // 영역별로 목표를 묶고, 날짜별 평균 정반응률 계산
-        const domainMap = {};  // domain -> { date -> [rate들] }
-        // ★ 컷오프·보고 기간과 동일한 날짜 집합(allDates)으로 제한 — 이전 차수 데이터 제거.
-        const allowedDates = new Set(allDates);
-        (goals || []).filter(g => g.includeInIep).forEach(g => {
-          // ★ [수정] 인라인 판정을 공용 헬퍼로 교체 (goalIsOX)
-          if (goalIsOX(g)) return;
-          const dom = reportDomainOf(g) || "(영역 없음)";  // ★ [55-3] 보고서와 같은 영역 이름
-          const series = (typeof getTimeline === "function") ? getTimeline(g) : [];
-          series.forEach(pt => {
-            if (pt.rate == null || isNaN(pt.rate)) return;
-            if (allowedDates.size > 0 && !allowedDates.has(pt.date)) return;  // ★ 컷오프/기간 밖 제외
-            if (!domainMap[dom]) domainMap[dom] = {};
-            if (!domainMap[dom][pt.date]) domainMap[dom][pt.date] = [];
-            domainMap[dom][pt.date].push(Number(pt.rate));
-          });
-        });
-        const trendSeries = Object.keys(domainMap).map((dom, i) => ({
-          domain: dom,
-          color: TREND_COLORS[i % TREND_COLORS.length],
-          points: Object.keys(domainMap[dom]).sort().map(date => {
-            const arr = domainMap[dom][date];
-            const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
-            return { date, rate: Math.round(avg) };
-          })
-        })).filter(s => s.points.length > 0);
-
-        if (trendSeries.length === 0) return null;
-
-        return (
-          <div style={CS}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 4, color: PKD }}>📈 영역별 진전도 추이</h3>
-            <div style={{ fontSize: 11, color: "#888", marginBottom: 12 }}>
-              영역마다 정반응률 추이를 따로 보여줍니다. 제목의 숫자는 시작 {COMPARE_EDGE_N}회기 → 최근 {COMPARE_EDGE_N}회기 평균이며, 변화가 큰 영역이 앞에 옵니다. 초록 점선은 숙달 80%입니다.
-            </div>
-            <DomainTrendChart series={trendSeries} />
-          </div>
-        );
-      })()}
 
       {/* W-34: VB-MAPP 마일스톤 격자 (보고서 탭에도 표시 — 인쇄에는 별도 섹션) */}
       {(() => {
@@ -16773,7 +16775,10 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
       {/* 성장 추이 (시계열) */}
       {allDates.length > 1 && (
         <div style={CS}>
-          <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 12, color: PKD }}>성장 추이 (전체 목표 평균)</h3>
+          <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 4, color: PKD }}>성장 추이 (전체 목표 평균)</h3>
+          <div style={{ fontSize: 11, color: "#888", marginBottom: 12 }}>
+            진행 중인 모든 목표의 평균입니다. 그날 측정하지 않은 목표는 가장 최근 값을 씁니다. '+새 목표' 표시는 새 목표가 들어온 날입니다.
+          </div>
           <GrowthLineChart goals={goals} dates={allDates} getTimeline={getTimeline} />
           <div style={{ marginTop: 10, padding: "8px 12px", background: PKL, borderRadius: 8, fontSize: 11, color: PKD, lineHeight: 1.6 }}>
             💡 날짜별 전체 목표의 평균 정반응률 추이입니다. 우상향 = 전반적 성장, 평탄 = 숙달 안정기. 새로 시작한 목표는 낮은 값에서 출발하므로, 목표를 추가한 시점에는 전체 평균이 일시적으로 내려갈 수 있습니다.
@@ -19484,38 +19489,80 @@ function StageCumulativeChart({ goals, dates }) {
   );
 }
 
+// ★ [59-12] 성장 추이 계산을 '이월 평균'으로.
+//    기존: 날마다 그날 돌린 목표만 평균 → 어떤 목표를 돌렸느냐에 따라 선이 널뛰었다.
+//      (하민: 80→30→40→60→53→40→30→40→80→43→10→10→34. 아이가 흔들린 게 아니라
+//       쉬운 목표만 돌린 날은 80, 새 목표만 돌린 날은 10이 찍힌 것)
+//    변경: 안 돌린 목표는 가장 최근 값을 그대로 써서 매 시점 같은 세트로 평균한다.
+//      새 목표가 들어오는 날은 진짜로 내려가므로 그 지점을 표시한다(newGoalDates).
+//      중단(전 과제 paused)된 목표는 마지막 측정 뒤로는 세트에서 뺀다.
+//      오래 안 돌린 목표(STALE_SESSIONS회기 초과)는 마스터가 아니면 세트에서 뺀다 —
+//      버린 목표의 옛 값이 평균을 끌고 가지 않게.
+//    순수 함수라 node 스모크로 검증한다. 렌더는 GrowthLineChart가 맡는다.
+const GROWTH_STALE_SESSIONS = 6;
+function goalDayValue(g, date, calcDayRate) {
+  const taskRates = [];
+  (g.tasks || []).forEach(t => {
+    const r = calcDayRate(t.daily?.[date], t.plannedTrials);
+    if (r !== null && r !== undefined) taskRates.push(r);
+  });
+  const oldRate = calcDayRate(g.daily?.[date]);
+  if (taskRates.length > 0 && (oldRate !== null && oldRate !== undefined)) {
+    const taskAvg = Math.round(taskRates.reduce((a, b) => a + b, 0) / taskRates.length);
+    return Math.round((taskAvg + oldRate) / 2);
+  }
+  if (taskRates.length > 0) return Math.round(taskRates.reduce((a, b) => a + b, 0) / taskRates.length);
+  return (oldRate === undefined) ? null : oldRate;
+}
+function buildGrowthCarryForward(goals, dates, calcDayRate) {
+  const list = (goals || []).filter(g => g && !goalIsOX(g));
+  const sorted = [...(dates || [])].sort();
+  const last = {};        // goalIdx -> { value, atIdx }
+  const seen = new Set(); // 처음 등장한 목표
+  const newGoalDates = [];
+  const points = [];
+  const statusOf = (g) => {
+    const tasks = g.tasks || [];
+    if (tasks.length === 0) return "active";
+    if (tasks.every(t => (t.listGroup || "1") === "paused")) return "paused";
+    if (tasks.every(t => t.listGroup === "2")) return "mastered";
+    return "active";
+  };
+  sorted.forEach((date, di) => {
+    let added = 0;
+    list.forEach((g, gi) => {
+      const v = goalDayValue(g, date, calcDayRate);
+      if (v === null || v === undefined || isNaN(v)) return;
+      if (!seen.has(gi)) { seen.add(gi); if (di > 0) added++; }
+      last[gi] = { value: v, atIdx: di };
+    });
+    if (added > 0) newGoalDates.push({ date, count: added });
+    let sum = 0, n = 0;
+    Object.keys(last).forEach(k => {
+      const gi = Number(k);
+      const rec = last[gi];
+      const st = statusOf(list[gi]);
+      const isStale = (di - rec.atIdx) > GROWTH_STALE_SESSIONS;
+      const measuredToday = rec.atIdx === di;
+      if (!measuredToday && st === "paused") return;               // 중단 목표: 마지막 측정 뒤로 제외
+      if (!measuredToday && isStale && st !== "mastered") return;   // 오래 안 돌린 목표: 마스터 아니면 제외
+      sum += rec.value; n++;
+    });
+    points.push({ date, avg: n > 0 ? Math.round(sum / n) : null, n });
+  });
+  return { points: points.filter(p => p.avg !== null), newGoalDates };
+}
+
 function GrowthLineChart({ goals, dates, getTimeline }) {
   const calcDayRate = calcDayRateGlobal;
   // ★ [수정] O·X 목표 제외 — 화면의 '영역별 진전도 추이'에만 적용돼 있던 제외 규칙을
   //    인쇄용 성장 추이에도 동일 적용한다. 이걸 빼야 표지 요약·영역별 균형과 모집단이 같아진다.
-  const chartGoals = useMemo(() => (goals || []).filter(g => !goalIsOX(g)), [goals]);
-  const points = useMemo(() => {
-    return dates.map(date => {
-      let sum = 0, n = 0;
-      chartGoals.forEach(g => {
-        const taskRates = [];
-        (g.tasks || []).forEach(t => {
-          const r = calcDayRate(t.daily?.[date], t.plannedTrials);
-          if (r !== null) taskRates.push(r);
-        });
-        const oldRate = calcDayRate(g.daily?.[date]);
-        // ★ 요약카드/막대(getCombinedDailySeries)와 동일 규칙 — task+구형 daily 둘 다 있으면 절반씩 평균
-        let goalValue = null;
-        if (taskRates.length > 0 && oldRate !== null) {
-          const taskAvg = Math.round(taskRates.reduce((a, b) => a + b, 0) / taskRates.length);
-          goalValue = Math.round((taskAvg + oldRate) / 2);
-        } else if (taskRates.length > 0) {
-          goalValue = Math.round(taskRates.reduce((a, b) => a + b, 0) / taskRates.length);
-        } else {
-          goalValue = oldRate;
-        }
-        if (goalValue === null) return;
-        sum += goalValue;
-        n++;
-      });
-      return { date, avg: n > 0 ? Math.round(sum / n) : null, n };
-    }).filter(p => p.avg !== null);
-  }, [chartGoals, dates]);
+  // ★ [59-12] 이월 평균 — 계산은 buildGrowthCarryForward(순수 함수)에 맡긴다.
+  const { points, newGoalDates } = useMemo(
+    () => buildGrowthCarryForward(goals, dates, calcDayRate),
+    [goals, dates]
+  );
+  const newGoalSet = useMemo(() => new Set(newGoalDates.map(x => x.date)), [newGoalDates]);
 
   if (points.length === 0) return <div style={{ padding: 20, textAlign: "center", fontSize: 12, color: "#aaa" }}>데이터 없음</div>;
 
@@ -19554,6 +19601,10 @@ function GrowthLineChart({ goals, dates, getTimeline }) {
       {pts.map((p, i) => (
         <g key={i}>
           <circle cx={p.x} cy={p.y} r="4" fill="#fff" stroke={PK} strokeWidth="2" />
+          {/* ★ [59-12] 새 목표가 들어온 날 — 평균이 내려가는 진짜 이유를 그 자리에 적는다 */}
+          {newGoalSet.has(p.date) && (
+            <text x={p.x} y={p.y + 18} fontSize="8.5" fill="#888" textAnchor="middle">+새 목표</text>
+          )}
           {labelIdx.has(i) && (
             <text
               x={i === 0 ? p.x + 6 : (i === pts.length - 1 ? p.x - 6 : p.x)}
