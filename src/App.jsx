@@ -12491,9 +12491,8 @@ cleanedHTML + '\n' +
             {domainAvgs.length > 0 && (
               <PrintSection num={nextSn()} title="영역별 균형 분석">
                 <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                  ※ 영역별 학습 목표의 최종 달성률을 한눈에 비교한 그래프입니다. (초록: 80%↑ 숙달, 파랑: 60~79% 진전, 주황: 60%↓ 집중 지도) 괄호 안은 영역의 목표 수입니다.<br />
-                  ※ 최종 달성률은 각 목표의 최근 {COMPARE_EDGE_N}회기 평균입니다. (한 회기 결과에 흔들리지 않도록 최근 구간을 평균한 값입니다)<br />
-                  ※ 회색 '시작 단계'는 측정이 {COMPARE_EDGE_N}회기 미만인 영역으로, 아직 달성률로 평가하지 않습니다.
+                  ※ 영역별 최근 {COMPARE_EDGE_N}회기 평균 달성률 · 괄호는 목표 수 · 회색은 측정 {COMPARE_EDGE_N}회기 미만(시작 단계)<br />
+                  ※ 초록 80% 이상 숙달 · 파랑 60~79% 진전 · 주황 60% 미만 집중 지도
                 </div>
                 <div style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                   <div style={{ fontSize: 11, color: "#666", marginBottom: 6, textAlign: "center", fontWeight: 500 }}>평균 달성률(%)</div>
@@ -12548,11 +12547,8 @@ cleanedHTML + '\n' +
               return (
                 <PrintSection num={nextSn()} title="성장 추이 (전체 목표 평균)">
                   <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                    ※ 보고 기간 동안 진행 중인 전체 목표의 평균 정반응률 추이입니다. 그날 측정하지 않은 목표는 가장 최근 값을 사용합니다.<br/>
-                    ※ 우상향 = 전반적 성장, 평탄 = 숙달 안정기. 새 목표는 낮은 값에서 출발하므로 추가된 날(+새 목표)에는 평균이 한 번 내려갈 수 있습니다.<br/>
-                    {/* ★ [50-5] 선은 모든 회기를 잇지만 날짜·수치 라벨은 겹침 방지를 위해 일부만 표시된다.
-                        라벨 개수를 회기 수로 오해해 "회기가 빠졌다"고 읽히던 문제. */}
-                    ※ 날짜와 수치 라벨은 겹침 방지를 위해 일부만 표시되며, 선은 보고 기간의 모든 평가 회기를 잇습니다.
+                    ※ 진행 중인 전체 목표의 평균 정반응률 · 그날 측정하지 않은 목표는 최근 값 사용 · 라벨은 일부만 표시<br/>
+                    ※ '+새 목표' '+새 단계'는 새로 시작한 날 — 0%대에서 출발해 평균이 잠시 내려갈 수 있습니다
                   </div>
                   <div style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                     <GrowthLineChart goals={goals} dates={allDates} getTimeline={null} />
@@ -12581,9 +12577,7 @@ cleanedHTML + '\n' +
               goalsForReport && goalsForReport.length > 0 && (
                 <PrintSection num={nextSn()} title="영역별 세부 학습 목표">
                   <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                    ※ 각 목표는 영역별로 그룹화되어 있으며, 진행률과 최근 데이터 추이를 함께 표시합니다.<br />
-                    ※ 미니 추이선은 학습 시작부터 현재까지의 평가 데이터 흐름을 보여줍니다.<br />
-                    ※ 회기당 1회만 시도하는 목표는 O(성공) · X(실패)로 표시됩니다.
+                    ※ 영역별로 묶은 목표마다 진행률과 시작부터 지금까지의 추이선 · 회기당 1회 시도 목표는 O(성공)·X(실패)로 표시
                   </div>
                   <GoalDashboard stos={goalsForReport} />
                 </PrintSection>
@@ -19519,6 +19513,7 @@ function buildGrowthCarryForward(goals, dates, calcDayRate) {
   const sorted = [...(dates || [])].sort();
   const last = {};        // goalIdx -> { value, atIdx }
   const seen = new Set(); // 처음 등장한 목표
+  const seenTask = new Set(); // ★ 처음 등장한 단계(task) — 새 단계도 0%에서 출발해 평균을 내린다
   const newGoalDates = [];
   const points = [];
   const statusOf = (g) => {
@@ -19529,14 +19524,21 @@ function buildGrowthCarryForward(goals, dates, calcDayRate) {
     return "active";
   };
   sorted.forEach((date, di) => {
-    let added = 0;
+    let added = 0, addedStage = 0;
     list.forEach((g, gi) => {
       const v = goalDayValue(g, date, calcDayRate);
       if (v === null || v === undefined || isNaN(v)) return;
-      if (!seen.has(gi)) { seen.add(gi); if (di > 0) added++; }
+      const isNewGoal = !seen.has(gi);
+      if (isNewGoal) { seen.add(gi); if (di > 0) added++; }
+      (g.tasks || []).forEach((t, ti) => {
+        const r = calcDayRate(t.daily?.[date], t.plannedTrials);
+        if (r === null || r === undefined) return;
+        const key = gi + ":" + ti;
+        if (!seenTask.has(key)) { seenTask.add(key); if (di > 0 && !isNewGoal) addedStage++; }
+      });
       last[gi] = { value: v, atIdx: di };
     });
-    if (added > 0) newGoalDates.push({ date, count: added });
+    if (added > 0 || addedStage > 0) newGoalDates.push({ date, count: added, stages: addedStage });
     let sum = 0, n = 0;
     Object.keys(last).forEach(k => {
       const gi = Number(k);
@@ -19563,6 +19565,7 @@ function GrowthLineChart({ goals, dates, getTimeline }) {
     [goals, dates]
   );
   const newGoalSet = useMemo(() => new Set(newGoalDates.map(x => x.date)), [newGoalDates]);
+  const newGoalLabel = useMemo(() => new Map(newGoalDates.map(x => [x.date, x.count > 0 ? "+새 목표" : "+새 단계"])), [newGoalDates]);
 
   if (points.length === 0) return <div style={{ padding: 20, textAlign: "center", fontSize: 12, color: "#aaa" }}>데이터 없음</div>;
 
@@ -19603,7 +19606,7 @@ function GrowthLineChart({ goals, dates, getTimeline }) {
           <circle cx={p.x} cy={p.y} r="4" fill="#fff" stroke={PK} strokeWidth="2" />
           {/* ★ [59-12] 새 목표가 들어온 날 — 평균이 내려가는 진짜 이유를 그 자리에 적는다 */}
           {newGoalSet.has(p.date) && (
-            <text x={p.x} y={p.y + 18} fontSize="8.5" fill="#888" textAnchor="middle">+새 목표</text>
+            <text x={p.x} y={p.y + 18} fontSize="8.5" fill="#888" textAnchor="middle">{newGoalLabel.get(p.date)}</text>
           )}
           {labelIdx.has(i) && (
             <text
