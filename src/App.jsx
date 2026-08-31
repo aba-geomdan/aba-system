@@ -2897,7 +2897,8 @@ function buildStartEndCompare(stos, goals) {
     if (!byDomain[k]) byDomain[k] = {
       domain: k, firsts: [], mids: [], lasts: [],
       total: 0, mastered: 0, paused: 0, ongoing: 0,
-      quotableGoals: 0, excludedGoals: 0
+      quotableGoals: 0, excludedGoals: 0,
+      maxSessions: 0   // ★ [59-10] 영역 안에서 가장 길게 측정된 목표의 회기 수 — '시작 단계' 판정용
     };
     return byDomain[k];
   };
@@ -2918,6 +2919,7 @@ function buildStartEndCompare(stos, goals) {
     const middle = g.series.slice(n, g.series.length - n);
     b.mids.push(middle.length > 0 ? middle.reduce((a, c) => a + c, 0) / middle.length : (hv + tv) / 2);
     b.quotableGoals++;
+    if (g.series.length > b.maxSessions) b.maxSessions = g.series.length;
   });
 
   // ② 마스터 진척 — 과제(STO) 개수. O·X 목표도 "달성했는가"는 셀 수 있으므로 여기선 제외하지 않는다.
@@ -2943,6 +2945,7 @@ function buildStartEndCompare(stos, goals) {
       change: (firstAvg !== null && lastAvg !== null) ? lastAvg - firstAvg : null,
       total: b.total, mastered: b.mastered, paused: b.paused, ongoing: b.ongoing,
       quotableGoals: b.quotableGoals, excludedGoals: b.excludedGoals,
+      maxSessions: b.maxSessions,
       // ★ [57-9] %가 없는 이유를 구분한다. 기존엔 전부 "O·X 기록 N개 — % 환산 제외"로 찍혀서,
       //    전 과제가 중단인 영역(성윤준 '모방' 2과제 전원 중단)에 "O·X 기록 0개"라는
       //    앞뒤 안 맞는 사유가 나갔다.
@@ -6570,6 +6573,8 @@ export default function App() {
       domain: r.domain,
       avg: r.lastAvg,
       count: r.quotableGoals,
+      total: r.total,          // ★ [59-10] 영역의 전체 목표 수 (막대 라벨에 표기)
+      sessions: r.maxSessions, // ★ [59-10] 측정 회기 수 — COMPARE_EDGE_N 미만이면 '시작 단계'
       short: shortDomain(r.domain)
     }));
   }, [stosForReport, includedGoals, needsReportCalc]);
@@ -11253,76 +11258,74 @@ function GoalCard({ goal, active, onToggle, onRemove, onUpdate, onToggleStatus, 
 // 영역별 진전도 추이 차트 (시간축 다중 꺾은선)
 // series: [{ domain, color, points: [{date, rate}] }]
 // ───────────────────────────────────────────────
+// ★ [59-11] 영역별 진전도 추이 — 겹친 꺾은선 → 영역마다 작은 그래프.
+//    영역이 6~8개면 한 판에 선이 엉켜 어느 게 어느 영역인지 색으로 찾아야 했다.
+//    영역마다 칸을 따로 주고(한 줄 3개, 좁은 화면 2개), 칸 제목에 시작→현재·변화폭을 적고,
+//    변화 큰 순으로 정렬한다. 선 색은 막대 그래프와 같은 규칙(현재 값 기준 초록·파랑·주황).
+//    화면 전용 — 인쇄본에는 안 나간다.
 function DomainTrendChart({ series }) {
   if (!series || series.length === 0) return null;
   const allDates = [...new Set(series.flatMap(s => s.points.map(p => p.date)))].sort();
   if (allDates.length < 2) {
     return (
-      <div style={{ padding: "28px 20px", textAlign: "center", color: "#9a9a9a", fontSize: 12.5, lineHeight: 1.7, background: "#fafafa", borderRadius: 10 }}>
+      <div style={{ padding: "28px 20px", textAlign: "center", color: "#9a9a9a", fontSize: 12.5, lineHeight: 1.7, background: "#fafafa", borderRadius: 10, border: "1px dashed #e5e5e5" }}>
         추이를 그리려면 최소 2개 이상의 날짜에 데이터가 필요합니다.<br />
         <span style={{ color: "#bbb" }}>데일리 데이터를 더 입력하면 영역별 변화가 선으로 표시됩니다.</span>
       </div>
     );
   }
-  // 넉넉한 여백
-  const W = 600, H = 300, padL = 44, padR = 18, padT = 24, padB = 52;
+  const dateIndex = Object.fromEntries(allDates.map((d, i) => [d, i]));
+  const fmtDate = (d) => { const p = (d || "").split("-"); return p.length >= 3 ? `${Number(p[1])}/${Number(p[2])}` : d; };
+
+  // 칸마다 시작·현재·변화폭 — 앞뒤 COMPARE_EDGE_N회기 평균 (막대·종합 평가와 같은 기준)
+  const panels = series.map(s => {
+    const pts = s.points.filter(p => p.date in dateIndex).sort((a, b) => dateIndex[a.date] - dateIndex[b.date]);
+    const n = Math.max(1, Math.min(COMPARE_EDGE_N, Math.floor(pts.length / 2) || 1));
+    const avg = (arr) => arr.length ? Math.round(arr.reduce((a, c) => a + c.rate, 0) / arr.length) : null;
+    const first = avg(pts.slice(0, n));
+    const last = avg(pts.slice(-n));
+    return { domain: s.domain, pts, first, last, delta: (first !== null && last !== null) ? last - first : null };
+  }).filter(p => p.pts.length > 0)
+    .sort((a, b) => (b.delta ?? -999) - (a.delta ?? -999));
+
+  const W = 220, H = 96, padL = 6, padR = 6, padT = 6, padB = 16;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const xFor = (i) => padL + (allDates.length === 1 ? plotW / 2 : (i / (allDates.length - 1)) * plotW);
   const yFor = (rate) => padT + plotH - (Math.max(0, Math.min(100, rate)) / 100) * plotH;
-  const dateIndex = Object.fromEntries(allDates.map((d, i) => [d, i]));
-  const fmtDate = (d) => { const p = (d || "").split("-"); return p.length >= 3 ? `${Number(p[1])}/${Number(p[2])}` : d; };
-  const labelStep = Math.max(1, Math.ceil(allDates.length / 6));
+  const colorOf = (v) => v === null ? "#B4B2A9" : v >= 80 ? GREEN : v >= 60 ? BLUE : ORANGE;
 
   return (
-    <div style={{ width: "100%", overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: W, height: "auto", display: "block", margin: "0 auto" }}>
-        {/* 가로 기준선 — 80은 숙달 기준선(초록 점선)으로 강조 */}
-        {[0, 20, 40, 60, 80, 100].map(v => {
-          const is80 = v === 80;
-          return (
-          <g key={v}>
-            <line
-              x1={padL} y1={yFor(v)} x2={W - padR} y2={yFor(v)}
-              stroke={is80 ? GREEN : (v === 0 ? "#e3e3e3" : "#f2f2f2")}
-              strokeWidth={is80 ? 1.2 : 1}
-              strokeDasharray={is80 ? "4,3" : "none"}
-              opacity={is80 ? 0.85 : 1}
-            />
-            <text x={padL - 9} y={yFor(v) + 3.5} fontSize="9.5" fill={is80 ? GREEN : "#bcbcbc"} textAnchor="end" fontFamily="inherit" fontWeight={is80 ? 700 : 400}>{v}</text>
-          </g>
-          );
-        })}
-        <text x={W - padR} y={yFor(80) - 4} fontSize="8.5" fill={GREEN} textAnchor="end" fontWeight="700" fontFamily="inherit">숙달 80%</text>
-        {/* x축 날짜 라벨 — 솎아내고 연하게 */}
-        {allDates.map((d, i) => (i % labelStep === 0 || i === allDates.length - 1) && (
-          <text key={d} x={xFor(i)} y={H - padB + 18} fontSize="9.5" fill="#aeaeae" textAnchor="middle" fontFamily="inherit">{fmtDate(d)}</text>
-        ))}
-        {/* 각 영역의 꺾은선 — 선이 주인공 */}
-        {series.map((s, si) => {
-          const pts = s.points
-            .filter(p => p.date in dateIndex)
-            .sort((a, b) => dateIndex[a.date] - dateIndex[b.date]);
-          if (pts.length === 0) return null;
-          const path = pts.map((p, idx) => `${idx === 0 ? "M" : "L"} ${xFor(dateIndex[p.date]).toFixed(1)} ${yFor(p.rate).toFixed(1)}`).join(" ");
-          return (
-            <g key={si}>
-              <path d={path} fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.9" />
-              {pts.map((p, idx) => (
-                <circle key={idx} cx={xFor(dateIndex[p.date])} cy={yFor(p.rate)} r="2.2" fill="#fff" stroke={s.color} strokeWidth="1.6" />
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
+      {panels.map((p, pi) => {
+        const c = colorOf(p.last);
+        const path = p.pts.map((pt, idx) => `${idx === 0 ? "M" : "L"} ${xFor(dateIndex[pt.date]).toFixed(1)} ${yFor(pt.rate).toFixed(1)}`).join(" ");
+        const area = p.pts.length > 1
+          ? `${path} L ${xFor(dateIndex[p.pts[p.pts.length - 1].date]).toFixed(1)} ${yFor(0).toFixed(1)} L ${xFor(dateIndex[p.pts[0].date]).toFixed(1)} ${yFor(0).toFixed(1)} Z`
+          : "";
+        const deltaColor = p.delta === null ? "#999" : p.delta >= 0 ? "#3B6D11" : "#A32D2D";
+        return (
+          <div key={pi} style={{ background: "#fafafa", border: "1px solid #eee", borderRadius: 8, padding: "8px 10px 4px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 6, marginBottom: 2 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#333", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={p.domain}>{p.domain}</span>
+              <span style={{ fontSize: 11, color: "#666", whiteSpace: "nowrap" }}>
+                {p.first !== null ? `${p.first}%` : "—"} → <b style={{ color: "#333" }}>{p.last !== null ? `${p.last}%` : "—"}</b>
+                {p.delta !== null && <span style={{ color: deltaColor, marginLeft: 4 }}>{p.delta >= 0 ? "+" : ""}{p.delta}p</span>}
+              </span>
+            </div>
+            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+              <line x1={padL} y1={yFor(80)} x2={W - padR} y2={yFor(80)} stroke={GREEN} strokeWidth="1" strokeDasharray="3,3" opacity="0.7" />
+              <line x1={padL} y1={yFor(0)} x2={W - padR} y2={yFor(0)} stroke="#e3e3e3" strokeWidth="1" />
+              {area && <path d={area} fill={c} opacity="0.10" />}
+              <path d={path} fill="none" stroke={c} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+              {p.pts.length <= 20 && p.pts.map((pt, idx) => (
+                <circle key={idx} cx={xFor(dateIndex[pt.date])} cy={yFor(pt.rate)} r="1.8" fill="#fff" stroke={c} strokeWidth="1.2" />
               ))}
-            </g>
-          );
-        })}
-      </svg>
-      {/* 범례 — 정돈된 칩 */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", justifyContent: "center", marginTop: 12 }}>
-        {series.map((s, si) => (
-          <div key={si} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#6b6b6b" }}>
-            <span style={{ width: 9, height: 9, background: s.color, borderRadius: "50%", display: "inline-block" }} />
-            {s.domain}
+              <text x={padL} y={H - 4} fontSize="9" fill="#aaa" fontFamily="inherit">{fmtDate(allDates[0])}</text>
+              <text x={W - padR} y={H - 4} fontSize="9" fill="#aaa" textAnchor="end" fontFamily="inherit">{fmtDate(allDates[allDates.length - 1])}</text>
+            </svg>
           </div>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
@@ -11390,27 +11393,55 @@ function RadarChart({ data }) {
   );
 }
 
+// ★ [59-10] 영역별 균형 분석 막대 개편 — 같은 숫자가 다르게 읽히던 세 가지를 고친다.
+//    ① 목표 수 표기: 유찬 '화자 언어 작동 80%'는 목표 1개, '청자 50%'는 5개인데 같은 무게로 보였다.
+//    ② 시작 단계 분리: '학습영역 0%'는 실패가 아니라 이제 막 시작한 3개 — 회색 '시작 단계'로 뺀다.
+//       기준은 COMPARE_EDGE_N(3회기) 미만. 최근 3회기 평균이라는 이 그래프의 정의상
+//       3회기가 안 쌓인 영역은 아직 평가 값이 아니다.
+//    ③ 정렬: 규칙 없던 순서를 높은 순으로. 시작 단계는 맨 아래.
+function sortBarRows(data) {
+  const rows = (data || []).map(d => ({
+    ...d,
+    starting: (d.sessions != null) && d.sessions < COMPARE_EDGE_N
+  }));
+  return rows.sort((a, b) => {
+    if (a.starting !== b.starting) return a.starting ? 1 : -1;
+    if (a.starting) return (a.domain || "").localeCompare(b.domain || "", "ko");
+    return (b.avg || 0) - (a.avg || 0);
+  });
+}
 function BarChart({ data }) {
   if (data.length === 0) return <div style={{ padding: 20, textAlign: "center", fontSize: 12, color: "#aaa" }}>데이터 없음</div>;
+  const rows = sortBarRows(data);
   const W = 780, labelW = 280, barAreaW = W - labelW - 60, rowH = 26, gap = 5;
-  const H = data.length * (rowH + gap) + 20;
+  const H = rows.length * (rowH + gap) + 20;
+  const GRAY = "#B4B2A9";
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%" }}>
-      {data.map((d, i) => {
+      {rows.map((d, i) => {
         const y = 10 + i * (rowH + gap);
+        const label = (d.total != null ? `${d.domain} (${d.total}개)` : d.domain);
+        const shown = label.length > 30 ? label.substring(0, 29) + "…" : label;
+        if (d.starting) {
+          const w = Math.max(4, (Math.min(d.avg || 0, 100) / 100) * barAreaW);
+          return (
+            <g key={i}>
+              <text x={labelW - 12} y={y + rowH / 2 + 4} textAnchor="end" fontSize="12" fill="#888" fontWeight="500">{shown}</text>
+              <rect x={labelW} y={y + 4} width={barAreaW} height={rowH - 8} fill="#F5F5F5" rx="4" />
+              <rect x={labelW} y={y + 4} width={w} height={rowH - 8} fill={GRAY} rx="4" opacity=".7" />
+              <text x={labelW + w + 8} y={y + rowH / 2 + 4} fontSize="11.5" fill="#888" fontWeight="500">
+                시작 단계 · {d.sessions}회기
+              </text>
+            </g>
+          );
+        }
         const w = (d.avg / 100) * barAreaW;
-        const c = d.avg >= 80 ? GREEN : d.avg >= 50 ? BLUE : ORANGE;
+        const c = d.avg >= 80 ? GREEN : d.avg >= 60 ? BLUE : ORANGE;
         return (
           <g key={i}>
-            {/* 영역명 라벨 (왼쪽 280px) - 28글자까지 풀 표시 */}
-            <text x={labelW - 12} y={y + rowH / 2 + 4} textAnchor="end" fontSize="12" fill="#333" fontWeight="500">
-              {d.domain.length > 28 ? d.domain.substring(0, 27) + "…" : d.domain}
-            </text>
-            {/* 배경 막대 (회색 트랙) */}
+            <text x={labelW - 12} y={y + rowH / 2 + 4} textAnchor="end" fontSize="12" fill="#333" fontWeight="500">{shown}</text>
             <rect x={labelW} y={y + 4} width={barAreaW} height={rowH - 8} fill="#F5F5F5" rx="4" />
-            {/* 실제 막대 */}
             <rect x={labelW} y={y + 4} width={w} height={rowH - 8} fill={c} rx="4" opacity=".88" />
-            {/* 퍼센트 텍스트 (막대 끝) */}
             <text x={labelW + w + 8} y={y + rowH / 2 + 4} fontSize="12" fill="#333" fontWeight="700">{d.avg}%</text>
           </g>
         );
@@ -12460,8 +12491,9 @@ cleanedHTML + '\n' +
             {domainAvgs.length > 0 && (
               <PrintSection num={nextSn()} title="영역별 균형 분석">
                 <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                  ※ 영역별 학습 목표의 최종 달성률을 한눈에 비교한 그래프입니다. (초록: 80%↑ 숙달, 파랑: 60~79% 진전, 주황: 60%↓ 집중 지도)<br />
-                  ※ 최종 달성률은 각 목표의 최근 {COMPARE_EDGE_N}회기 평균입니다. (한 회기 결과에 흔들리지 않도록 최근 구간을 평균한 값입니다)
+                  ※ 영역별 학습 목표의 최종 달성률을 한눈에 비교한 그래프입니다. (초록: 80%↑ 숙달, 파랑: 60~79% 진전, 주황: 60%↓ 집중 지도) 괄호 안은 영역의 목표 수입니다.<br />
+                  ※ 최종 달성률은 각 목표의 최근 {COMPARE_EDGE_N}회기 평균입니다. (한 회기 결과에 흔들리지 않도록 최근 구간을 평균한 값입니다)<br />
+                  ※ 회색 '시작 단계'는 측정이 {COMPARE_EDGE_N}회기 미만인 영역으로, 아직 달성률로 평가하지 않습니다.
                 </div>
                 <div style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                   <div style={{ fontSize: 11, color: "#666", marginBottom: 6, textAlign: "center", fontWeight: 500 }}>평균 달성률(%)</div>
@@ -16713,7 +16745,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, baselineAvgs, domain
           <div style={CS}>
             <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 4, color: PKD }}>📈 영역별 진전도 추이</h3>
             <div style={{ fontSize: 11, color: "#888", marginBottom: 12 }}>
-              데일리 기록 날짜에 따라 각 영역의 평균 정반응률이 어떻게 변해왔는지 보여줍니다.
+              영역마다 정반응률 추이를 따로 보여줍니다. 제목의 숫자는 시작 {COMPARE_EDGE_N}회기 → 최근 {COMPARE_EDGE_N}회기 평균이며, 변화가 큰 영역이 앞에 옵니다. 초록 점선은 숙달 80%입니다.
             </div>
             <DomainTrendChart series={trendSeries} />
           </div>
