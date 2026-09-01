@@ -5012,7 +5012,13 @@ export default function App() {
     })();
   }, []);
 
-  const [children, setChildren] = useState(() => [blankChild()]);
+  // ★ [61-1] 초기값을 [blankChild()] → []로.
+  //    60-8은 자리표시자가 클라우드로 나가는 것만 막았고, 만들어지는 것 자체는 그대로였다.
+  //    이름·목표·기록이 전부 빈 아동이 로컬에 계속 남아 대시보드 "(미할당) 아동 1 · 목표 0"의
+  //    뿌리가 됐다. 애초에 만들지 않으면 걸러낼 일도 없다.
+  //    activeChild는 이미 전부 ?. 로 방어돼 있어(info/goals/reportFields… 모두 폴백 존재)
+  //    children이 0명이어도 화면이 기댈 자리가 따로 필요하지 않다.
+  const [children, setChildren] = useState(() => []);
   const [activeChildId, setActiveChildId] = useState(null);  // 초기엔 null, 로드 후 설정
   const activeChildIdRef = useRef(null);
   useEffect(() => { activeChildIdRef.current = activeChildId; }, [activeChildId]);
@@ -5595,10 +5601,12 @@ export default function App() {
           const aliveList = liveChildren(childrenList);
           const validActive = lastActive && aliveList.find(c => c.id === lastActive);
           setActiveChildId(validActive ? lastActive : (aliveList[0]?.id || childrenList[0].id));
-        } else {
-          const firstId = liveChildren(children)[0]?.id || children[0]?.id;
-          if (firstId) setActiveChildId(firstId);
         }
+        // ★ [61-2] 로드가 아무것도 못 찾았을 때(새 기기 첫 로그인·네트워크 실패·삼켜진 예외)
+        //    기존엔 else에서 자리표시자를 활성 아동으로 세웠다. 그 순간 loaded=true가 되고
+        //    자동저장이 그걸 실제 아동처럼 다뤘다.
+        //    이제 children은 []로 남고 activeChildId도 null 그대로다 —
+        //    화면은 "총 0명 등록" + [＋ 아동 추가]가 뜬다. 없는 걸 없다고 보여주는 게 맞다.
       } catch (e) { /* 무시 */ }
       setLoaded(true);
     })();
@@ -5619,8 +5627,27 @@ export default function App() {
     saveTimerRef.current = setTimeout(() => {
       try {
         if (typeof localStorage !== "undefined") {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(children));
-          if (activeChildId) localStorage.setItem(ACTIVE_KEY, activeChildId);
+          // ★ [61-3] 61-1로 children이 []가 될 수 있게 되면서 생긴 자리.
+          //    로드가 실패했는데(예외가 catch로 삼켜짐) loaded=true가 되면 여기서
+          //    빈 배열이 localStorage의 멀쩡한 사본을 덮어쓴다.
+          //    (기존엔 [blankChild()]가 덮어썼으니 위험 자체는 원래 있던 것이다.)
+          //    로컬에 이미 아동이 있는데 메모리가 비었으면 정상 상태가 아니므로 쓰지 않는다.
+          //    사용자가 마지막 아동을 지운 경우는 tombstone이 남아 length>0이라 여기 안 걸린다.
+          //    ※ 지금 코드엔 children을 통째로 []로 만드는 경로가 없다(안내 문구만 있고
+          //      '아동 데이터 초기화' 기능은 미구현). 나중에 그런 기능을 만들면
+          //      이 가드를 우회하는 플래그가 필요하다 — 안 그러면 초기화가 저장되지 않는다.
+          let skipLocalWrite = false;
+          if (children.length === 0) {
+            try {
+              const prevRaw = localStorage.getItem(STORAGE_KEY);
+              const prev = prevRaw ? JSON.parse(prevRaw) : null;
+              if (Array.isArray(prev) && prev.length > 0) skipLocalWrite = true;
+            } catch (e) { skipLocalWrite = true; }   // 파싱 실패 = 원본 보존
+          }
+          if (!skipLocalWrite) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(children));
+            if (activeChildId) localStorage.setItem(ACTIVE_KEY, activeChildId);
+          }
         }
       } catch (e) {}
       if (fromRemote) return;  // 클라우드에서 온 것은 로컬에만 저장하고 끝
@@ -17096,22 +17123,59 @@ function ReportTab({ currentUser, info, goals, currentAvgs, balanceBarRows = [],
               </select>
             </div>
             <div>
-              <label style={{ fontSize: 10.5, color: "#5a8c1f", fontWeight: 500, display: "block", marginBottom: 4 }}>
-                회기 시간 (분)
-                {Array.isArray(info.sMinList) && info.sMinList.filter(Boolean).length > 1 && (
-                  <span style={{ fontSize: 9, color: "#888", fontWeight: 400, marginLeft: 5 }}>
-                    회차별 설정됨 ({sessionMinText(info)})
-                  </span>
-                )}
-              </label>
-              <input
-                type="number"
-                placeholder="예: 50"
-                value={info.sMin || ""}
-                // ★ [수정] 여기서 값을 바꾸면 회차별 설정(sMinList)을 지운다 — 두 값이 어긋나지 않도록.
-                onChange={e => setInfo(prev => ({ ...prev, sMin: e.target.value, sMinList: [], sMinPerSession: false }))}
-                style={{ width: "100%", padding: "5px 8px", border: "1px solid #d4e5ba", borderRadius: 6, fontSize: 11.5, fontFamily: "inherit", boxSizing: "border-box" }}
-              />
+              {(() => {
+                // ★ [61-4] 회차별 설정(sMinList)이 있는데 이 칸을 건드리면 그 목록이 통째로 지워졌다.
+                //    보겸 종결 "50분 · 100분"이 여기 숫자 하나로 납작해지는 자리 —
+                //    실수로 한 글자만 눌러도 복구가 안 된다(원본이 남지 않음).
+                //    회차별 설정이 있을 때만 읽기 전용으로 잠그고, 지우려면 명시적으로 누르게 한다.
+                //    회차별 설정이 없으면(sMinList 비었거나 1개) 예전과 똑같이 그냥 입력된다.
+                const perSession = Array.isArray(info.sMinList) && info.sMinList.filter(Boolean).length > 1;
+                return (
+                  <>
+                    <label style={{ fontSize: 10.5, color: "#5a8c1f", fontWeight: 500, display: "block", marginBottom: 4 }}>
+                      회기 시간 (분)
+                      {perSession && (
+                        <span style={{ fontSize: 9, color: "#888", fontWeight: 400, marginLeft: 5 }}>
+                          회차별 설정됨 ({sessionMinText(info)}) · 잠김
+                        </span>
+                      )}
+                    </label>
+                    <input
+                      type="number"
+                      placeholder="예: 50"
+                      value={info.sMin || ""}
+                      readOnly={perSession}
+                      title={perSession ? "회차별 설정이 있어 잠겨 있습니다. 아래 '회차별 설정 해제'를 누르면 편집할 수 있습니다." : ""}
+                      onChange={e => {
+                        if (perSession) return;
+                        setInfo(prev => ({ ...prev, sMin: e.target.value, sMinList: [], sMinPerSession: false }));
+                      }}
+                      style={{
+                        width: "100%", padding: "5px 8px", border: "1px solid #d4e5ba", borderRadius: 6,
+                        fontSize: 11.5, fontFamily: "inherit", boxSizing: "border-box",
+                        background: perSession ? "#f2f2f0" : "#fff",
+                        color: perSession ? "#999" : "inherit",
+                        cursor: perSession ? "not-allowed" : "auto"
+                      }}
+                    />
+                    {perSession && (
+                      <button
+                        type="button"
+                        onClick={() => askConfirm(
+                          `회차별 회기 시간(${sessionMinText(info)})을 지우고 한 값으로 바꾸시겠습니까?\n(되돌릴 수 없습니다)`,
+                          () => setInfo(prev => ({ ...prev, sMinList: [], sMinPerSession: false }))
+                        )}
+                        style={{
+                          marginTop: 4, padding: "3px 7px", fontSize: 9.5, color: "#888",
+                          background: "#fff", border: "1px solid #ddd", borderRadius: 5,
+                          cursor: "pointer", fontFamily: "inherit"
+                        }}>
+                        회차별 설정 해제
+                      </button>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
 
