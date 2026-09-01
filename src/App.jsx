@@ -8058,10 +8058,13 @@ export default function App() {
                       let latest = "";
                       goals.forEach(g => {
                         (g.tasks || []).forEach(t => {
+                          // ★ [76-1] Object.keys는 넣은 순서를 그대로 준다 — 날짜순이 아니다.
+                          //    지난 날짜 기록을 고치거나 클라우드 병합으로 순서가 섞이면
+                          //    마지막 키가 최신일이 아니어서 '최근 입력일'이 갱신되지 않았다.
+                          //    (같은 계산을 하는 2568행은 이미 .sort()를 쓰고 있었다.)
                           const dates = Object.keys(t.daily || {});
-                          if (dates.length > 0) {
-                            const max = dates[dates.length - 1];
-                            if (max > latest) latest = max;
+                          for (const d of dates) {
+                            if (d > latest) latest = d;
                           }
                         });
                       });
@@ -8574,10 +8577,10 @@ export default function App() {
             dailyGoals.forEach(g => {
               if (g.tasks) {
                 (g.tasks || []).forEach(t => {
+                  // ★ [76-1] 위와 같은 이유 — 키 순서가 날짜순이라는 보장이 없다.
                   const dates = Object.keys(t.daily || {});
-                  if (dates.length > 0) {
-                    const maxDate = dates[dates.length - 1];
-                    if (!latestDate || maxDate > latestDate) latestDate = maxDate;
+                  for (const d of dates) {
+                    if (!latestDate || d > latestDate) latestDate = d;
                   }
                 });
               }
