@@ -2929,6 +2929,19 @@ const ESDM_REPORT_ALIAS = {
   "사회 기술": "사회기술",
   "사회기술: 어른과 동료": "사회기술: 어른 혹은 친구"
 };
+// ★ [64-1] 보고서에 찍는 영역명 다듬기 — 표기만 정리한다(영역을 옮기거나 합치지 않는다).
+//    표에 없는 대영역은 이름이 그대로 나가는데, 새 ELCAR은 원서 제목을 병기해 두어
+//      "Ⅸ 강화제군 (Community of Reinforcers)  (34개)  45%"
+//    처럼 로마숫자와 영문까지 보고서 막대·완료 현황에 찍혔다.
+//    앞의 로마숫자와 끝의 괄호 영문만 떼어 "강화제군"으로 줄인다.
+//    한글 괄호(예: "옹알이(기능X 말)")는 뜻이 담겨 있으므로 건드리지 않고,
+//    영문·기호로만 이뤄진 꼬리 괄호 하나만 벗긴다. 떼고 나서 비면 원본을 쓴다.
+function tidyReportDomainName(domain) {
+  const base = cleanDomainKey(domain);
+  const stripped = base.replace(/\s*[(（][^()（）가-힣]*[)）]\s*$/, "").trim();
+  return stripped || base || domain;
+}
+
 function reportDomainOf(goal) {
   const domain = (goal && goal.domain) || "";
   if (!domain) return domain;
@@ -2936,12 +2949,12 @@ function reportDomainOf(goal) {
   if (table) {
     const code = String((goal && goal.subDomain) || "").trim().split(/\s+/)[0];
     if (code && table[code]) return table[code];
-    return domain;
+    return tidyReportDomainName(domain);
   }
   // ESDM 레벨별 이름 흔들림 통일 (위 표에 걸리지 않은 영역만)
   const alias = ESDM_REPORT_ALIAS[domain.trim()];
   if (alias) return alias;
-  return domain;
+  return tidyReportDomainName(domain);
 }
 
 // 받침 유무에 따라 은/는 조사를 붙임
@@ -11486,11 +11499,25 @@ function GoalCard({ goal, active, onToggle, onRemove, onUpdate, onToggleStatus, 
               if (cutoffArchives.length === 0) return null;
               const archiveDate = cutoffOf(cutoffArchives[0]);
               if (!archiveDate) return null;
-              const recentResumed = resumedTasks.filter(t => t.resumedAt > archiveDate);
-              if (recentResumed.length === 0) return null;
-              const earliestResume = recentResumed.map(t => t.resumedAt).sort()[0];
+              // ★ [65-1] 재실시 날짜가 마지막 보고서 발행일보다 늦을 때만 배지가 떴다.
+              //    보고서 나가기 전에 재개하면 재개한 사실이 화면에서 통째로 사라진다.
+              //    (같은 아동에서 09-01 재실시는 보이는데 08-28 보고서 전에 재개한 것은 안 보였다.)
+              //    재개는 보고서 발행과 무관한 사실이므로 항상 표시한다.
+              //    다만 이 배지의 원래 목적이 "보고서에 중단으로 나간 뒤 재개됨"을 알리는 것이라
+              //    그 경우만 진한 주황으로 두고, 발행 전 재개는 옅은 회색으로 구분한다.
+              const earliestResume = resumedTasks.map(t => t.resumedAt).sort()[0];
+              const afterReport = earliestResume > archiveDate;
               return (
-                <span style={{ fontSize: 9, padding: "2px 7px", background: "#fef0e0", color: "#a85020", borderRadius: 8, fontWeight: 600, border: "1px solid #f5c08a", whiteSpace: "nowrap" }} title={`${archiveDate} 보고서 발행 후 ${earliestResume}에 재실시됨 (${recentResumed.length}개 과제)`}>
+                <span
+                  style={{
+                    fontSize: 9, padding: "2px 7px", borderRadius: 8, fontWeight: 600, whiteSpace: "nowrap",
+                    background: afterReport ? "#fef0e0" : "#f4f3ef",
+                    color: afterReport ? "#a85020" : "#6e6a60",
+                    border: `1px solid ${afterReport ? "#f5c08a" : "#dcd9d0"}`
+                  }}
+                  title={afterReport
+                    ? `${archiveDate} 보고서 발행 후 ${earliestResume}에 재실시됨 (${resumedTasks.length}개 과제)`
+                    : `${earliestResume}에 재실시됨 — ${archiveDate} 보고서 발행 이전 (${resumedTasks.length}개 과제)`}>
                   🔄 {earliestResume} 재실시
                 </span>
               );
@@ -14728,6 +14755,14 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
           Object.keys(groupedByDomain).forEach(k => {
             groupedByDomain[k].sort((a, b) => (_hasActiveTask(a) ? 0 : 1) - (_hasActiveTask(b) ? 0 : 1));
           });
+          // ★ [66-1] 위 정렬은 '영역 안에서만' 동작했다. 목표는 자기 영역의 맨 아래로 가지만
+          //    그 영역 카드 자체는 목록 중간에 그대로 남아서, 진행 과제가 하나도 없는 영역이
+          //    매일 입력하는 영역들 사이에 끼어 있었다("진행 과제 없음"만 뜬 채로).
+          //    영역 카드도 같은 기준으로 내린다 — 안이 다 비면 영역째 아래로.
+          //    영역 사이 순서는 원래 등장 순서를 유지한다(정렬 기준이 같으면 순서 안 바뀜).
+          const _domainHasActive = (list) => (list || []).some(_hasActiveTask);
+          const groupedDomainEntries = Object.entries(groupedByDomain)
+            .sort((a, b) => (_domainHasActive(a[1]) ? 0 : 1) - (_domainHasActive(b[1]) ? 0 : 1));
           return (
             <div key={src} style={{ marginBottom: 16, padding: 12, background: meta.bg, border: `2px solid ${meta.accent}`, borderRadius: 8 }}>
               {/* 커리큘럼 헤더 */}
@@ -14947,7 +14982,7 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
               })()}
               {/* 영역별 카드 */}
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {Object.entries(groupedByDomain).map(([domain, domainGoals]) => (
+                {groupedDomainEntries.map(([domain, domainGoals]) => (
                   <div key={domain} style={{ background: "#fff", border: `1px solid ${meta.accent}`, borderRadius: 6, padding: "8px 10px" }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: meta.deep, marginBottom: 8, paddingBottom: 4, borderBottom: `1px dashed ${meta.accent}` }}>{shortDomain(domain) || domain}</div>
                     {domainGoals.map(g => (
