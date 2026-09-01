@@ -2969,11 +2969,19 @@ function buildStartEndCompare(stos, goals) {
   series.forEach(g => {
     const b = bucket(g.domain);
     // ★ [60-9] 기존엔 둘 다 excludedGoals로 뭉뚱그려서, 지도를 시작도 안 한 영역에
-    //    "O·X 기록 · 달성률 산출 제외"라는 틀린 사유가 나갔다
-    //    (준우 종결 — 학습 영역은 곱셈·나눗셈 진행 예정이라 기록이 0건이다).
+    //    "O·X 기록" 같은 틀린 사유가 나갔다.
+    // ★ [60-16] 그런데 60-9는 series.length로 갈라서 정반대로 뒤집혀 있었다.
+    //    buildGoalSeries는 O·X 단계의 점을 series에 넣지 않는다(`if (s.isOX) return`).
+    //    그래서 순수 O·X 목표는 series가 비어 있고, 60-9는 그걸 "기록 없음"으로 봤다.
+    //      · 준우 맨드 — 실제로는 5~7회기 O·X 기록이 있는데 "본 보고 기간 기록 없음"
+    //      · 보겸 맨드 — 인트라버벌 맨드가 %와 O·X 혼재라 series가 비지 않아 우연히 맞게 나옴
+    //    측정 방식은 series 길이가 아니라 O·X 플래그(currentIsOX·hasOXStage)로 봐야 한다.
+    //    기록 유무는 anyPoints로 본다 — O·X 점도 여기엔 잡힌다.
     if (!g.quotable || g.series.length === 0) {
       b.excludedGoals++;
-      if (g.series.length === 0) b.noDataGoals++; else b.oxGoals++;
+      if (g.currentIsOX || g.hasOXStage) b.oxGoals++;
+      else if (!g.anyPoints) b.noDataGoals++;
+      else b.oxGoals++;   // 점은 있는데 %로 못 쓰는 나머지 — 측정방식 혼재
       return;
     }
     const n = compareEdgeSize(g.series.length);
@@ -6746,6 +6754,7 @@ export default function App() {
         : "본 보고 기간 기록 없음",
       total: r.total,
       sessions: r.maxSessions,
+      oxGoals: r.oxGoals,   // ★ [60-16] '시작 단계' 라벨에서 O·X 동반 여부 판정용
       short: shortDomain(r.domain)
     }));
   }, [stosForReport, includedGoals, needsReportCalc]);
@@ -11601,9 +11610,18 @@ function BarChart({ data }) {
         if (d.noRate || d.starting) {
           // ★ [60-2] 회색 행 두 종류 — 아직 값이 아닌 것(시작 단계)과 %로 환산 못 하는 것(O·X 등).
           const w = d.noRate ? 4 : Math.max(4, (Math.min(d.avg || 0, 100) / 100) * barAreaW);
+          // ★ [60-16] '시작 단계'는 정반응률 목표의 회기 수만 센 값이다(maxSessions).
+          //    O·X 목표는 거기 안 들어가서, 영역 대부분이 O·X인데 정반응률 목표
+          //    하나가 1회기면 영역 전체가 "시작 단계 · 1회기"로 찍혔다.
+          //      보겸 신체발달 — 종이접기 20회기·가위 14회기가 다 O·X인데
+          //      "시작 단계 · 1회기"로 나가, 같은 보고서 완료 현황의
+          //      "신체발달 2/6 마스터"와 앞뒤가 안 맞았다.
+          //    O·X 목표가 함께 있으면 그 사실을 같이 적는다.
           const note = d.noRate
             ? (d.noRateReason || "정반응률 기록 없음")
-            : `시작 단계 · ${d.sessions}회기`;
+            : ((d.oxGoals || 0) > 0
+                ? `O·X 기록 포함 · 정반응률 ${d.sessions}회기`
+                : `시작 단계 · ${d.sessions}회기`);
           const noteShown = note.length > 26 ? note.substring(0, 25) + "…" : note;
           return (
             <g key={i}>
