@@ -2248,11 +2248,31 @@ function buildEndReason(selected, info) {
 //    앞 구간 기록을 되살릴 방법은 없으니, 분석 대상 기간을 표에 따로 밝히고
 //    앞 경과는 선생님이 직접 적는 칸을 둔다. 두 줄 모두 아래 기준을 넘을 때만 인쇄된다.
 const PRIOR_GAP_MIN_MONTHS = 6;
+// ★ [60-10] 30일로 나누면 긴 기간에서 한 달씩 부푼다. 12"개월"이 360일이라
+//    실제 달력보다 5일 짧고, 그 오차가 해마다 쌓인다.
+//      · 준우 종결 2023-06-01~2026-08-31 → 1187일/30 = 39.6 → 40 → "3년 4개월"
+//        (실제 3년 2개월 30일)
+//      · 정확히 3년(2023-06-01~2026-06-01)이면 1096일/30 = 36.5 → 37 → "3년 1개월"
+//    달력 기준으로 개월을 세고, 남은 날은 그 달의 실제 길이로 반올림한다.
 function monthsBetweenDates(a, b) {
   if (!a || !b) return null;
   const s = new Date(a), e = new Date(b);
   if (isNaN(s.getTime()) || isNaN(e.getTime())) return null;
-  return Math.round((e - s) / (1000 * 60 * 60 * 24 * 30));
+  if (e < s) return null;
+  let m = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
+  // 시작일과 같은 '일'을 기준점으로 잡아 넘치는 날수를 잰다
+  const anchor = new Date(e.getFullYear(), e.getMonth(), 1);
+  anchor.setDate(Math.min(s.getDate(), new Date(e.getFullYear(), e.getMonth() + 1, 0).getDate()));
+  let extraDays = Math.round((e - anchor) / 86400000);
+  if (extraDays < 0) {
+    m--;
+    const prev = new Date(e.getFullYear(), e.getMonth() - 1, 1);
+    prev.setDate(Math.min(s.getDate(), new Date(e.getFullYear(), e.getMonth(), 0).getDate()));
+    extraDays = Math.round((e - prev) / 86400000);
+  }
+  const daysInThatMonth = new Date(e.getFullYear(), e.getMonth() + 1, 0).getDate();
+  if (extraDays >= daysInThatMonth / 2) m++;
+  return m;
 }
 function spanLabelOf(months) {
   if (months === null) return "";
@@ -2922,7 +2942,7 @@ function buildStartEndCompare(stos, goals) {
     if (!byDomain[k]) byDomain[k] = {
       domain: k, firsts: [], mids: [], lasts: [],
       total: 0, mastered: 0, paused: 0, ongoing: 0,
-      quotableGoals: 0, excludedGoals: 0,
+      quotableGoals: 0, excludedGoals: 0, oxGoals: 0, noDataGoals: 0,
       maxSessions: 0   // ★ [59-10] 영역 안에서 가장 길게 측정된 목표의 회기 수 — '시작 단계' 판정용
     };
     return byDomain[k];
@@ -2931,7 +2951,14 @@ function buildStartEndCompare(stos, goals) {
   // ① 정반응률 변화 — buildGoalSeries 기준(중단 제외·O·X 제외·상위 단계 우선)
   series.forEach(g => {
     const b = bucket(g.domain);
-    if (!g.quotable || g.series.length === 0) { b.excludedGoals++; return; }
+    // ★ [60-9] 기존엔 둘 다 excludedGoals로 뭉뚱그려서, 지도를 시작도 안 한 영역에
+    //    "O·X 기록 · 달성률 산출 제외"라는 틀린 사유가 나갔다
+    //    (준우 종결 — 학습 영역은 곱셈·나눗셈 진행 예정이라 기록이 0건이다).
+    if (!g.quotable || g.series.length === 0) {
+      b.excludedGoals++;
+      if (g.series.length === 0) b.noDataGoals++; else b.oxGoals++;
+      return;
+    }
     const n = compareEdgeSize(g.series.length);
     const head = g.series.slice(0, n);
     const tail = g.series.slice(-n);
@@ -2970,6 +2997,7 @@ function buildStartEndCompare(stos, goals) {
       change: (firstAvg !== null && lastAvg !== null) ? lastAvg - firstAvg : null,
       total: b.total, mastered: b.mastered, paused: b.paused, ongoing: b.ongoing,
       quotableGoals: b.quotableGoals, excludedGoals: b.excludedGoals,
+      oxGoals: b.oxGoals, noDataGoals: b.noDataGoals,
       maxSessions: b.maxSessions,
       // ★ [57-9] %가 없는 이유를 구분한다. 기존엔 전부 "O·X 기록 N개 — % 환산 제외"로 찍혀서,
       //    전 과제가 중단인 영역(성윤준 '모방' 2과제 전원 중단)에 "O·X 기록 0개"라는
@@ -4288,6 +4316,31 @@ function liveChildren(list) {
   return (Array.isArray(list) ? list : []).filter(c => c && !c.deletedAt);
 }
 
+// ★ [60-8] 저장하면 안 되는 빈 자리표시자 아동.
+//    children의 초기값이 [blankChild()]인데(name·ownerName 모두 ""), 정상 흐름에서는
+//    로드가 끝나며 setChildren(childrenList)로 교체돼 사라진다. 그런데 로드가 빈 결과로
+//    끝나면(새 기기 첫 로그인, 네트워크 실패, 로드 중 삼켜진 예외) 자리표시자가 살아남고,
+//    loaded=true가 되는 순간 자동저장이 그걸 id째로 클라우드에 올려버린다.
+//    한번 올라가면 mergeChildren이 id 기준이라 모든 기기에 계속 합쳐지고,
+//    deletedAt이 없어 liveChildren도 못 거른다 → 대시보드에 "(미할당) 아동 1 · 목표 0".
+//    이름이 비었고 목표도 기록도 하나 없는 것만 잡는다. 사람이 만든 아동은
+//    addChild가 이름을 "새 아동"으로라도 채우므로 여기 걸리지 않는다.
+function isBlankPlaceholderChild(c) {
+  if (!c) return true;
+  if (((c.info?.name || "").trim())) return false;
+  if (((c.info?.ownerName || "").trim())) return false;
+  const goals = Array.isArray(c.goals) ? c.goals : [];
+  if (goals.length > 0) return false;
+  // 이름만 지운 실제 아동을 자리표시자로 오판하면 그 아동이 조용히 동기화에서 빠진다.
+  // 사람 손이 닿은 흔적이 하나라도 있으면 실제 아동으로 본다.
+  const i = c.info || {};
+  const touched = ["birth", "therapist", "evalStart", "evalEnd", "startDate",
+    "finalEndDate", "archivedAt", "fn", "pStart", "pEnd", "sWeek", "sMin", "sTotal"];
+  if (touched.some(k => String(i[k] || "").trim())) return false;
+  if (c.deletedAt) return false;   // 삭제 표식은 반드시 올라가야 다른 기기에 전파된다
+  return true;
+}
+
 function ManualModal({ onClose }) {
   const sec = (title, lines) => (
     <section style={{ marginBottom: 20 }}>
@@ -5508,7 +5561,15 @@ export default function App() {
                   if (Array.isArray(parsed.children)) cloudChildren = parsed.children.map(migrateChild);
                 }
               } catch (e) {}
-              const toSave = cloudChildren ? mergeChildren(children, cloudChildren) : children;
+              // ★ [60-8] 업로드 대상에서 빈 자리표시자를 뺀다.
+              //    로컬(localStorage)에는 그대로 둔다 — 아동이 0명일 때 화면이 기댈 자리가
+              //    필요하고, 로컬은 이 기기 밖으로 안 나가므로 번지지 않는다.
+              //    클라우드는 모든 기기가 병합해 가는 곳이라 여기만 막으면 된다.
+              const _localToSend = children.filter(c => !isBlankPlaceholderChild(c));
+              const toSave = cloudChildren ? mergeChildren(_localToSend, cloudChildren) : _localToSend;
+              // 보낼 게 아무것도 없으면 저장 자체를 건너뛴다 — 빈 배열을 올리면
+              // 다른 기기의 아동이 지워지는 게 아니라(병합은 id 합집합) 무의미한 쓰기만 는다.
+              if (toSave.length === 0) return;
               await window.storage.set(FILE_KEY, JSON.stringify({
                 children: toSave,
                 activeChildId,
@@ -6630,9 +6691,13 @@ export default function App() {
       quotable: r.quotable,
       // 내부 사유 문자열("O·X·측정방식 혼재 2개 — % 환산 제외")은 보호자 문서에 그대로 쓰기엔
       // 용어가 무겁다. 뜻은 같게, 표기만 카드 각주와 같은 말로 바꾼다.
+      // ★ [60-11] "달성률 산출 제외"는 시스템 사정을 보호자에게 떠넘기는 말이다.
+      //    맨드는 2개 다 준거를 달성했는데 "제외"라고 적히면 못 한 것처럼 읽힌다.
+      //    빠진 이유가 아니라 기록 방식을 적는다 — 세부 목표 카드의
+      //    "회기당 1회 기회 · O 성공 / X 실패"와 같은 말로 맞춘다.
       noRateReason: r.quotable ? null
         : (r.total > 0 && r.paused === r.total) ? "전 과제 중단"
-        : (r.excludedGoals > 0) ? "O·X 기록 · 달성률 산출 제외"
+        : (r.oxGoals > 0) ? "회기당 1회 시도 · O·X로 기록"
         : "본 보고 기간 기록 없음",
       total: r.total,
       sessions: r.maxSessions,
@@ -12562,7 +12627,7 @@ cleanedHTML + '\n' +
             {balanceBarRows.length > 0 && (
               <PrintSection num={nextSn()} title="영역별 균형 분석">
                 <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                  ※ 영역별 최근 {COMPARE_EDGE_N}회기 평균 달성률 · 괄호는 단기 목표(STO) 수 · 회색은 달성률로 볼 수 없는 영역<br />
+                  ※ 영역별 최근 {COMPARE_EDGE_N}회기 평균 달성률 · 괄호는 단기 목표(STO) 수 · 회색은 달성률로 나타내지 않는 영역<br />
                   ※ 초록 80% 이상 숙달 · 파랑 60~79% 진전 · 주황 60% 미만 집중 지도
                 </div>
                 <div style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
@@ -20218,24 +20283,16 @@ function DomainCompletionSection({ goals }) {
     //    그래서 '시작 vs 종결 비교'·종합 평가는 '택트'라고 쓰는데
     //    이 표만 '화자'라고 써서 같은 보고서 안에서 영역 이름이 갈렸다.
     const dom = reportDomainOf(g) || "(영역 없음)";
-    if (!byDomain[dom]) byDomain[dom] = { total: 0, mastered: 0, paused: 0, ongoing: 0, upcoming: 0, masteredList: [] };
+    if (!byDomain[dom]) byDomain[dom] = { total: 0, mastered: 0, paused: 0, ongoing: 0, upcoming: 0 };
     const started = goalHasRecord(g);
-    const doneTasks = [];
     (g.tasks || []).forEach(t => {
       const lg = t.listGroup || "1";
       byDomain[dom].total++;
-      if (lg === "2") { byDomain[dom].mastered++; doneTasks.push(t.name); }
+      if (lg === "2") byDomain[dom].mastered++;
       else if (lg === "paused") byDomain[dom].paused++;
       else if (!started) byDomain[dom].upcoming++;
       else byDomain[dom].ongoing++;
     });
-    // ★ [60-7] 종결모드는 '영역별 세부 학습 목표'를 이 섹션으로 통째 대체한다.
-    //    그래서 종결보고서 전체에 목표 이름이 한 번도 안 나왔다 — 유치원·학교·후속
-    //    치료 기관에 넘길 때 "무엇을 습득했는지"를 읽을 수 없는 문서가 된다.
-    //    막대 아래에 마스터한 목표·단계만 이름으로 적는다(진행중·중단은 제외).
-    if (doneTasks.length > 0) {
-      byDomain[dom].masteredList.push({ goal: g.name || "(목표명 없음)", tasks: doneTasks.filter(Boolean) });
-    }
   });
 
   const domains = Object.entries(byDomain)
@@ -20369,35 +20426,6 @@ function DomainCompletionSection({ goals }) {
         })}
       </div>
 
-      {/* ★ [60-7] 마스터한 과제 목록 — 인계용. 영역별 막대 순서를 그대로 따른다. */}
-      {masteredAll > 0 && (
-        <div style={{ marginTop: 16, pageBreakInside: "avoid", breakInside: "avoid" }}>
-          <div style={{ fontSize: 11.5, fontWeight: 700, color: "#3d6014", marginBottom: 6 }}>
-            ✓ 종결 시점까지 습득한 과제 ({masteredAll}개)
-          </div>
-          <div style={{ border: "1px solid #d4e5ba", borderRadius: 6, overflow: "hidden" }}>
-            {domains.filter(([, d]) => (d.masteredList || []).length > 0).map(([dom, d], i) => (
-              <div key={dom} style={{
-                display: "flex", gap: 10, padding: "7px 12px", fontSize: 11, lineHeight: 1.65,
-                background: i % 2 === 0 ? "#f9fbf5" : "#fff",
-                borderTop: i === 0 ? "none" : "1px solid #e8f0da",
-                pageBreakInside: "avoid", breakInside: "avoid"
-              }}>
-                <div style={{ minWidth: 78, fontWeight: 600, color: "#5a8c1f" }}>{cleanDomainKey(dom)}</div>
-                <div style={{ color: "#333", flex: 1 }}>
-                  {d.masteredList.map((m, mi) => (
-                    <span key={mi}>
-                      {mi > 0 && <span style={{ color: "#bbb" }}> · </span>}
-                      {m.goal}
-                      {m.tasks.length > 0 && <span style={{ color: "#888" }}> ({m.tasks.join(", ")})</span>}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
