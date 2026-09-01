@@ -7032,18 +7032,32 @@ export default function App() {
       const childCount = _live.length;
       const goalCount = _live.reduce((sum, c) => sum + (c.goals?.length || 0), 0);
       const archiveCount = _live.reduce((sum, c) => sum + (Array.isArray(c.archiveList) ? c.archiveList.length : 0), 0);
+      // ★ [62-1] ESDM 문항을 백업에 담는다.
+      //    ESDM 문항은 코드에 없다 — mergeEsdmItems는 영역·레벨 뼈대만 갖고 있고
+      //    실제 항목은 Supabase 키(gd-aba-esdm-items) 하나에만 산다.
+      //    그런데 지금까지 백업 payload는 children만 담아서, 그 키가 날아가면
+      //    관리자가 직접 입력한 전 레벨 문항을 되살릴 방법이 아예 없었다.
+      //    children과 같은 파일에 넣어 한 번의 백업으로 둘 다 지켜지게 한다.
+      const _esdmItems = (esdmUserItems && typeof esdmUserItems === "object") ? esdmUserItems : null;
+      const esdmItemCount = _esdmItems
+        ? Object.values(_esdmItems).reduce(
+            (s, lv) => s + Object.values(lv || {}).reduce(
+              (t, arr) => t + (Array.isArray(arr) ? arr.filter(x => String(x || "").trim()).length : 0), 0), 0)
+        : 0;
       const payload = {
         type: "gd-aba-iep-backup",
-        version: 1,
+        version: 2,   // ★ [62-1] esdmItems 추가 — v1 파일도 그대로 복원된다(아래 복원부 참고)
         savedAt: new Date().toISOString(),
         meta: {
           childCount,
           goalCount,
           archiveCount,
+          esdmItemCount,
           childNames: _live.map(c => c.info?.name || "(이름없음)").filter(Boolean)
         },
         activeChildId,
-        children
+        children,
+        esdmItems: _esdmItems
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -7093,7 +7107,7 @@ export default function App() {
         }
       } catch (e) {}
       if (!silent) {
-        alert(`✓ 전체 백업 완료\n아동 ${childCount}명 · 목표 ${goalCount}개 · 보관 ${archiveCount}건\n\n다운로드된 JSON 파일을 안전한 곳에 보관하세요.\n복원이 필요하면 [📂 복원] 버튼을 사용하세요.`);
+        alert(`✓ 전체 백업 완료\n아동 ${childCount}명 · 목표 ${goalCount}개 · 보관 ${archiveCount}건${esdmItemCount > 0 ? `\nESDM 문항 ${esdmItemCount}개` : ""}\n\n다운로드된 JSON 파일을 안전한 곳에 보관하세요.\n복원이 필요하면 [📂 복원] 버튼을 사용하세요.`);
       }
     } catch (e) {
       if (!silent) alert("백업 실패: " + (e?.message || "알 수 없는 오류"));
@@ -7133,6 +7147,20 @@ export default function App() {
         const savedAtLabel = data.savedAt ? new Date(data.savedAt).toLocaleString("ko-KR") : "알 수 없음";
         const importedNames = data.children.map(c => c.info?.name || "(이름없음)").filter(Boolean);
 
+        // ★ [62-2] 백업 파일의 ESDM 문항. 없으면 null — 이때는 현재 문항을 건드리지 않는다.
+        //    62-1 이전(version 1)에 받은 백업 파일에는 esdmItems가 아예 없다.
+        //    그 파일로 복원할 때 문항을 빈 값으로 덮으면, 관리자가 직접 입력한 전 레벨이
+        //    복원 한 번으로 통째로 날아간다 — 이 작업이 막으려던 사고를 복원이 일으키는 꼴이다.
+        //    "파일에 있을 때만 덮어쓴다"가 규칙이다.
+        const _cntEsdm = (obj) => (obj && typeof obj === "object")
+          ? Object.values(obj).reduce(
+              (s, lv) => s + Object.values(lv || {}).reduce(
+                (t, arr) => t + (Array.isArray(arr) ? arr.filter(x => String(x || "").trim()).length : 0), 0), 0)
+          : 0;
+        const importedEsdm = (data.esdmItems && typeof data.esdmItems === "object") ? data.esdmItems : null;
+        const importedEsdmCount = _cntEsdm(importedEsdm);
+        const currentEsdmCount = _cntEsdm(esdmUserItems);
+
         const _liveCur = liveChildren(children);
         const currentChildCount = _liveCur.length;
         const currentGoalCount = _liveCur.reduce((sum, c) => sum + ((c.goals && c.goals.length) || 0), 0);
@@ -7154,17 +7182,26 @@ export default function App() {
           nameDiffMsg += `\n  - 사라질 아동: ${removedNames.join(", ")}`;
         }
 
+        // ESDM 문항이 어떻게 될지 확인 창에서 분명히 밝힌다 — 조용히 바뀌면 안 되는 값이다.
+        const esdmMsg = importedEsdm === null
+          ? `  ESDM 문항: ${currentEsdmCount}개 (이 파일에 없음 — 그대로 유지)\n`
+          : `  ESDM 문항: ${currentEsdmCount}개 → ${importedEsdmCount}개${fmtDiff(importedEsdmCount - currentEsdmCount)}\n`;
+
         const confirmMsg =
           `⚠️ 백업 파일로 복원합니다 (현재 데이터 덮어쓰기)\n\n` +
           `📊 데이터 비교\n` +
           `  아동 수: ${currentChildCount}명 → ${importedChildCount}명${fmtDiff(childDiff)}\n` +
           `  목표 수: ${currentGoalCount}개 → ${importedGoalCount}개${fmtDiff(goalDiff)}\n` +
           `  보관 보고서: ${currentArchiveCount}건 → ${importedArchiveCount}건${fmtDiff(archiveDiff)}\n` +
+          esdmMsg +
           `  백업 시점: ${savedAtLabel}` +
           nameDiffMsg +
           `\n\n` +
           (removedNames.length > 0
             ? `🚨 ${removedNames.length}명의 아동 데이터가 영구히 사라집니다.\n   사라지는 아동의 데이터가 다른 백업 파일에 있는지 확인하세요.\n\n`
+            : ``) +
+          (importedEsdm !== null && importedEsdmCount < currentEsdmCount
+            ? `🚨 ESDM 문항이 ${currentEsdmCount - importedEsdmCount}개 줄어듭니다.\n   이 문항은 코드에 없어 되살리려면 다시 입력해야 합니다.\n\n`
             : ``) +
           `현재 데이터는 모두 사라지고 백업 데이터로 교체됩니다.\n정말 진행할까요?`;
 
@@ -7183,7 +7220,19 @@ export default function App() {
             }
           } catch (e) {}
 
-          alert(`✓ 복원 완료\n아동 ${importedChildCount}명 · 목표 ${importedGoalCount}개가 복구되었습니다.`);
+          // ★ [62-2] ESDM 문항은 파일에 있을 때만 되돌린다.
+          //    saveEsdmItems가 Supabase 저장까지 하고 성공 여부를 돌려주므로,
+          //    아동은 복원됐는데 문항만 조용히 실패하는 일이 없게 결과를 따로 알린다.
+          if (importedEsdm === null) {
+            alert(`✓ 복원 완료\n아동 ${importedChildCount}명 · 목표 ${importedGoalCount}개가 복구되었습니다.\n\nESDM 문항은 이 백업 파일에 없어 기존 ${currentEsdmCount}개를 그대로 두었습니다.`);
+          } else {
+            (async () => {
+              const ok = await saveEsdmItems(importedEsdm);
+              alert(ok
+                ? `✓ 복원 완료\n아동 ${importedChildCount}명 · 목표 ${importedGoalCount}개 · ESDM 문항 ${importedEsdmCount}개가 복구되었습니다.`
+                : `⚠ 아동 ${importedChildCount}명 · 목표 ${importedGoalCount}개는 복원됐지만\nESDM 문항 저장에 실패했습니다.\n네트워크를 확인한 뒤 같은 파일로 다시 복원해 주세요.`);
+            })();
+          }
         });
       } catch (err) {
         alert("복원 실패: JSON 파일을 읽을 수 없습니다.\n" + (err?.message || ""));
