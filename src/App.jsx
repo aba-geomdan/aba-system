@@ -1039,7 +1039,13 @@ function buildSummary(stosForReport, info) {
   //    %평균 계산은 그대로 active만 본다(중단 STO는 수행 지표에서 빼는 게 맞다).
   const total = stosForReport.length;
   const pausedCnt = stosForReport.filter(s => s.status === "중단").length;
-  const pausedNote = pausedCnt > 0 ? ` (이 중 ${pausedCnt}개는 학습 경로 조정에 따라 중단)` : "";
+  // ★ [60-20] "이 중 N개는 … 중단"이 done(준거 달성 수)을 가리키는 것처럼 읽혔다.
+  //    done은 active(중단 제외)에서만 세므로 중단 과제는 애초에 그 안에 없다.
+  //      보겸 — 표지 "5개에서 준거를 달성했습니다 (이 중 1개는 … 중단)"
+  //             완료 현황 "5개 마스터 · 1개 중단" (신체발달 2마스터+3진행+1중단=6)
+  //             → 같은 1개를 표지는 달성 안쪽, 완료 현황은 바깥쪽으로 세고 있었다.
+  //    total(21) 안쪽이되 done(5) 바깥쪽이라는 걸 문장에서 분명히 한다.
+  const pausedNote = pausedCnt > 0 ? ` (이와 별도로 ${pausedCnt}개는 학습 경로 조정에 따라 중단)` : "";
   const done = active.filter(s => s.status === "완료").length;
   // ★ [57-7] 표지 요약도 buildGoalSeries 기준으로 맞춘다.
   //    기존엔 STO 단위로 !s.isOX만 봐서, 한 목표 안에 L1=O·X / L2=%가 섞여 있으면
@@ -2393,7 +2399,14 @@ function buildFinalSummary(goals, info, periodEnd, stos) {
   if (referral) {
     const firstSentence = referral.split(/[.\n]/).find(s => s.trim().length > 10) || referral.split("\n")[0];
     if (firstSentence && firstSentence.trim()) {
-      para1Parts.push(`치료 시작 시점에는 ${firstSentence.trim().replace(/^[·\-\s]+/, "")}${firstSentence.endsWith(".") ? "" : "."}`);
+      // ★ [60-22] 앞머리 "치료 시작 시점에는"에 의뢰 사유 원문을 그대로 붙여서
+      //    주어가 두 번 나왔다 — "치료 시작 시점에는 준우는 본 치료를 의뢰받을 무렵…"
+      //    (준우·보겸 두 보고서 모두). 인용문 선두의 "○○는/은"만 떼고 붙인다.
+      //    이름이 다른 위치에 나오는 문장은 건드리지 않는다(선두 앵커 ^만 본다).
+      const quoted = firstSentence.trim()
+        .replace(/^[·\-\s]+/, "")
+        .replace(new RegExp("^" + fn + "(?:은|는|이|가)\\s+"), "");
+      para1Parts.push(`치료 시작 시점에는 ${quoted}${firstSentence.endsWith(".") ? "" : "."}`);
     }
   }
   if (totalTasks > 0 && totalDomains > 0) {
@@ -2591,15 +2604,23 @@ function buildFinalGrowth(goals, info, stos) {
     //    둘 다 맞는 값인데 문단이 그래프를 설명하는 말처럼 읽혀 앞뒤가 안 맞아 보였다.
     //    기준을 한 번 밝혀서 어느 숫자를 말하는지 알 수 있게 한다.
     const unit = "영역별 평균 기준";
+    // ★ [60-21] 그래프와 흐름이 달라 보이는 이유를 적는 문장이 rise>=25 가지에만 있었다.
+    //    보겸 종결 — 이 문단 37→51→54(오름)인데 앞 페이지 그래프 끝점은 23%.
+    //    rise 17이라 아래 rise>=5 가지로 빠져 설명이 통째로 빠졌고, 괴리는 준우보다 컸다.
+    //    (준우 rise 29 → 첫 가지 → 문장 있음. 걸리고 안 걸리고가 우연이었다.)
+    //    수치를 올랐다고 말하는 가지에는 전부 붙인다. 아래 dip>=10·rise<=-10 두 가지는
+    //    이미 각자 '새 목표가 낮은 값에서 출발' 설명을 갖고 있어 중복이라 뺀다.
+    const graphNote = `회기별 전체 목표 평균을 그린 '성장 추이' 그래프는 새 목표·새 단계가 투입될 때마다 낮은 값에서 다시 출발하므로, 위 수치와 흐름이 다르게 보일 수 있습니다.`;
     if (rise >= 25 && dip < 10) {
       timeline = `학습 곡선 분석 결과(${unit}), 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 향상이 확인되었습니다. ` +
                  `이는 단기적 향상이 아닌 치료 기간 전반에 걸친 학습 동기 유지와 능동적 참여의 결과로 해석됩니다. ` +
-                 `회기별 전체 목표 평균을 그린 '성장 추이' 그래프는 새 목표·새 단계가 투입될 때마다 낮은 값에서 다시 출발하므로, 위 수치와 흐름이 다르게 보일 수 있습니다.`;
+                 graphNote;
     } else if (rise >= 5 && dip < 10) {
       // ★ [57-16] 기준을 10 → 5로 내린다. 9%p일 때 표지는 "올랐습니다",
       //    종합 평가는 "9%p 향상되어"인데 곡선만 "큰 기복 없이"라고 적어 톤이 어긋났다.
       timeline = `학습 곡선 분석 결과(${unit}), 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%까지 안정적인 향상이 확인되었습니다. ` +
-                 `회기 누적에 따른 점진적 변화 양상으로, 보호자의 지속적 지원이 학습 진행에 기여하였습니다.`;
+                 `회기 누적에 따른 점진적 변화 양상으로, 보호자의 지속적 지원이 학습 진행에 기여하였습니다. ` +
+                 graphNote;
     } else if (dip >= 10 && rise > 0) {
       // 중반이 정점, 종결이 그보다 낮음 — 전체로는 올랐지만 "일관된 향상"은 아니다.
       timeline = `학습 곡선 분석 결과(${unit}), 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%까지 향상된 뒤 종결 시점 ${lateAvg}%로 나타났습니다. ` +
@@ -2609,12 +2630,14 @@ function buildFinalGrowth(goals, info, stos) {
                  `종결 시점 평균이 초기보다 낮으므로, 보고 기간 후반에 추가된 목표의 난이도와 목표별 개별 추이를 함께 확인해 주시기 바랍니다.`;
     } else if (lateAvg >= 75) {
       timeline = `${fn}${josa은는(fn)} 초기 ${earlyAvg}% 수준에서 종결 시점 ${lateAvg}%로(${unit}), 치료 기간 전반에 걸쳐 안정적인 학습 수행을 유지하였습니다. ` +
-                 `이는 학습 환경 적응이 신속히 이루어지고 안정적인 학습 수행 양상이 형성되었음을 나타냅니다.`;
+                 `이는 학습 환경 적응이 신속히 이루어지고 안정적인 학습 수행 양상이 형성되었음을 나타냅니다. ` +
+                 graphNote;
     } else {
       // ★ [57-14] 기존 문구는 종결 시점 값을 "치료 기간 동안 평균"이라고 불렀다.
       //    같은 보고서의 막대·비교 종결 열과 같은 값인데 이름만 달라 어긋나 보였다.
       timeline = `학습 곡선 분석 결과(${unit}), 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 나타났으며, ` +
-                 `큰 기복 없이 회기별 단계적 학습 진행이 확인되었습니다.`;
+                 `큰 기복 없이 회기별 단계적 학습 진행이 확인되었습니다. ` +
+                 graphNote;
     }
     paragraphs.push(timeline.replace(/\(가\)/g, i_ga));
   } else if (hasStos && totalMastered > 0) {
@@ -11777,6 +11800,33 @@ function VbmappGrid({ goals }) {
   );
 }
 
+// ★ [60-23] '▸ 소제목' 줄이 본문과 갈라져 페이지 끝에 혼자 남던 것.
+//    인계·권고·가정 유지 방안 본문은 한 덩어리 문자열을 \n으로 잘라 <p>로 나열하는데,
+//    <p> 사이는 어디서든 페이지가 끊긴다.
+//      보겸 종결 — 8페이지 마지막 줄이 "▸ 효과적인 강화 방식", 본문은 9페이지 첫 줄.
+//    60-5는 '영역별 완료 현황' 카드만 봐서 이 섹션엔 안 닿았다.
+//    ▸로 시작하는 줄에 breakAfter: avoid를 걸어 바로 뒤 문단과 붙여 둔다.
+//    (문단 자체를 묶지 않으므로 긴 본문은 그대로 다음 장으로 흘러간다.)
+function markedLines(text, keyPrefix) {
+  return String(text || "").split("\n").map((line, i) => {
+    const isHeading = line.trim().startsWith("▸");
+    return (
+      <p
+        key={`${keyPrefix}-${i}`}
+        style={{
+          margin: line.trim() === "" ? "4px 0" : "0 0 6px 0",
+          breakAfter: isHeading ? "avoid" : "auto",
+          pageBreakAfter: isHeading ? "avoid" : "auto",
+          breakInside: "avoid",
+          pageBreakInside: "avoid",
+        }}
+      >
+        {line || "\u00A0"}
+      </p>
+    );
+  });
+}
+
 function PrintView({ info, goals, domainAvgs, balanceBarRows = [], domainLevelOverrides, reportSections, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportBehaviors, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, archiveList, dailyMemos, mode, onBack, autoPrint = "", onAutoPrintDone }) {
   const isIepMode = mode === "iep";
   const isFinalMode = mode === "final";  // ★ 종결보고서 모드
@@ -12975,11 +13025,7 @@ cleanedHTML + '\n' +
                     {/* 강점 (전반적 패턴) - 먼저 큰 그림 */}
                     {strengthsText && (
                       <div style={{ marginBottom: highlightsText ? 14 : 0 }}>
-                        {personalize(strengthsText).split("\n").map((line, i) => (
-                          <p key={`s-${i}`} style={{ margin: line.trim() === "" ? "4px 0" : "0 0 6px 0" }}>
-                            {line || "\u00A0"}
-                          </p>
-                        ))}
+                        {markedLines(personalize(strengthsText), "s")}
                       </div>
                     )}
                     {/* 구체적 변화 사건 - 강점 다음 */}
@@ -12989,11 +13035,7 @@ cleanedHTML + '\n' +
                         {strengthsText && (
                           <div style={{ paddingTop: 10, borderTop: "0.5pt solid #f0e0e5", marginBottom: 4 }} />
                         )}
-                        {personalize(highlightsText).split("\n").map((line, i) => (
-                          <p key={`h-${i}`} style={{ margin: line.trim() === "" ? "4px 0" : "0 0 6px 0" }}>
-                            {line || "\u00A0"}
-                          </p>
-                        ))}
+                        {markedLines(personalize(highlightsText), "hl")}
                       </div>
                     )}
                   </div>
@@ -13046,8 +13088,8 @@ cleanedHTML + '\n' +
               if (!homeClean) return null;
               return (
                 <PrintSection num={nextSn()} title="가정에서의 유지 방안" accent>
-                  <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-line" }}>
-                    {personalize(homeClean)}
+                  <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333" }}>
+                    {markedLines(personalize(homeClean), "hm")}
                   </div>
                 </PrintSection>
               );
@@ -13117,11 +13159,7 @@ cleanedHTML + '\n' +
                     <div style={{ marginBottom: handoverClean ? 14 : 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 6 }}>▸ 권고사항</div>
                       <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333" }}>
-                        {personalize(recClean).split("\n").map((line, i) => (
-                          <p key={`r-${i}`} style={{ margin: line.trim() === "" ? "4px 0" : "0 0 6px 0" }}>
-                            {line || "\u00A0"}
-                          </p>
-                        ))}
+                        {markedLines(personalize(recClean), "r")}
                       </div>
                     </div>
                   )}
@@ -13133,11 +13171,7 @@ cleanedHTML + '\n' +
                         ※ 유치원·학교·후속 치료 기관 등으로 이동 시 다음 정보가 도움이 됩니다.
                       </div>
                       <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#333" }}>
-                        {personalize(handoverClean).split("\n").map((line, i) => (
-                          <p key={`h-${i}`} style={{ margin: line.trim() === "" ? "4px 0" : "0 0 6px 0" }}>
-                            {line || "\u00A0"}
-                          </p>
-                        ))}
+                        {markedLines(personalize(handoverClean), "h")}
                       </div>
                     </div>
                   )}
