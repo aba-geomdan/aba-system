@@ -2984,11 +2984,48 @@ const ESDM_REPORT_ALIAS = {
 //    앞의 로마숫자와 끝의 괄호 영문만 떼어 "강화제군"으로 줄인다.
 //    한글 괄호(예: "옹알이(기능X 말)")는 뜻이 담겨 있으므로 건드리지 않고,
 //    영문·기호로만 이뤄진 꼬리 괄호 하나만 벗긴다. 떼고 나서 비면 원본을 쓴다.
+// ★ [74-2] ELCAR 옛 대영역명 → 새 이름.
+//    63-1에서 대영역 이름을 책 기준으로 고쳤는데, 그 전에 담아둔 목표에는
+//    옛 이름이 그대로 남아 한 아동 보고서에 같은 영역이 두 줄로 나왔다
+//    ("신체발달"과 "신체 발달", "조건화된 강화"와 "관찰 반응 스크리닝").
+//    REPORT_DOMAIN_MAP에 키가 있는 넷(언어행동기초·청자·화자·자기관리)은
+//    거기서 이미 처리되므로 여기에는 표에 없는 대영역만 적는다.
+//    goals 데이터는 건드리지 않는다 — 보고서에 찍을 때만 이름을 바꿔 부른다.
+const ELCAR_OLD_DOMAIN_ALIAS = {
+  "선호물·강화제": "선호물/강화제 스크리닝",
+  "조건화된 강화": "관찰 반응 스크리닝",
+  "화자 언어 작동": "화자 언어 작동 행동 스크리닝",
+  "교수 준비도": "교수 준비도 스크리닝",
+  "신체발달": "신체 발달",
+};
+
 const VBMAPP_REPORT_ALIAS = {
+  // ── 새 이름 (67-1 이후) ──
   "청자반응": "청자",
   "동작 모방": "모방",
   "사회성 행동과 사회적 놀이": "사회성",
   "시지각 기술과 샘플매칭": "시각 변별·매칭",
+  // ── ★ [74-1] 옛 이름 (67-1 이전에 담아둔 목표에 저장된 값) ──
+  //    기존 아동의 goals에는 "Tact (명명)" 같은 옛 영역명이 그대로 남아 있어,
+  //    한 아동 보고서에 "택트 2개"와 "Tact (명명) 4개"가 따로 나왔다.
+  //    같은 것을 두 줄로 세는 셈이라 옛 이름도 새 보고서 이름으로 보낸다.
+  //    goals 데이터는 건드리지 않는다 — 보고서에 찍을 때만 이름을 바꿔 부른다.
+  "Mand (요구)": "맨드",
+  "Tact (명명)": "택트",
+  "Listener Responding (청자 반응)": "청자",
+  "VP/MTS (시각 수행·매칭)": "시각 변별·매칭",
+  "Play (독립 놀이)": "독립놀이",
+  "Social (사회성)": "사회성",
+  "Motor Imitation (운동 모방)": "모방",
+  "Echoic (에코익)": "에코익",
+  "Spontaneous Vocal (자발 발성)": "자발적 발성 행동",
+  "LRFFC (기능·특성·범주 청자반응)": "LRFFC",
+  "Intraverbal (인트라버벌)": "인트라버벌",
+  "Classroom Routines (학급 일과)": "학급 일과와 집단활동기술",
+  "Group Skills (집단 기술)": "학급 일과와 집단활동기술",
+  "Reading (읽기)": "읽기",
+  "Writing (쓰기)": "쓰기",
+  "Math (수학)": "수학",
 };
 
 function tidyReportDomainName(domain) {
@@ -3016,6 +3053,9 @@ function reportDomainOf(goal) {
   //    그쪽에 맞춰야 같은 아동의 보고서가 시점마다 달라지지 않는다.
   const vbAlias = VBMAPP_REPORT_ALIAS[domain.trim()];
   if (vbAlias) return vbAlias;
+  // ★ [74-2] ELCAR 옛 대영역명 — 로마숫자를 뗀 뒤 비교한다("Ⅺ 신체발달" → "신체발달").
+  const elcarOld = ELCAR_OLD_DOMAIN_ALIAS[cleanDomainKey(domain)];
+  if (elcarOld) return elcarOld;
   return tidyReportDomainName(domain);
 }
 
