@@ -8542,9 +8542,17 @@ export default function App() {
           const activeChildren = visibleForStats.filter(c => !c.info?.finalEndDate).length;
           const terminatedChildren = visibleForStats.filter(c => c.info?.finalEndDate).length;
           const archivedChildren = _liveAll.filter(c => c.info?.archivedAt).length;
-          
+
+          // ★ [75-1] '🗄️ 보관 아동' 카드를 눌러도 이 화면이 그대로였다.
+          //    카드는 showArchived를 뒤집는데 아래 선생님별 현황은 visibleForStats(보관 항상 제외)만
+          //    써서, '표시 중 / 숨김' 글자만 바뀌고 목록에는 아무 변화가 없었다.
+          //    (그 토글이 실제로 먹는 곳은 아동 선택 목록이라 여기서는 티가 안 났다.)
+          //    선생님별 현황에만 반영한다 — 위 숫자 카드(활동 중·종료)는 그대로 둔다.
+          //    보관 아동을 활동 중으로 세면 안 되고, 카드 자체가 보관을 따로 세고 있다.
+          const statsSource = showArchived ? _liveAll : visibleForStats;
+
           const teacherStats = {};
-          visibleForStats.forEach(child => {
+          statsSource.forEach(child => {
             const owner = child.info?.ownerName || "(미할당)";
             if (!teacherStats[owner]) {
               teacherStats[owner] = {
