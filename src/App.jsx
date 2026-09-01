@@ -17049,7 +17049,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, balanceBarRows = [],
           <div style={CS}>
             <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 8, color: PKD }}>📊 영역별 세부 학습 목표</h3>
             <div style={{ fontSize: 11, color: "#666", lineHeight: 1.7, padding: "8px 12px", background: "#FFFAFB", borderLeft: "2px solid #F5A0B1", borderRadius: 4, marginBottom: 12 }}>
-              ※ 각 목표는 영역별로 그룹화되어 있으며, 진행률과 최근 데이터 추이를 함께 표시합니다.<br />
+              ※ 각 목표는 영역별로 그룹화되어 있으며, 진행 상태와 최근 데이터 추이를 함께 표시합니다.<br />
               ※ 미니 추이선은 학습 시작부터 현재까지의 평가 데이터 흐름을 보여줍니다.<br />
               ※ 회기당 1회만 시도하는 목표는 O(성공) · X(실패)로 표시됩니다.
             </div>
