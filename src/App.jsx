@@ -1089,15 +1089,21 @@ function buildSummary(stosForReport, info) {
   } else if (diff >= 5) {
     // ★ [수정] "평균 달성률"이 어떤 평균인지 밝힌다 — 성장 추이 그래프(회기별 전체 평균)와
     //    계산 방식이 달라 숫자가 다르게 보이던 문제를 문구로 구분한다.
+    // ★ [60-12] 그런데 "목표별"이라고 써놔서 구분이 안 됐다. 그래프 제목이
+    //    '성장 추이 (전체 목표 평균)'이라 둘 다 목표 평균으로 읽힌다.
+    //    실제로 이 값은 buildStartEndCompare의 영역 행(quotableRows)을 평균낸 것이다.
+    //      준우 — 표지 50% = (언어행동 87 + 청자 53 + 학습능력 31 + 화자 29) / 4
+    //             그래프 끝점 33% = 그날 진행 중인 목표 전체의 평균
+    //    두 숫자가 다른 건 계산이 틀려서가 아니라 세는 단위가 달라서다. 이름으로 가른다.
     // ★ [57-9] 기준을 10 → 5로 내린다. 7%p일 때 표지는 "유지했고", 종합 평가는
     //    "7%p 향상"이라고 적어 같은 값을 두 가지로 말하던 문제.
-    return `${fn}${josa은는(fn)} 본 보고 기간에 목표별 달성률 평균이 ${firstAvg}%에서 ${lastAvg}%로 +${diff}%p 올랐습니다. ${total}개 STO 중 ${done}개에서 준거를 달성했습니다${pausedNote}.`;
+    return `${fn}${josa은는(fn)} 본 보고 기간에 영역별 달성률 평균이 ${firstAvg}%에서 ${lastAvg}%로 +${diff}%p 올랐습니다. ${total}개 STO 중 ${done}개에서 준거를 달성했습니다${pausedNote}.`;
   } else if (diff >= 0 && done > 0) {
-    return `${fn}${josa은는(fn)} 본 보고 기간에 목표별 달성률 평균 ${lastAvg}%를 유지했고, ${total}개 STO 중 ${done}개에서 준거를 달성했습니다${pausedNote}.`;
+    return `${fn}${josa은는(fn)} 본 보고 기간에 영역별 달성률 평균 ${lastAvg}%를 유지했고, ${total}개 STO 중 ${done}개에서 준거를 달성했습니다${pausedNote}.`;
   } else if (done > 0) {
     return `${fn}${josa은는(fn)} 본 보고 기간에 ${total}개 STO 중 ${done}개에서 준거를 달성했습니다${pausedNote}.`;
   } else {
-    return `${fn}${josa은는(fn)} 본 보고 기간에 목표별 달성률 평균 ${lastAvg}%를 보였고, 기초선 형성 단계에서 진행되고 있습니다.`;
+    return `${fn}${josa은는(fn)} 본 보고 기간에 영역별 달성률 평균 ${lastAvg}%를 보였고, 기초선 형성 단계에서 진행되고 있습니다.`;
   }
 }
 
@@ -2536,7 +2542,12 @@ function buildFinalGrowth(goals, info, stos) {
     //    목표 21개짜리 학습능력과 5개짜리 자기관리가 서로 다르게 반영됐다.
     //    (성윤준: 곡선 66% / 비교 종결 열 평균 71%)
     const cmp = buildStartEndCompare(stos, goals);
-    const rows = cmp.quotableRows.filter(r => r.midAvg !== null);
+    // ★ [60-13] 60-3에서 표지 요약만 '측정 3회기 미만 영역 제외'를 걸어놔서,
+    //    같은 행을 쓰는데도 표지와 곡선 숫자가 갈릴 수 있었다
+    //    (보겸 — 표지 54% / 곡선 27%). 같은 필터를 여기에도 건다.
+    const _all = cmp.quotableRows.filter(r => r.midAvg !== null);
+    const _edge = _all.filter(r => (r.maxSessions || 0) >= COMPARE_EDGE_N);
+    const rows = _edge.length > 0 ? _edge : _all;
     if (rows.length === 0) return null;
     const mean = (pick) => Math.round(rows.reduce((a, r) => a + pick(r), 0) / rows.length);
     return {
@@ -2567,29 +2578,35 @@ function buildFinalGrowth(goals, info, stos) {
     //    중반→종결 하락(dip)과 초기→종결 하락을 따로 판정한다.
     const rise = lateAvg - earlyAvg;
     const dip = midAvg - lateAvg;
+    // ★ [60-13] 이 문단은 '영역별 앞3/뒤3 회기 평균'이고, 앞 페이지 '성장 추이' 그래프는
+    //    '그날 진행 중인 목표의 이월 일별 평균'이다. 세는 단위가 다르다.
+    //    준우 종결 — 이 문단 21→37→50(오름) / 그래프는 6월 73%에서 8월 33%로 내려감.
+    //    둘 다 맞는 값인데 문단이 그래프를 설명하는 말처럼 읽혀 앞뒤가 안 맞아 보였다.
+    //    기준을 한 번 밝혀서 어느 숫자를 말하는지 알 수 있게 한다.
+    const unit = "영역별 평균 기준";
     if (rise >= 25 && dip < 10) {
-      timeline = `학습 곡선 분석 결과, 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 점진적이고 일관된 향상이 확인되었습니다. ` +
+      timeline = `학습 곡선 분석 결과(${unit}), 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 향상이 확인되었습니다. ` +
                  `이는 단기적 향상이 아닌 치료 기간 전반에 걸친 학습 동기 유지와 능동적 참여의 결과로 해석됩니다. ` +
-                 `초기 시도가 누적되어 안정적인 수행 수준으로 도달하는 단계적 진행이 확인되었습니다.`;
+                 `회기별 전체 목표 평균을 그린 '성장 추이' 그래프는 새 목표·새 단계가 투입될 때마다 낮은 값에서 다시 출발하므로, 위 수치와 흐름이 다르게 보일 수 있습니다.`;
     } else if (rise >= 5 && dip < 10) {
       // ★ [57-16] 기준을 10 → 5로 내린다. 9%p일 때 표지는 "올랐습니다",
       //    종합 평가는 "9%p 향상되어"인데 곡선만 "큰 기복 없이"라고 적어 톤이 어긋났다.
-      timeline = `학습 곡선 분석 결과, 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%까지 안정적인 향상이 확인되었습니다. ` +
+      timeline = `학습 곡선 분석 결과(${unit}), 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%까지 안정적인 향상이 확인되었습니다. ` +
                  `회기 누적에 따른 점진적 변화 양상으로, 보호자의 지속적 지원이 학습 진행에 기여하였습니다.`;
     } else if (dip >= 10 && rise > 0) {
       // 중반이 정점, 종결이 그보다 낮음 — 전체로는 올랐지만 "일관된 향상"은 아니다.
-      timeline = `학습 곡선 분석 결과, 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%까지 향상된 뒤 종결 시점 ${lateAvg}%로 나타났습니다. ` +
+      timeline = `학습 곡선 분석 결과(${unit}), 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%까지 향상된 뒤 종결 시점 ${lateAvg}%로 나타났습니다. ` +
                  `종결 시점 값은 초기 대비 ${rise}%p 높은 수준이며, 중반 이후 구간은 새로 도입된 목표가 낮은 값에서 출발하면서 전체 평균이 함께 내려간 시점일 수 있어 목표별 추이와 함께 확인이 필요합니다.`;
     } else if (rise <= -10) {
-      timeline = `학습 곡선 분석 결과, 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 나타났습니다. ` +
+      timeline = `학습 곡선 분석 결과(${unit}), 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 나타났습니다. ` +
                  `종결 시점 평균이 초기보다 낮으므로, 보고 기간 후반에 추가된 목표의 난이도와 목표별 개별 추이를 함께 확인해 주시기 바랍니다.`;
     } else if (lateAvg >= 75) {
-      timeline = `${fn}${josa은는(fn)} 초기 ${earlyAvg}% 수준에서 종결 시점 ${lateAvg}%로, 치료 기간 전반에 걸쳐 안정적인 학습 수행을 유지하였습니다. ` +
+      timeline = `${fn}${josa은는(fn)} 초기 ${earlyAvg}% 수준에서 종결 시점 ${lateAvg}%로(${unit}), 치료 기간 전반에 걸쳐 안정적인 학습 수행을 유지하였습니다. ` +
                  `이는 학습 환경 적응이 신속히 이루어지고 안정적인 학습 수행 양상이 형성되었음을 나타냅니다.`;
     } else {
       // ★ [57-14] 기존 문구는 종결 시점 값을 "치료 기간 동안 평균"이라고 불렀다.
       //    같은 보고서의 막대·비교 종결 열과 같은 값인데 이름만 달라 어긋나 보였다.
-      timeline = `학습 곡선 분석 결과, 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 나타났으며, ` +
+      timeline = `학습 곡선 분석 결과(${unit}), 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 나타났으며, ` +
                  `큰 기복 없이 회기별 단계적 학습 진행이 확인되었습니다.`;
     }
     paragraphs.push(timeline.replace(/\(가\)/g, i_ga));
@@ -3882,6 +3899,18 @@ const STORAGE_KEY_V1 = "gd-aba-iep-v1";        // 이전 버전 (단일 아동) 
 const STORAGE_KEY = "gd-aba-v5-children";      // 아동 리스트
 const ACTIVE_KEY = "gd-aba-v5-active";          // 현재 선택된 아동 ID
 const FILE_KEY = "iep-data-backup";
+// ★ [60-15] 클라우드 키를 한 번이라도 성공적으로 읽은 적이 있는지 표식.
+//    storage.get은 키가 없어도 예외를 던지므로, "읽기 실패"와 "아직 키가 없음"을
+//    예외만으로는 못 가른다. 표식이 없으면 최초 생성으로 보고 업로드를 허용하고,
+//    표식이 있는데 읽기가 실패하면 진짜 장애로 보고 덮어쓰기를 막는다.
+const CLOUD_SEEN_KEY = "gd-aba-v5-cloud-seen";
+function markCloudSeen() {
+  try { if (typeof localStorage !== "undefined") localStorage.setItem(CLOUD_SEEN_KEY, "1"); } catch (e) {}
+}
+function hasCloudEverBeenRead() {
+  try { return typeof localStorage !== "undefined" && localStorage.getItem(CLOUD_SEEN_KEY) === "1"; }
+  catch (e) { return false; }
+}
 const LAST_BACKUP_KEY = "gd-aba-last-backup-at";   // 마지막 💾 전체 백업 시각 (ISO)
 const AUTO_BACKUP_ENABLED_KEY = "gd-aba-auto-backup-enabled";  // "1" | "0"
 const AUTO_BACKUP_INTERVAL_KEY = "gd-aba-auto-backup-interval"; // 분 단위: "30" | "60" | "120" | "240"
@@ -5466,6 +5495,7 @@ export default function App() {
         if (typeof window !== "undefined" && window.storage) {
           try {
             const res = await window.storage.get(FILE_KEY, true);  // true = shared
+            markCloudSeen();   // ★ [60-15] 읽기 성공 — 이후 읽기 실패는 진짜 장애로 본다
             if (res?.value) {
               try {
                 const d = JSON.parse(res.value);
@@ -5554,13 +5584,27 @@ export default function App() {
           (async () => {
             try {
               let cloudChildren = null;
+              // ★ [60-15] 읽기 실패와 "아직 데이터 없음"을 구분한다.
+              //    기존엔 둘 다 cloudChildren=null이라, 읽기가 실패해도 로컬만으로
+              //    통째 덮어썼다(storage.set은 키 전체를 갈아치운다).
+              //    새 기기 첫 로그인처럼 로컬이 비어 있는 상태에서 읽기가 실패하면
+              //    클라우드의 아동 전체를 날릴 수 있는 자리였다.
+              //    (지금 눈에 띈 '이름 없는 (미할당) 아동'도 같은 뿌리 —
+              //     읽기 실패를 데이터 없음으로 보고 자리표시자를 올려버린 것.)
+              let cloudReadOk = false;
               try {
                 const res = await window.storage.get(FILE_KEY, true);
+                cloudReadOk = true;
+                markCloudSeen();
                 if (res?.value) {
                   const parsed = JSON.parse(res.value);
                   if (Array.isArray(parsed.children)) cloudChildren = parsed.children.map(migrateChild);
                 }
               } catch (e) {}
+              // 한 번도 읽힌 적 없는 키면 최초 생성이므로 그대로 올린다.
+              // (storage.get은 키가 없을 때도 예외를 던져, 예외만으로는 장애와 구분되지 않는다.
+              //  여기서 무조건 막으면 클라우드 데이터가 영영 만들어지지 않는다.)
+              if (!cloudReadOk && hasCloudEverBeenRead()) return;
               // ★ [60-8] 업로드 대상에서 빈 자리표시자를 뺀다.
               //    로컬(localStorage)에는 그대로 둔다 — 아동이 0명일 때 화면이 기댈 자리가
               //    필요하고, 로컬은 이 기기 밖으로 안 나가므로 번지지 않는다.
@@ -5746,6 +5790,7 @@ export default function App() {
       try {
         if (typeof window !== "undefined" && window.storage) {
           const res = await window.storage.get(FILE_KEY, true);
+          markCloudSeen();   // ★ [60-15]
           if (!res?.value) return;
           
           let parsed;
@@ -12713,7 +12758,7 @@ cleanedHTML + '\n' +
               goalsForReport && goalsForReport.length > 0 && (
                 <PrintSection num={nextSn()} title="영역별 세부 학습 목표">
                   <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                    ※ 영역별로 묶은 목표마다 진행률과 시작부터 지금까지의 추이선 · 회기당 1회 시도 목표는 O(성공)·X(실패)로 표시
+                    ※ 영역별로 묶은 목표마다 진행 상태와 시작부터 지금까지의 추이선 · 회기당 1회 시도 목표는 O(성공)·X(실패)로 표시
                   </div>
                   <GoalDashboard stos={goalsForReport} />
                 </PrintSection>
