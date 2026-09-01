@@ -2253,7 +2253,12 @@ function buildEndReason(selected, info) {
 //    보고서 어디에도 그 말이 없어 2년 반을 분석한 문서처럼 읽힌다.
 //    앞 구간 기록을 되살릴 방법은 없으니, 분석 대상 기간을 표에 따로 밝히고
 //    앞 경과는 선생님이 직접 적는 칸을 둔다. 두 줄 모두 아래 기준을 넘을 때만 인쇄된다.
-const PRIOR_GAP_MIN_MONTHS = 6;
+//    ★ [60-18] 임계값을 6 → 3개월로 내린다. 6은 너무 높아 실제 사례가 빠져나갔다.
+//      보겸 종결 — 치료기간 2025-12-19~2026-09-01(8개월)인데 기록은 2026-05-06부터.
+//      앞 4개월 반이 빈 채로 "약 8개월 치료, 37%→54% 향상"으로 읽히는데
+//      공백이 5개월로 잡혀 임계값에 못 미쳐 안내 행이 아예 안 나갔다.
+//      한 분기(3개월)만 비어도 표지의 치료기간과 분석 대상이 갈리므로 밝히는 게 맞다.
+const PRIOR_GAP_MIN_MONTHS = 3;
 // ★ [60-10] 30일로 나누면 긴 기간에서 한 달씩 부푼다. 12"개월"이 360일이라
 //    실제 달력보다 5일 짧고, 그 오차가 해마다 쌓인다.
 //      · 준우 종결 2023-06-01~2026-08-31 → 1187일/30 = 39.6 → 40 → "3년 4개월"
@@ -2361,12 +2366,14 @@ function buildFinalSummary(goals, info, periodEnd, stos) {
 
   let monthsLabel = "";
   if (startDateO && endDateO) {
-    const s = new Date(startDateO); const e = new Date(endDateO);
-    const months = Math.round((e - s) / (1000 * 60 * 60 * 24 * 30));
-    if (months >= 12) {
+    // ★ [60-17] 여기만 30일 나눗셈을 따로 갖고 있어서 60-10(캘린더 계산)이 안 닿았다.
+    //    보겸 종결 2025-12-19~2026-09-01 → 257일/30 = 8.6 → 9 → "약 9개월"
+    //    (실제 8개월 13일). 공용 monthsBetweenDates로 통일한다.
+    const months = monthsBetweenDates(startDateO, endDateO);
+    if (months !== null && months >= 12) {
       const y = Math.floor(months / 12); const m = months % 12;
       monthsLabel = m > 0 ? `${y}년 ${m}개월에 걸친` : `${y}년에 걸친`;
-    } else if (months > 0) {
+    } else if (months !== null && months > 0) {
       monthsLabel = `약 ${months}개월에 걸친`;
     }
   }
@@ -3040,7 +3047,15 @@ function buildStartEndCompare(stos, goals) {
   // ★ [60-3] 평균 변화도 표지 요약과 같은 기준 — 측정 3회기 미만 영역은 뺀다.
   //    (시작 단계 영역은 first=last라 change 0으로 들어와 평균을 0 쪽으로 끌어내린다)
   const _edgeRows = quotableRows.filter(r => (r.maxSessions || 0) >= COMPARE_EDGE_N);
-  const changes = (_edgeRows.length > 0 ? _edgeRows : quotableRows).map(r => r.change);
+  const _changeRows = _edgeRows.length > 0 ? _edgeRows : quotableRows;
+  const changes = _changeRows.map(r => r.change);
+  // ★ [60-19] 표지 요약은 round(평균(종결)) − round(평균(초기))로 내고,
+  //    여기선 평균(각 영역의 변화량)으로 내서 같은 값이 1%p 어긋났다.
+  //    보겸 종결 — 표지 "+17%p" / 종합 평가 "약 18%p"
+  //      (변화량 평균 (13+24+16)/3 = 17.67 → 18 · 표지 54 − 37 = 17)
+  //    둘 다 맞는 계산이지만 한 보고서 안에서 갈리면 안 된다. 표지 식으로 맞춘다.
+  const _mean = (pick) => Math.round(_changeRows.reduce((a, r) => a + pick(r), 0) / _changeRows.length);
+  const avgChangeAligned = _changeRows.length > 0 ? _mean(r => r.lastAvg) - _mean(r => r.firstAvg) : null;
   const totalTasks = rows.reduce((s, r) => s + r.total, 0);
   const totalMastered = rows.reduce((s, r) => s + r.mastered, 0);
   const totalPaused = rows.reduce((s, r) => s + r.paused, 0);
@@ -3049,7 +3064,7 @@ function buildStartEndCompare(stos, goals) {
     rows: rows.sort((a, b) => (b.change ?? -999) - (a.change ?? -999)),
     quotableRows,
     // 영역 평균 변화 — %로 말할 수 있는 영역이 하나도 없으면 null(문장에서 %p를 쓰지 않는다).
-    avgChange: changes.length > 0 ? Math.round(changes.reduce((a, c) => a + c, 0) / changes.length) : null,
+    avgChange: changes.length > 0 ? avgChangeAligned : null,
     totalTasks, totalMastered, totalPaused,
     masterPct: totalTasks > 0 ? Math.round(totalMastered / totalTasks * 100) : 0,
     // 전 영역이 O·X거나 측정 방식이 섞여 %로 서술 불가한 아동인가.
