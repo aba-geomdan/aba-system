@@ -11560,7 +11560,21 @@ function GoalCard({ goal, active, onToggle, onRemove, onUpdate, onToggleStatus, 
               //    재개는 보고서 발행과 무관한 사실이므로 항상 표시한다.
               //    다만 이 배지의 원래 목적이 "보고서에 중단으로 나간 뒤 재개됨"을 알리는 것이라
               //    그 경우만 진한 주황으로 두고, 발행 전 재개는 옅은 회색으로 구분한다.
+              // ★ [72-1] 65-1에서 조건을 통째로 없앤 게 과했다.
+              //    원래 "재실시 > 마지막 보고서 발행일" 조건은 표시 조건이면서
+              //    동시에 정리 역할도 했다 — 보고서를 한 번 뽑으면 배지가 내려갔다.
+              //    조건을 없애니 재개한 목표마다 배지가 영구히 붙어, 아동당 20~30개
+              //    목표에 몇 달치가 그대로 쌓인다.
+              //    보고서 발행 여부 대신 '재실시한 지 얼마나 됐나'로 정리한다 —
+              //    발행 전에 재개해도 보이고, 오래된 것은 알아서 내려간다.
+              const RESUME_BADGE_DAYS = 28;   // 4주
+              const _daysSince = (d) => {
+                const t = Date.parse(d + "T00:00:00");
+                if (Number.isNaN(t)) return 0;
+                return Math.floor((Date.now() - t) / 86400000);
+              };
               const earliestResume = resumedTasks.map(t => t.resumedAt).sort()[0];
+              if (_daysSince(earliestResume) > RESUME_BADGE_DAYS) return null;
               const afterReport = earliestResume > archiveDate;
               return (
                 <span
@@ -14798,7 +14812,25 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
           });
           const pausedCount = pausedTasksList.length;
           const isPausedHidden = hidePaused[src] !== false;  // 기본 true
-          const visibleItems = items.filter(g => g.status !== "mastered");
+          // ★ [70-1] 과제를 중단하면 그 목표가 빈 카드로 남았다.
+          //    중단 과제는 위 '중단된 과제' 묶음으로 옮겨가는데 목표 카드는 제자리에 남아
+          //    "현재 진행 과제 0 / 노출된 진행 과제가 없습니다"만 찍힌 채 자리를 차지했다.
+          //    (ELCAR '이야기 다시 말하기' 재현 — 커리큘럼과 무관하게 모두 같다.
+          //     ELCAR이 멀쩡해 보였던 건 '공간/장소'에 진행 중인 다음 단계가 있어서였다.)
+          //    중단 때문에 그릴 것이 없어진 목표는 카드를 감춘다.
+          //    목표 이름은 '중단된 과제' 묶음에 그대로 나오므로 사라져 보이지 않고,
+          //    거기 [↩ 재개]를 누르면 진행 과제가 생기면서 카드가 다시 나온다.
+          //    ※ pendingNext(모든 과제를 마쳐 다음 List 입력을 기다리는 목표)는 남긴다 —
+          //      그 안내 배너를 봐야 다음 단계를 넣을 수 있다.
+          const visibleItems = items.filter(g => {
+            if (g.status === "mastered") return false;
+            const tasks = g.tasks || [];
+            const hasActive = tasks.some(t => (t.listGroup || "1") === "1" && t.isActive !== false);
+            if (hasActive) return true;
+            if (g.pendingNext === true) return true;
+            const hasPaused = tasks.some(t => t.listGroup === "paused");
+            return !hasPaused;   // 중단 탓에 빈 것만 감춘다
+          });
           const groupedByDomain = {};
           visibleItems.forEach(g => {
             const key = g.domain || "(영역 없음)";
