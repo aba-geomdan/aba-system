@@ -4548,10 +4548,55 @@ function _childDelTime(c) {
   return isNaN(t) ? 0 : t;
 }
 // 두 아동 레코드 중 "더 최근 상태"를 채택. 삭제 표식과 일반 수정 시각을 함께 비교.
+// ★ [83-1] 아동 하나에 담긴 회기 기록 수를 센다 — 병합에서 데이터가 줄어드는지 판단용.
+function _childDataPoints(c) {
+  let n = 0;
+  ((c && c.goals) || []).forEach(g => {
+    n += Object.keys((g && g.daily) || {}).length;
+    ((g && g.tasks) || []).forEach(t => { n += Object.keys((t && t.daily) || {}).length; });
+  });
+  return n;
+}
+
 function _pickNewerChild(a, b) {
   const aTime = Math.max(_childTime(a), _childDelTime(a));
   const bTime = Math.max(_childTime(b), _childDelTime(b));
-  return bTime > aTime ? b : a;
+  const winner = bTime > aTime ? b : a;
+  const loser  = bTime > aTime ? a : b;
+
+  // 삭제 표식은 그대로 이겨야 한다 — 다른 기기의 삭제가 전파되지 않으면 지운 아동이 되살아난다.
+  if (winner && winner.deletedAt) return winner;
+
+  // ★ [83-1] 시각이 늦다는 이유만으로 회기 기록이 통째로 사라지던 것.
+  //    병합은 아동을 항목별로 합치지 않고 한쪽으로 바꿔치기한다. 그래서
+  //    기록이 빠진 사본을 든 기기가 나중에 저장하면, 기록이 있던 쪽을 덮어 지웠다.
+  //      (배유민 — 선생님이 전날 넣은 기록이 다음 날 통째로 사라짐)
+  //    "늦게 저장한 쪽"이 아니라 "기록이 남아 있는 쪽"을 살린다.
+  //    이긴 쪽 기록이 더 적으면, 목표·설정은 이긴 쪽 것을 쓰되 기록은 진 쪽에서 되살린다.
+  const wn = _childDataPoints(winner);
+  const ln = _childDataPoints(loser);
+  if (ln > wn) {
+    const loserDaily = new Map();   // goalId|taskId → daily
+    ((loser && loser.goals) || []).forEach(g => {
+      loserDaily.set("g:" + g.id, g.daily || {});
+      ((g && g.tasks) || []).forEach(t => loserDaily.set("t:" + g.id + "|" + t.id, t.daily || {}));
+    });
+    const mergedGoals = ((winner && winner.goals) || []).map(g => {
+      const gd = loserDaily.get("g:" + g.id);
+      const tasks = ((g && g.tasks) || []).map(t => {
+        const td = loserDaily.get("t:" + g.id + "|" + t.id);
+        // 양쪽 기록을 날짜 단위로 합친다. 같은 날은 이긴 쪽(최신 저장) 값을 쓴다.
+        return (td && Object.keys(td).length) ? { ...t, daily: { ...td, ...(t.daily || {}) } } : t;
+      });
+      const daily = (gd && Object.keys(gd).length) ? { ...gd, ...(g.daily || {}) } : g.daily;
+      return { ...g, daily, tasks };
+    });
+    // 진 쪽에만 있던 목표도 잃지 않는다.
+    const winIds = new Set(((winner && winner.goals) || []).map(g => g.id));
+    const onlyInLoser = ((loser && loser.goals) || []).filter(g => !winIds.has(g.id));
+    return { ...winner, goals: [...mergedGoals, ...onlyInLoser] };
+  }
+  return winner;
 }
 function mergeChildren(localList, cloudList) {
   const local = Array.isArray(localList) ? localList : [];
@@ -5503,6 +5548,15 @@ export default function App() {
   };
 
   const updateActiveChild = (patch) => {
+    // ★ [83-3] 관리자가 남의 담당 아동을 열면 기본은 '보기만'.
+    //    관리자는 모든 아동을 열 수 있는데, 화면을 열어둔 것만으로도 자동저장이 돌면서
+    //    관리자 쪽 사본이 최신이 되어 담당 선생님의 기록을 덮을 수 있었다.
+    //    남의 아동은 잠가 두고, 고쳐야 할 때만 위 [✏️ 편집 허용]으로 풀게 한다.
+    //    (83-1이 기록 손실은 막지만, 애초에 남의 아동을 건드리지 않는 것이 더 안전하다.)
+    if (adminReadOnlyBlocked()) {
+      setAdminLockNotice(Date.now());
+      return;
+    }
     setChildren(prev => {
       const targetId = activeChildIdRef.current || prev[0]?.id;
       if (!targetId) return prev;
@@ -5517,6 +5571,27 @@ export default function App() {
       return newChildren;
     });
   };
+
+  // ★ [83-3] 관리자 읽기 전용 — 남의 담당 아동일 때만. 본인 담당·치료사 본인 아동은 영향 없음.
+  const [adminEditUnlocked, setAdminEditUnlocked] = useState(false);
+  const [adminLockNotice, setAdminLockNotice] = useState(0);
+  const activeChildRef2 = useRef(null);
+  useEffect(() => { activeChildRef2.current = activeChild; }, [activeChild]);
+  const isOthersChild = (() => {
+    if (currentUser?.role !== "admin") return false;
+    const c = activeChildRef2.current;
+    const owner = (c?.info?.ownerName || "").trim();
+    return !!owner && owner !== currentUser.name;
+  })();
+  const adminReadOnlyBlocked = () => {
+    if (currentUser?.role !== "admin") return false;
+    if (adminEditUnlocked) return false;
+    const c = activeChildRef2.current;
+    const owner = (c?.info?.ownerName || "").trim();
+    return !!owner && owner !== currentUser.name;
+  };
+  // 아동을 바꾸면 잠금을 다시 건다 — 한 번 푼 것이 다음 아동까지 이어지면 안 된다.
+  useEffect(() => { setAdminEditUnlocked(false); }, [activeChildId]);
 
   const addHistory = (action, description, before = null, after = null, targetName = null) => {
     if (!currentUser) return;  // 인증 안 된 경우 기록 안 함
@@ -6108,14 +6183,19 @@ export default function App() {
           
           const isOtherUser = parsed.lastEditor !== currentUser.name;
           const isNewer = parsed.lastEditTime > lastKnownEditTimeRef.current;
-          const isRecent = Date.now() - parsed.lastEditTime < 30000;  // 30초 이내
-          
-          if (isOtherUser && isNewer && isRecent) {
+          // ★ [83-2] 예전엔 "30초 이내 저장"일 때만 남의 변경을 받아왔다.
+          //    5초마다 확인하지만 조건이 30초라, 그 창을 놓치면 그 변경은 영영 안 들어온다.
+          //    그래서 관리자가 나중에 아동을 열면 낡은 사본을 보게 되고, 거기서 무엇이든
+          //    저장하면 updatedAt이 갱신되며 그 낡은 사본이 최신이 되어 선생님 기록을 덮었다.
+          //    시간 조건을 없애고, 클라우드가 더 최신이면 언제든 받아온다.
+          //    (내가 방금 편집 중일 때는 아래 editingNow로 여전히 미룬다.)
+          if (isOtherUser && isNewer) {
             // ★ [59-7] 예전엔 여기서 관리자에게 "다른 사용자가 수정했습니다" 팝업을 띄웠다.
             //    관리자는 열람 위주라 하루 종일 뜨는 팝업이 소음이었고, 팝업을 그냥 끄면
             //    새로고침 전까지 옛 화면을 보게 된다(다른 사람 변경은 저장할 때만 병합됐다).
-            //    → 팝업 대신 조용히 병합해 화면에 반영한다. 아동별로 updatedAt이 최신인 쪽을 고르므로
-            //      관리자가 방금 고친 아동은 지켜진다. 그래도 편집 직후 30초는 미뤄 덮어쓰기 위험을 없앤다.
+            //    → 팝업 대신 조용히 병합해 화면에 반영한다. 아동별로 updatedAt이 최신인 쪽을 고르되
+            //      83-1이 기록이 더 많은 쪽을 지키므로, 병합으로 회기 기록이 사라지지 않는다.
+            //      내가 편집 중인 30초 동안은 여전히 미룬다.
             //    치료사끼리는 같은 아동을 만질 일이 없어 알림도 자동 반영도 하지 않는다 — 기존과 같음.
             if (currentUser?.role === "admin" && Array.isArray(parsed.children)) {
               const editingNow = Date.now() - lastLocalEditRef.current < 30000;
@@ -8050,6 +8130,33 @@ export default function App() {
             </div>
           );
         })()}
+
+        {/* ★ [83-3] 남의 담당 아동 잠금 배너 — 관리자에게만, 남의 아동일 때만 */}
+        {isOthersChild && (
+          <div style={{
+            marginBottom: 10, padding: "9px 13px", borderRadius: 10, lineHeight: 1.7, fontSize: 12,
+            background: adminEditUnlocked ? "#fff4e6" : "#f4f6f8",
+            border: `1.5px solid ${adminEditUnlocked ? "#e0a860" : "#cfd8e0"}`,
+            color: adminEditUnlocked ? "#8a5a10" : "#44515c",
+            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap"
+          }}>
+            <span style={{ flex: 1, minWidth: 240 }}>
+              {adminEditUnlocked
+                ? <>✏️ <b>편집 허용됨</b> — {activeChild?.info?.ownerName} 선생님 담당 아동입니다. 저장하면 선생님 화면에도 반영됩니다.</>
+                : <>🔒 <b>{activeChild?.info?.ownerName} 선생님 담당 아동 — 보기 전용</b>입니다. 보고서 확인·인쇄는 그대로 되고, 목표·기록 수정만 잠겨 있습니다.</>}
+            </span>
+            <button
+              onClick={() => setAdminEditUnlocked(v => !v)}
+              style={{ ...BS, padding: "5px 11px", fontSize: 11, whiteSpace: "nowrap" }}>
+              {adminEditUnlocked ? "🔒 다시 잠그기" : "✏️ 편집 허용"}
+            </button>
+          </div>
+        )}
+        {adminLockNotice > 0 && Date.now() - adminLockNotice < 4000 && (
+          <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 8, fontSize: 12, background: "#fdecec", border: "1px solid #f0b8b8", color: "#a03030" }}>
+            🔒 보기 전용이라 저장하지 않았습니다. 고치시려면 위 <b>[✏️ 편집 허용]</b>을 눌러 주세요.
+          </div>
+        )}
 
         {/* ═══ 아동 프로필 드롭다운 (최상단) ═══ */}
         <div style={{ marginBottom: 14, padding: "10px 12px", background: "#fff", border: `1.5px solid ${PK}`, borderRadius: 12, boxShadow: "0 2px 6px rgba(212,114,138,0.08)" }}>
@@ -10315,6 +10422,7 @@ export default function App() {
           <ReportTab 
             currentUser={currentUser}
             info={effectiveInfo} goals={includedGoals} currentAvgs={currentAvgs} balanceBarRows={balanceBarRows} baselineAvgs={baselineAvgs}
+            reportSectionsStamp={activeChild?.reportFields?.reportSectionsStamp || ""}
             domainLevelOverrides={domainLevelOverrides}
             getTimeline={getTimeline}
             stosForReport={stosForReport}
@@ -16956,7 +17064,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   return r;
 }
 
-function ReportTab({ currentUser, info, goals, currentAvgs, balanceBarRows = [], baselineAvgs, domainLevelOverrides, getTimeline, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, awaitingNewData, askConfirm, reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportReinfType, reportPromptStart, reportPromptNow, reportNextPlans, reportBehaviors, reportSections, dailyMemos, setReportField, setReportPatch, setInfo, archiveList, cutoffDisabled, setCutoffDisabled, reportMode, setReportMode, onArchiveSave, onArchiveDelete, onArchiveView, onPrev, onPreview, onPrint }) {
+function ReportTab({ currentUser, info, goals, currentAvgs, balanceBarRows = [], reportSectionsStamp = "", baselineAvgs, domainLevelOverrides, getTimeline, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, awaitingNewData, askConfirm, reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportReinfType, reportPromptStart, reportPromptNow, reportNextPlans, reportBehaviors, reportSections, dailyMemos, setReportField, setReportPatch, setInfo, archiveList, cutoffDisabled, setCutoffDisabled, reportMode, setReportMode, onArchiveSave, onArchiveDelete, onArchiveView, onPrev, onPreview, onPrint }) {
   const [showReportHelp, setShowReportHelp] = useState(false); // ★ 인쇄 안내 박스 접기 (기본 접힘)
   const visibleArchiveList = useMemo(() => {
     if (!archiveList || archiveList.length === 0) return [];
@@ -16990,6 +17098,28 @@ function ReportTab({ currentUser, info, goals, currentAvgs, balanceBarRows = [],
       </div>
     );
   };
+  // ★ [81-2] 인쇄·PDF 저장 전 낡은 문장 확인.
+  //    중간보고서 섹션은 [🔄 보고서 다시 생성]을 누른 시점 값으로 굳는데, 표지는 매번
+  //    새로 계산된다. 다시 생성하지 않고 인쇄하면 한 보고서 안에서 숫자가 갈린다.
+  //    막지는 않는다 — 일부러 옛 문장을 그대로 내보내는 경우도 있으므로 확인만 받는다.
+  const midSectionsStale = (() => {
+    if (isFinalMode) return false;
+    const hasText = Object.values(reportSections || {}).some(v => String(v || "").trim());
+    if (!hasText) return false;
+    if (!reportSectionsStamp) return true;            // 지문 없이 저장된 옛 보고서
+    return reportSectionsStamp !== currentTextStamp;
+  })();
+  const guardStaleThen = (proceed) => {
+    if (!midSectionsStale) { proceed(); return; }
+    askConfirm(
+      "보고서 문장이 예전 데이터로 만들어졌습니다.\n" +
+      "그 뒤로 과제 수나 보고 기간이 바뀌어, 표지 숫자와 본문 숫자가 다를 수 있습니다.\n\n" +
+      "[🔄 보고서 다시 생성]을 먼저 누르시는 것을 권합니다.\n" +
+      "이대로 진행하시겠습니까?",
+      proceed
+    );
+  };
+
   const effectiveArchiveList = (cutoffDisabled || isFinalMode) ? [] : (visibleArchiveList || []).filter(item => !item.isFinal);
   const allDates = useMemo(() => {
     let cutoffDate = null;
@@ -18428,6 +18558,8 @@ function ReportTab({ currentUser, info, goals, currentAvgs, balanceBarRows = [],
         <ReportGeneratorSection
           info={info}
           stos={stosForReport}
+          currentTextStamp={currentTextStamp}
+          reportSectionsStamp={reportFields?.reportSectionsStamp || info?.reportSectionsStamp || ""}
           reportPeriodStart={reportPeriodStart}
           reportPeriodEnd={reportPeriodEnd}
           awaitingNewData={awaitingNewData}
@@ -18534,10 +18666,11 @@ function ReportTab({ currentUser, info, goals, currentAvgs, balanceBarRows = [],
           {onPreview && (
             <button style={{ ...BS, background: "#fff", border: "1px solid #b9d4ee", color: "#1d4d80", fontWeight: 600 }} onClick={onPreview} title="보관 없이 인쇄 양식만 미리보기 (데이터에 영향 없음)">👁 미리보기 (보관 안 함)</button>
           )}
-          <button style={isFinalMode ? { ...BP, background: "#5a8c1f" } : BP} onClick={() => onPrint && onPrint("print")} title="보관 후 인쇄 대화상자가 바로 열립니다">
+          {/* ★ [81-2] 인쇄·PDF 저장 직전에 낡은 문장을 한 번 더 막는다. */}
+          <button style={isFinalMode ? { ...BP, background: "#5a8c1f" } : BP} onClick={() => guardStaleThen(() => onPrint && onPrint("print"))} title="보관 후 인쇄 대화상자가 바로 열립니다">
             🖨️ 인쇄
           </button>
-          <button style={isFinalMode ? { ...BP, background: "#5a8c1f" } : BP} onClick={() => onPrint && onPrint("pdf")} title="보관 후 PDF 저장 화면이 바로 열립니다">
+          <button style={isFinalMode ? { ...BP, background: "#5a8c1f" } : BP} onClick={() => guardStaleThen(() => onPrint && onPrint("pdf"))} title="보관 후 PDF 저장 화면이 바로 열립니다">
             📄 PDF로 저장
           </button>
         </div>
@@ -18916,6 +19049,7 @@ function GrowthHistoryChart({ list }) {
 
 function ReportGeneratorSection({
   info, stos, domAvgs, reportPeriodStart, reportPeriodEnd, awaitingNewData,
+  currentTextStamp, reportSectionsStamp,   // ★ [81-1] 낡은 문장 판정용 데이터 지문
   reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule,
   reportReinfType, reportPromptStart, reportPromptNow, reportNextPlans,
   reportBehaviors, reportSections,
@@ -18970,7 +19104,11 @@ function ReportGeneratorSection({
       const meta = result.__meta;
       const sectionsOnly = { ...result };
       delete sectionsOnly.__meta;
-      setReportPatch({ reportSections: sectionsOnly });
+      // ★ [81-1] 만든 시점의 데이터 지문을 함께 저장한다.
+      //    중간보고서 섹션은 [🔄 보고서 다시 생성]을 누른 순간의 값으로 굳는데, 그 뒤
+      //    과제가 늘어도 다시 누르지 않으면 옛 숫자가 그대로 인쇄됐다 — 표지는 매번 새로
+      //    계산하므로 한 보고서 안에서 숫자가 갈렸다(표지 20개 / 종합 현황 14개).
+      setReportPatch({ reportSections: sectionsOnly, reportSectionsStamp: currentTextStamp });
       if (meta && meta.totalMemoCount > 0) {
         setMemoAlert(meta);
       }
@@ -19612,6 +19750,24 @@ function ReportGeneratorSection({
           </button>
         )}
       </div>
+
+      {/* ★ [81-3] 낡은 문장 경고 — 생성 버튼 바로 아래.
+          종결보고서는 이미 같은 경고를 쓰고 있었는데 중간보고서에는 없어서,
+          선생님이 다시 생성해야 한다는 걸 알 방법이 없었다. */}
+      {(() => {
+        const hasText = Object.values(reportSections || {}).some(v => String(v || "").trim());
+        if (!hasText) return null;
+        const stale = !reportSectionsStamp || reportSectionsStamp !== currentTextStamp;
+        if (!stale) return null;
+        return (
+          <div style={{ fontSize: 11.5, color: "#7a5a00", background: "#fff8e8", border: "1px solid #f0dcb0", borderLeft: "4px solid #d68b3a", borderRadius: 6, padding: "9px 12px", marginBottom: 14, lineHeight: 1.7 }}>
+            {reportSectionsStamp
+              ? <>⚠ 아래 문장은 <b>예전 데이터로 만들어졌습니다.</b> 그 뒤로 과제 수나 보고 기간이 바뀌어, <b>표지 숫자와 본문 숫자가 다를 수 있습니다.</b></>
+              : <>⚠ 아래 문장을 <b>언제 만들었는지 확인할 수 없습니다.</b> 지금 데이터와 맞는지 확인해 주세요.</>}
+            <br />위 <b>[🔄 보고서 다시 생성]</b>을 누르면 지금 데이터로 새로 만들어집니다.
+          </div>
+        );
+      })()}
 
       {/* ★ 메모 활용 알림 — 보고서 자동 생성 후 일시 표시 */}
       {memoAlert && (
