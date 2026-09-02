@@ -4152,6 +4152,19 @@ const BACKUP_HISTORY_KEY = "gd-aba-backup-history";  // 최근 10개 백업 기�
 
 const AUTH_ADMIN_PW_KEY = "gd-aba-admin-pw";       // 관리자 비밀번호 (해시)
 const AUTH_TEACHERS_KEY = "gd-aba-teachers";       // 선생님 목록 (JSON 배열)
+// ★ [85-1] 치료사가 올린 삭제 요청함 — 공용 저장소(shared)라 관리자가 어디서든 본다.
+const DELETE_REQUEST_KEY = "gd-aba-delete-requests";
+// ★ [85-2] 클라우드 자동 스냅샷 — 하루 한 번, 최근 7일치.
+//    지금까지 백업은 브라우저 다운로드 폴더로만 떨어졌다. 그래서
+//      · 자동 백업이 꺼져 있으면(기본 꺼짐) 아무것도 안 남고
+//      · 남아도 그 컴퓨터에만 있어 다른 사람은 못 쓴다
+//    실제로 하루치 기록이 통째로 사라졌을 때 되돌릴 자료가 없었다.
+//    공용 저장소에 날짜별로 남겨, 어느 컴퓨터에서든 되돌릴 수 있게 한다.
+//    측정치: 살아 있는 아동 28명 = 약 1.6MB. 7일치라도 12MB 안쪽이고
+//    키 하나당 한도(5MB)에 날짜별로 나눠 담으므로 여유가 있다.
+const SNAPSHOT_PREFIX = "gd-aba-snapshot:";     // + YYYY-MM-DD
+const SNAPSHOT_INDEX_KEY = "gd-aba-snapshot-index";
+const SNAPSHOT_KEEP_DAYS = 7;
 // ★ [59-4] ESDM 항목 저장 키 — 문항은 코드가 아니라 데이터로 산다.
 //    관리자가 항목 편집 화면에서 직접 입력하면 Supabase(aba_data)에 저장되고,
 //    모든 선생님의 커리큘럼 화면에 ELCAR와 같은 방식으로 나타난다.
@@ -5435,6 +5448,12 @@ export default function App() {
   // ★ [신규] 보관함 토글 — true면 아카이브된 아동도 함께 표시
   const [showArchived, setShowArchived] = useState(false);
   const [teacherArchiveOpen, setTeacherArchiveOpen] = useState(false);   // ★ [84-2] 치료사용 보관함 펼침
+  const [deleteRequests, setDeleteRequests] = useState([]);             // ★ [85-1] 삭제 요청함
+  const [deleteRequestTarget, setDeleteRequestTarget] = useState(null); // 치료사 선택 모달 대상
+  const [deleteRequestReason, setDeleteRequestReason] = useState("");
+  const [showDeleteRequests, setShowDeleteRequests] = useState(false);  // 관리자 요청함 펼침
+  const [snapshotIndex, setSnapshotIndex] = useState([]);               // ★ [85-2] 스냅샷 목록
+  const [showSnapshots, setShowSnapshots] = useState(false);
   const [dashFilter, setDashFilter] = useState("all"); // ★ 대시보드 카드 필터: all | active | terminated
   // ★ [신규] 선생님별 '종결 아동' 접힘 상태 (선생님 이름별로 따로 관리)
   const [endedOpenMap, setEndedOpenMap] = useState({});
@@ -5711,13 +5730,9 @@ export default function App() {
     //    (성윤준 — 종결 아동인데 삭제돼 있었고, 백업이 없었다면 되살릴 수 없었다.)
     //    보관은 목록에서 숨기되 데이터를 남기고 언제든 되돌릴 수 있으므로 그쪽으로 보낸다.
     if (currentUser?.role !== "admin") {
-      askConfirm(
-        `'${target.info.name || "이름없음"}' 아동을 보관함으로 옮깁니다.\n\n` +
-        `목록에서 숨겨지고 데이터는 그대로 남습니다.\n` +
-        `[🗄️ 보관 아동 N명] 버튼으로 언제든 다시 꺼낼 수 있습니다.\n\n` +
-        `완전 삭제가 필요하면 관리자에게 요청해 주세요.`,
-        () => archiveChild(id)
-      );
+      // ★ [85-1] 보관만 하거나, 관리자에게 삭제를 요청하거나 고를 수 있게 한다.
+      //    "관리자에게 요청하세요"라고만 적어두면 따로 말로 전해야 해서 잊히기 쉽다.
+      setDeleteRequestTarget(target);
       return;
     }
     if (liveChildren(children).length === 1) {
@@ -5750,6 +5765,97 @@ export default function App() {
   };
 
   // ★ [신규] 아동 보관함으로 이동 (아카이브)
+  // ★ [85-1] 삭제 요청 목록 읽기/쓰기. 공용 저장소를 쓰되 로컬에도 사본을 둬서
+//    클라우드가 잠깐 안 될 때도 요청이 사라지지 않게 한다.
+  const loadDeleteRequests = async () => {
+    try {
+      if (typeof window !== "undefined" && window.storage) {
+        const r = await window.storage.get(DELETE_REQUEST_KEY, true);
+        if (r?.value) { const a = JSON.parse(r.value); if (Array.isArray(a)) return a; }
+      }
+    } catch (e) {}
+    try {
+      const raw = localStorage.getItem(DELETE_REQUEST_KEY);
+      if (raw) { const a = JSON.parse(raw); if (Array.isArray(a)) return a; }
+    } catch (e) {}
+    return [];
+  };
+  const saveDeleteRequests = async (list) => {
+    const json = JSON.stringify(list);
+    try { localStorage.setItem(DELETE_REQUEST_KEY, json); } catch (e) {}
+    try {
+      if (typeof window !== "undefined" && window.storage) {
+        await window.storage.set(DELETE_REQUEST_KEY, json, true);
+      }
+    } catch (e) {}
+    setDeleteRequests(list);
+  };
+  // 삭제 요청 올리기 — 아동은 일단 보관 처리해 목록에서 치우고, 실제 삭제는 관리자가 한다.
+  const requestChildDelete = async (id, reason) => {
+    const target = children.find(c => c.id === id);
+    if (!target) return;
+    const list = await loadDeleteRequests();
+    if (list.some(r => r.childId === id && r.status === "pending")) {
+      alert("이미 삭제 요청이 올라가 있습니다. 관리자 확인을 기다려 주세요.");
+      return;
+    }
+    const req = {
+      id: "dr_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+      childId: id,
+      childName: target.info?.name || "이름없음",
+      ownerName: target.info?.ownerName || "",
+      requestedBy: currentUser?.name || "",
+      requestedAt: new Date().toISOString(),
+      reason: (reason || "").trim(),
+      status: "pending"
+    };
+    await saveDeleteRequests([req, ...list]);
+    archiveChild(id);   // 요청 중에는 보관 상태로 두어 목록에서 보이지 않게
+    alert("✅ 삭제 요청을 보냈습니다.\n관리자가 확인할 때까지 이 아동은 보관함에 있습니다.");
+  };
+
+  // ★ [85-2] 오늘자 스냅샷이 없으면 만든다. 하루 한 번만 쓴다.
+  const ensureDailySnapshot = async () => {
+    if (typeof window === "undefined" || !window.storage) return;
+    const today = new Date().toISOString().slice(0, 10);
+    let index = [];
+    try {
+      const r = await window.storage.get(SNAPSHOT_INDEX_KEY, true);
+      if (r?.value) { const a = JSON.parse(r.value); if (Array.isArray(a)) index = a; }
+    } catch (e) {}
+    if (index.some(x => x.date === today)) return;      // 오늘 것 이미 있음
+
+    const live = liveChildren(children).filter(c => !isBlankPlaceholderChild(c));
+    if (live.length === 0) return;                       // 빈 상태를 스냅샷으로 남기지 않는다
+    let points = 0;
+    live.forEach(c => (c.goals || []).forEach(g => {
+      points += Object.keys(g.daily || {}).length;
+      (g.tasks || []).forEach(t => { points += Object.keys(t.daily || {}).length; });
+    }));
+
+    // 직전 스냅샷보다 기록이 크게 줄었으면 남기지 않는다 —
+    // 망가진 상태를 스냅샷으로 굳히면 되돌릴 자료가 오히려 사라진다.
+    const prev = index[0];
+    if (prev && prev.points > 0 && points < prev.points * 0.7) {
+      console.warn("[스냅샷 보류] 기록이 크게 줄어 저장하지 않음:", prev.points, "→", points);
+      return;
+    }
+    try {
+      await window.storage.set(SNAPSHOT_PREFIX + today, JSON.stringify({
+        date: today, savedAt: new Date().toISOString(),
+        by: currentUser?.name || "", children: live
+      }), true);
+      const next = [{ date: today, savedAt: new Date().toISOString(), childCount: live.length, points, by: currentUser?.name || "" }, ...index]
+        .filter((x, i, arr) => arr.findIndex(y => y.date === x.date) === i)
+        .slice(0, SNAPSHOT_KEEP_DAYS);
+      // 보관 기간을 넘긴 날짜는 지운다
+      index.filter(x => !next.some(y => y.date === x.date))
+        .forEach(x => { window.storage.delete(SNAPSHOT_PREFIX + x.date, true).catch(() => {}); });
+      await window.storage.set(SNAPSHOT_INDEX_KEY, JSON.stringify(next), true);
+      setSnapshotIndex(next);
+    } catch (e) { console.warn("[스냅샷 실패]", e?.message); }
+  };
+
   const archiveChild = (id) => {
     const target = children.find(c => c.id === id);
     if (!target) return;
@@ -5786,6 +5892,30 @@ export default function App() {
       setChildren(newChildren);
     }
   };
+
+  // ★ [85-1] 삭제 요청함 로드 — 로그인 후 한 번, 이후 관리자 화면에서 갱신
+  useEffect(() => {
+    if (!loaded || !currentUser) return;
+    (async () => { setDeleteRequests(await loadDeleteRequests()); })();
+  }, [loaded, currentUser]);
+
+  // ★ [85-2] 스냅샷 목록 읽고, 오늘 것이 없으면 만든다.
+  //    로드 직후가 아니라 30초 뒤에 돌린다 — 클라우드 병합이 끝난 뒤의 상태를 남겨야
+  //    낡은 사본이 스냅샷으로 굳지 않는다.
+  useEffect(() => {
+    if (!loaded || !currentUser) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        if (typeof window !== "undefined" && window.storage) {
+          const r = await window.storage.get(SNAPSHOT_INDEX_KEY, true);
+          if (!cancelled && r?.value) { const a = JSON.parse(r.value); if (Array.isArray(a)) setSnapshotIndex(a); }
+        }
+      } catch (e) {}
+    })();
+    const t = setTimeout(() => { if (!cancelled) ensureDailySnapshot(); }, 30000);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [loaded, currentUser]);
 
   const [tab, setTab] = useState("dashboard"); // ★ [v19 신규] dashboard | info | iep | daily | report
   const [reportMode, setReportMode] = useState("interim");
@@ -8143,6 +8273,136 @@ export default function App() {
                 }}>
                 💾 지금 백업
               </button>
+            </div>
+          );
+        })()}
+
+        {/* ★ [85-1] 치료사 — 보관할지 삭제 요청할지 고르는 창 */}
+        {deleteRequestTarget && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 16 }}>
+            <div style={{ background: "#fff", borderRadius: 14, padding: "20px 22px", maxWidth: 440, width: "100%", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: PKD, marginBottom: 10 }}>
+                '{deleteRequestTarget.info?.name || "이름없음"}' 아동
+              </div>
+              <div style={{ fontSize: 12.5, color: "#555", lineHeight: 1.8, marginBottom: 14 }}>
+                <b>보관</b>은 목록에서만 숨기고 데이터는 그대로 남습니다. 언제든 다시 꺼낼 수 있습니다.<br />
+                <b>삭제 요청</b>은 관리자에게 전달되며, 관리자가 확인 후 처리합니다. 그때까지는 보관함에 있습니다.
+              </div>
+              <textarea
+                value={deleteRequestReason}
+                onChange={e => setDeleteRequestReason(e.target.value)}
+                placeholder="삭제 요청 사유 (선택) — 예: 중복 등록, 등록 취소"
+                style={{ width: "100%", minHeight: 58, padding: "8px 10px", border: "1px solid #e0d5d8", borderRadius: 8, fontSize: 12, fontFamily: "inherit", boxSizing: "border-box", marginBottom: 12, resize: "vertical" }} />
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <button style={{ ...BS, fontSize: 12 }} onClick={() => { setDeleteRequestTarget(null); setDeleteRequestReason(""); }}>취소</button>
+                <button style={{ ...BS, fontSize: 12 }}
+                  onClick={() => { const t = deleteRequestTarget; setDeleteRequestTarget(null); setDeleteRequestReason(""); archiveChild(t.id); }}>
+                  🗄️ 보관만 하기
+                </button>
+                <button style={{ ...BP, fontSize: 12, background: "#a85020" }}
+                  onClick={async () => { const t = deleteRequestTarget, r = deleteRequestReason; setDeleteRequestTarget(null); setDeleteRequestReason(""); await requestChildDelete(t.id, r); }}>
+                  🗑 삭제 요청 보내기
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ★ [85-2] 관리자 — 클라우드 스냅샷에서 되돌리기 */}
+        {currentUser?.role === "admin" && snapshotIndex.length > 0 && (
+          <div style={{ marginBottom: 10, padding: "9px 13px", background: "#f0f6fb", border: "1.5px solid #b9d4ee", borderRadius: 10, fontSize: 12, color: "#1d4d80" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ flex: 1, minWidth: 200 }}>
+                ☁️ <b>자동 스냅샷 {snapshotIndex.length}개</b> — 최근 {SNAPSHOT_KEEP_DAYS}일치가 클라우드에 남아 있습니다.
+              </span>
+              <button onClick={() => setShowSnapshots(v => !v)} style={{ ...BS, padding: "5px 11px", fontSize: 11, whiteSpace: "nowrap" }}>
+                {showSnapshots ? "접기" : "되돌리기"}
+              </button>
+            </div>
+            {showSnapshots && (
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                {snapshotIndex.map(sn => (
+                  <div key={sn.date} style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1px solid #d6e6f5", borderRadius: 7, padding: "7px 10px", flexWrap: "wrap" }}>
+                    <span style={{ flex: 1, minWidth: 150 }}><b>{sn.date}</b>
+                      <span style={{ fontSize: 10.5, color: "#7a9ab8", marginLeft: 6 }}>아동 {sn.childCount}명 · 기록 {sn.points}칸</span>
+                    </span>
+                    <button style={{ ...BS, padding: "3px 9px", fontSize: 10.5, whiteSpace: "nowrap" }}
+                      onClick={() => askConfirm(
+                        `${sn.date} 상태로 되돌립니다.\n\n` +
+                        `그날 이후에 넣은 기록은 사라집니다.\n` +
+                        `되돌리기 전에 지금 상태를 따로 스냅샷으로 남깁니다.\n\n진행할까요?`,
+                        async () => {
+                          try {
+                            const r = await window.storage.get(SNAPSHOT_PREFIX + sn.date, true);
+                            if (!r?.value) { alert("스냅샷을 읽지 못했습니다."); return; }
+                            const snap = JSON.parse(r.value);
+                            if (!Array.isArray(snap.children) || snap.children.length === 0) { alert("스냅샷이 비어 있습니다."); return; }
+                            // 지금 상태를 먼저 남긴다 — 되돌리기도 되돌릴 수 있게
+                            const now = new Date().toISOString();
+                            await window.storage.set(SNAPSHOT_PREFIX + "before-restore-" + now.slice(0, 19).replace(/[:T]/g, ""), JSON.stringify({
+                              date: now.slice(0, 10), savedAt: now, by: currentUser?.name || "", children: liveChildren(children)
+                            }), true);
+                            // 스냅샷을 현재 목록에 덮되, 스냅샷에 없는 아동(그 뒤 새로 만든 아동)은 남긴다
+                            const byId = new Map(children.map(c => [c.id, c]));
+                            snap.children.forEach(c => byId.set(c.id, { ...c, updatedAt: now }));
+                            const merged = [...byId.values()];
+                            if (validateChildrenBeforeSave(merged)) {
+                              setChildren(merged);
+                              alert(`✅ ${sn.date} 상태로 되돌렸습니다.\n아동 ${snap.children.length}명이 복구되었습니다.`);
+                            } else {
+                              alert("검증에 걸려 되돌리지 않았습니다.");
+                            }
+                          } catch (e) { alert("되돌리기 실패: " + (e?.message || "")); }
+                        })}>
+                      ↩ 이 날짜로
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ★ [85-1] 관리자 — 들어온 삭제 요청 */}
+        {currentUser?.role === "admin" && deleteRequests.filter(r => r.status === "pending").length > 0 && (() => {
+          const pending = deleteRequests.filter(r => r.status === "pending");
+          return (
+            <div style={{ marginBottom: 10, padding: "9px 13px", background: "#fdf2f2", border: "1.5px solid #eab8b8", borderRadius: 10, fontSize: 12, color: "#8a3030" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ flex: 1, minWidth: 200 }}>🗑 <b>삭제 요청 {pending.length}건</b> — 선생님이 올린 요청입니다.</span>
+                <button onClick={() => setShowDeleteRequests(v => !v)} style={{ ...BS, padding: "5px 11px", fontSize: 11, whiteSpace: "nowrap" }}>
+                  {showDeleteRequests ? "접기" : "확인하기"}
+                </button>
+              </div>
+              {showDeleteRequests && (
+                <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                  {pending.map(r => (
+                    <div key={r.id} style={{ background: "#fff", border: "1px solid #f0d5d5", borderRadius: 7, padding: "8px 10px" }}>
+                      <div style={{ color: "#5a3030", marginBottom: 3 }}>
+                        <b>{r.childName}</b>
+                        <span style={{ fontSize: 10.5, color: "#a87878", marginLeft: 6 }}>{r.requestedBy} 선생님 · {String(r.requestedAt).slice(0, 10)}</span>
+                      </div>
+                      {r.reason && <div style={{ fontSize: 11, color: "#8a6060", marginBottom: 6 }}>사유: {r.reason}</div>}
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <button style={{ ...BS, padding: "3px 9px", fontSize: 10.5 }}
+                          onClick={() => askConfirm(`'${r.childName}' 아동을 완전히 삭제합니다.\n되돌릴 수 없습니다. 진행할까요?`, async () => {
+                            deleteChild(r.childId);
+                            await saveDeleteRequests(deleteRequests.map(x => x.id === r.id ? { ...x, status: "done", handledAt: new Date().toISOString() } : x));
+                          })}>
+                          🗑 삭제 승인
+                        </button>
+                        <button style={{ ...BS, padding: "3px 9px", fontSize: 10.5 }}
+                          onClick={async () => {
+                            await saveDeleteRequests(deleteRequests.map(x => x.id === r.id ? { ...x, status: "rejected", handledAt: new Date().toISOString() } : x));
+                            alert("요청을 거절했습니다. 아동은 보관함에 그대로 있습니다.");
+                          }}>
+                          거절 (보관 유지)
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })()}
