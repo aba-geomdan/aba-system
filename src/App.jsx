@@ -4165,6 +4165,11 @@ const DELETE_REQUEST_KEY = "gd-aba-delete-requests";
 const SNAPSHOT_PREFIX = "gd-aba-snapshot:";     // + YYYY-MM-DD
 const SNAPSHOT_INDEX_KEY = "gd-aba-snapshot-index";
 const SNAPSHOT_KEEP_DAYS = 7;
+// ★ [88-1] 월 1회 파일 백업 표식 — "YYYY-MM"을 남겨 그 달에 받았는지 본다.
+//    클라우드 스냅샷(85-2)은 클라우드가 통째로 잘못되면 같이 사라진다.
+//    그 경우까지 대비해 손에 남는 파일을 한 달에 하나는 갖게 한다.
+//    자동 다운로드는 브라우저가 막을 수 있어, 알려주고 한 번 누르게 한다.
+const MONTHLY_BACKUP_KEY = "gd-aba-monthly-backup";
 // ★ [59-4] ESDM 항목 저장 키 — 문항은 코드가 아니라 데이터로 산다.
 //    관리자가 항목 편집 화면에서 직접 입력하면 Supabase(aba_data)에 저장되고,
 //    모든 선생님의 커리큘럼 화면에 ELCAR와 같은 방식으로 나타난다.
@@ -5453,6 +5458,8 @@ export default function App() {
   const [deleteRequestReason, setDeleteRequestReason] = useState("");
   const [showDeleteRequests, setShowDeleteRequests] = useState(false);  // 관리자 요청함 펼침
   const [snapshotIndex, setSnapshotIndex] = useState([]);               // ★ [85-2] 스냅샷 목록
+  const [monthlyBackupDone, setMonthlyBackupDone] = useState(null);     // ★ [88-1] "YYYY-MM" | null
+  const [monthlyDismissed, setMonthlyDismissed] = useState(false);
   const [showSnapshots, setShowSnapshots] = useState(false);
   const [dashFilter, setDashFilter] = useState("all"); // ★ 대시보드 카드 필터: all | active | terminated
   // ★ [신규] 선생님별 '종결 아동' 접힘 상태 (선생님 이름별로 따로 관리)
@@ -5896,8 +5903,41 @@ export default function App() {
   // ★ [85-1] 삭제 요청함 로드 — 로그인 후 한 번, 이후 관리자 화면에서 갱신
   useEffect(() => {
     if (!loaded || !currentUser) return;
-    (async () => { setDeleteRequests(await loadDeleteRequests()); })();
+    let cancelled = false;
+    const pull = async () => { const a = await loadDeleteRequests(); if (!cancelled) setDeleteRequests(a); };
+    pull();
+    // ★ [87-2] 처리 결과가 상대 화면에 뜨려면 주기적으로 다시 읽어야 한다.
+    //    요청함은 작아서(건당 수백 바이트) 1분마다 읽어도 부담이 없다.
+    const t = setInterval(pull, 60000);
+    return () => { cancelled = true; clearInterval(t); };
   }, [loaded, currentUser]);
+
+  // ★ [88-1] 이번 달 파일 백업을 받았는지 읽어둔다.
+  useEffect(() => {
+    if (!loaded || !currentUser) return;
+    (async () => {
+      let v = null;
+      try {
+        if (typeof window !== "undefined" && window.storage) {
+          const r = await window.storage.get(MONTHLY_BACKUP_KEY, true);
+          if (r?.value) v = r.value;
+        }
+      } catch (e) {}
+      if (!v) { try { v = localStorage.getItem(MONTHLY_BACKUP_KEY); } catch (e) {} }
+      setMonthlyBackupDone(v);
+    })();
+  }, [loaded, currentUser]);
+
+  const markMonthlyBackup = async () => {
+    const ym = new Date().toISOString().slice(0, 7);
+    try { localStorage.setItem(MONTHLY_BACKUP_KEY, ym); } catch (e) {}
+    try {
+      if (typeof window !== "undefined" && window.storage) {
+        await window.storage.set(MONTHLY_BACKUP_KEY, ym, true);
+      }
+    } catch (e) {}
+    setMonthlyBackupDone(ym);
+  };
 
   // ★ [85-2] 스냅샷 목록 읽고, 오늘 것이 없으면 만든다.
   //    로드 직후가 아니라 30초 뒤에 돌린다 — 클라우드 병합이 끝난 뒤의 상태를 남겨야
@@ -6218,8 +6258,12 @@ export default function App() {
             if (!isNaN(ms)) setLastBackupAt(ms);
           }
           
+          // ★ [86-1] 켜짐("1")을 읽는 줄이 아예 없어서, 켜 두어도 다음에 열면 꺼진 채 시작했다.
+          //    초기값이 false라 "0"만 처리하면 켜짐은 영영 반영되지 않는다.
+          //    (8/30에 켜서 auto 백업이 한 번 떨어진 뒤, 그다음부터는 계속 꺼진 상태로 돌았다.)
           const resEnabled = await window.storage.get(AUTO_BACKUP_ENABLED_KEY, true);
           if (resEnabled?.value === "0") setAutoBackupEnabled(false);
+          else if (resEnabled?.value === "1") setAutoBackupEnabled(true);
           
           const resInterval = await window.storage.get(AUTO_BACKUP_INTERVAL_KEY, true);
           if (resInterval?.value) {
@@ -6232,8 +6276,9 @@ export default function App() {
             const ms = parseInt(raw, 10);
             if (!isNaN(ms)) setLastBackupAt(ms);
           }
-          const enabledRaw = localStorage.getItem(AUTO_BACKUP_ENABLED_KEY);
+          const enabledRaw = localStorage.getItem(AUTO_BACKUP_ENABLED_KEY);   // ★ [86-1] 위와 같은 이유
           if (enabledRaw === "0") setAutoBackupEnabled(false);
+          else if (enabledRaw === "1") setAutoBackupEnabled(true);
           const intervalRaw = localStorage.getItem(AUTO_BACKUP_INTERVAL_KEY);
           if (intervalRaw) {
             const m = parseInt(intervalRaw, 10);
@@ -8095,8 +8140,15 @@ export default function App() {
                       데이터 백업 / 복원
                     </div>
                     <button style={{ ...BS, fontSize: 11, textAlign: "left" }} onClick={() => { exportToDataEntry(); setShowBackupMenu(false); }} title="중간보고서 시스템(v9) 연동용 JSON 내보내기">📤 JSON 백업 (v9 연동)</button>
-                    <button style={{ ...BS, borderColor: GREEN, color: GREEN, fontSize: 11, textAlign: "left" }} onClick={() => { exportAllChildren(); setShowBackupMenu(false); }} title="전체 데이터를 PC에 JSON 파일로 저장">💾 전체 백업</button>
+                    <button style={{ ...BS, borderColor: GREEN, color: GREEN, fontSize: 11, textAlign: "left" }} onClick={async () => { exportAllChildren(); await markMonthlyBackup(); setShowBackupMenu(false); }} title="전체 데이터를 PC에 JSON 파일로 저장">💾 전체 백업</button>
                     <button style={{ ...BS, borderColor: BLUE, color: BLUE, fontSize: 11, textAlign: "left" }} onClick={() => { triggerBackupRestore(); setShowBackupMenu(false); }} title="PC에 저장해둔 백업 JSON 파일을 불러와 데이터를 복구">📂 복원</button>
+                    {/* ★ [87-1] 스냅샷은 사고 났을 때만 쓰는 기능이라 평소 화면을 차지할 이유가 없다.
+                        상단 배너에서 백업 메뉴 안으로 옮긴다. */}
+                    <button style={{ ...BS, borderColor: "#7a9ab8", color: "#1d4d80", fontSize: 11, textAlign: "left" }}
+                      onClick={() => { setShowSnapshots(true); setShowBackupMenu(false); }}
+                      title="클라우드에 자동 저장된 최근 7일치 상태로 되돌립니다">
+                      ☁️ 스냅샷 되돌리기{snapshotIndex.length > 0 ? ` (${snapshotIndex.length})` : ""}
+                    </button>
                   </div>
                 )}
               </div>
@@ -8308,58 +8360,82 @@ export default function App() {
           </div>
         )}
 
-        {/* ★ [85-2] 관리자 — 클라우드 스냅샷에서 되돌리기 */}
-        {currentUser?.role === "admin" && snapshotIndex.length > 0 && (
-          <div style={{ marginBottom: 10, padding: "9px 13px", background: "#f0f6fb", border: "1.5px solid #b9d4ee", borderRadius: 10, fontSize: 12, color: "#1d4d80" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <span style={{ flex: 1, minWidth: 200 }}>
-                ☁️ <b>자동 스냅샷 {snapshotIndex.length}개</b> — 최근 {SNAPSHOT_KEEP_DAYS}일치가 클라우드에 남아 있습니다.
-              </span>
-              <button onClick={() => setShowSnapshots(v => !v)} style={{ ...BS, padding: "5px 11px", fontSize: 11, whiteSpace: "nowrap" }}>
-                {showSnapshots ? "접기" : "되돌리기"}
-              </button>
-            </div>
-            {showSnapshots && (
-              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                {snapshotIndex.map(sn => (
-                  <div key={sn.date} style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1px solid #d6e6f5", borderRadius: 7, padding: "7px 10px", flexWrap: "wrap" }}>
-                    <span style={{ flex: 1, minWidth: 150 }}><b>{sn.date}</b>
-                      <span style={{ fontSize: 10.5, color: "#7a9ab8", marginLeft: 6 }}>아동 {sn.childCount}명 · 기록 {sn.points}칸</span>
-                    </span>
-                    <button style={{ ...BS, padding: "3px 9px", fontSize: 10.5, whiteSpace: "nowrap" }}
-                      onClick={() => askConfirm(
-                        `${sn.date} 상태로 되돌립니다.\n\n` +
-                        `그날 이후에 넣은 기록은 사라집니다.\n` +
-                        `되돌리기 전에 지금 상태를 따로 스냅샷으로 남깁니다.\n\n진행할까요?`,
-                        async () => {
-                          try {
-                            const r = await window.storage.get(SNAPSHOT_PREFIX + sn.date, true);
-                            if (!r?.value) { alert("스냅샷을 읽지 못했습니다."); return; }
-                            const snap = JSON.parse(r.value);
-                            if (!Array.isArray(snap.children) || snap.children.length === 0) { alert("스냅샷이 비어 있습니다."); return; }
-                            // 지금 상태를 먼저 남긴다 — 되돌리기도 되돌릴 수 있게
-                            const now = new Date().toISOString();
-                            await window.storage.set(SNAPSHOT_PREFIX + "before-restore-" + now.slice(0, 19).replace(/[:T]/g, ""), JSON.stringify({
-                              date: now.slice(0, 10), savedAt: now, by: currentUser?.name || "", children: liveChildren(children)
-                            }), true);
-                            // 스냅샷을 현재 목록에 덮되, 스냅샷에 없는 아동(그 뒤 새로 만든 아동)은 남긴다
-                            const byId = new Map(children.map(c => [c.id, c]));
-                            snap.children.forEach(c => byId.set(c.id, { ...c, updatedAt: now }));
-                            const merged = [...byId.values()];
-                            if (validateChildrenBeforeSave(merged)) {
-                              setChildren(merged);
-                              alert(`✅ ${sn.date} 상태로 되돌렸습니다.\n아동 ${snap.children.length}명이 복구되었습니다.`);
-                            } else {
-                              alert("검증에 걸려 되돌리지 않았습니다.");
-                            }
-                          } catch (e) { alert("되돌리기 실패: " + (e?.message || "")); }
-                        })}>
-                      ↩ 이 날짜로
-                    </button>
-                  </div>
-                ))}
+        {/* ★ [88-1] 이번 달 파일 백업 알림 — 관리자에게만, 그 달에 아직 안 받았을 때만.
+            받고 나면 다음 달까지 안 뜬다. */}
+        {currentUser?.role === "admin" && monthlyBackupDone !== null && !monthlyDismissed &&
+         monthlyBackupDone !== new Date().toISOString().slice(0, 7) && (
+          <div style={{ marginBottom: 10, padding: "9px 13px", background: "#f2f8f0", border: "1.5px solid #b8d8a8", borderRadius: 10, fontSize: 12, color: "#3d6014", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ flex: 1, minWidth: 240 }}>
+              💾 <b>이번 달 백업 파일이 아직 없습니다.</b> 클라우드와 별개로 한 달에 하나는 컴퓨터에 받아 두세요.
+              {monthlyBackupDone && <span style={{ fontSize: 10.5, opacity: 0.7, marginLeft: 6 }}>마지막 {monthlyBackupDone}</span>}
+            </span>
+            <button style={{ ...BP, padding: "5px 12px", fontSize: 11, whiteSpace: "nowrap", background: GREEN }}
+              onClick={async () => { exportAllChildren(); await markMonthlyBackup(); }}>
+              💾 지금 받기
+            </button>
+            <button style={{ ...BS, padding: "5px 10px", fontSize: 11, whiteSpace: "nowrap" }}
+              onClick={() => setMonthlyDismissed(true)}>
+              나중에
+            </button>
+          </div>
+        )}
+
+        {/* ★ [87-1] 스냅샷 되돌리기 — 백업 메뉴에서 열리는 창. 평소엔 화면에 없다. */}
+        {currentUser?.role === "admin" && showSnapshots && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 16 }}
+            onClick={() => setShowSnapshots(false)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: "20px 22px", maxWidth: 480, width: "100%", maxHeight: "80vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#1d4d80", marginBottom: 6 }}>☁️ 스냅샷 되돌리기</div>
+              <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 14 }}>
+                하루 한 번 클라우드에 자동 저장됩니다. 최근 {SNAPSHOT_KEEP_DAYS}일치가 남습니다.<br />
+                되돌리기 전에 지금 상태를 먼저 스냅샷으로 남기므로, 되돌린 것도 다시 되돌릴 수 있습니다.
               </div>
-            )}
+              {snapshotIndex.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#999", padding: "16px 0", textAlign: "center" }}>아직 저장된 스냅샷이 없습니다.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {snapshotIndex.map(sn => (
+                    <div key={sn.date} style={{ display: "flex", alignItems: "center", gap: 8, background: "#f7fafd", border: "1px solid #d6e6f5", borderRadius: 8, padding: "9px 11px", flexWrap: "wrap" }}>
+                      <span style={{ flex: 1, minWidth: 150, fontSize: 12 }}><b>{sn.date}</b>
+                        <span style={{ fontSize: 10.5, color: "#7a9ab8", marginLeft: 6 }}>아동 {sn.childCount}명 · 기록 {sn.points}칸</span>
+                      </span>
+                      <button style={{ ...BS, padding: "4px 10px", fontSize: 11, whiteSpace: "nowrap" }}
+                        onClick={() => askConfirm(
+                          `${sn.date} 상태로 되돌립니다.\n\n` +
+                          `그날 이후에 넣은 기록은 사라집니다.\n` +
+                          `되돌리기 전에 지금 상태를 따로 스냅샷으로 남깁니다.\n\n진행할까요?`,
+                          async () => {
+                            try {
+                              const r = await window.storage.get(SNAPSHOT_PREFIX + sn.date, true);
+                              if (!r?.value) { alert("스냅샷을 읽지 못했습니다."); return; }
+                              const snap = JSON.parse(r.value);
+                              if (!Array.isArray(snap.children) || snap.children.length === 0) { alert("스냅샷이 비어 있습니다."); return; }
+                              const now = new Date().toISOString();
+                              await window.storage.set(SNAPSHOT_PREFIX + "before-restore-" + now.slice(0, 19).replace(/[:T]/g, ""), JSON.stringify({
+                                date: now.slice(0, 10), savedAt: now, by: currentUser?.name || "", children: liveChildren(children)
+                              }), true);
+                              const byId = new Map(children.map(c => [c.id, c]));
+                              snap.children.forEach(c => byId.set(c.id, { ...c, updatedAt: now }));
+                              const merged = [...byId.values()];
+                              if (validateChildrenBeforeSave(merged)) {
+                                setChildren(merged);
+                                setShowSnapshots(false);
+                                alert(`✅ ${sn.date} 상태로 되돌렸습니다.\n아동 ${snap.children.length}명이 복구되었습니다.`);
+                              } else {
+                                alert("검증에 걸려 되돌리지 않았습니다.");
+                              }
+                            } catch (e) { alert("되돌리기 실패: " + (e?.message || "")); }
+                          })}>
+                        ↩ 이 날짜로
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ marginTop: 14, textAlign: "right" }}>
+                <button style={{ ...BS, fontSize: 12 }} onClick={() => setShowSnapshots(false)}>닫기</button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -8403,6 +8479,47 @@ export default function App() {
                   ))}
                 </div>
               )}
+            </div>
+          );
+        })()}
+
+        {/* ★ [87-2] 치료사 — 내가 올린 삭제 요청의 처리 결과.
+            관리자가 승인·거절해도 선생님은 알 방법이 없어, 아동이 사라진 걸 나중에
+            우연히 알게 됐다. 확인 버튼을 누를 때까지 남는다(놓치면 안 되는 알림이라). */}
+        {currentUser?.role === "teacher" && (() => {
+          const mine = deleteRequests.filter(r =>
+            r.requestedBy === currentUser.name &&
+            (r.status === "done" || r.status === "rejected") &&
+            !r.seenByRequester
+          );
+          if (mine.length === 0) return null;
+          return (
+            <div style={{ marginBottom: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+              {mine.map(r => (
+                <div key={r.id} style={{
+                  padding: "9px 13px", borderRadius: 10, fontSize: 12, lineHeight: 1.7,
+                  background: r.status === "done" ? "#f0f6fb" : "#fffaf0",
+                  border: `1.5px solid ${r.status === "done" ? "#b9d4ee" : "#e8d5a8"}`,
+                  color: r.status === "done" ? "#1d4d80" : "#7a5a10",
+                  display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap"
+                }}>
+                  <span style={{ flex: 1, minWidth: 220 }}>
+                    {r.status === "done"
+                      ? <>✅ <b>'{r.childName}' 아동 삭제 요청이 승인되었습니다.</b> 데이터가 삭제되었습니다.</>
+                      : <>↩ <b>'{r.childName}' 아동 삭제 요청이 거절되었습니다.</b> 보관함에 그대로 있습니다.</>}
+                    <span style={{ fontSize: 10.5, opacity: 0.75, marginLeft: 6 }}>
+                      {String(r.handledAt || "").slice(0, 10)}
+                    </span>
+                  </span>
+                  <button style={{ ...BS, padding: "4px 10px", fontSize: 11, whiteSpace: "nowrap" }}
+                    onClick={async () => {
+                      const cur = await loadDeleteRequests();
+                      await saveDeleteRequests(cur.map(x => x.id === r.id ? { ...x, seenByRequester: true } : x));
+                    }}>
+                    확인
+                  </button>
+                </div>
+              ))}
             </div>
           );
         })()}
