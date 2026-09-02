@@ -13265,7 +13265,19 @@ cleanedHTML + '\n' +
 
         {/* ★ [IEP 신규] 의뢰 사유 — 맨 앞 (선택 입력 · 비워두면 생략) */}
         {isIepMode && (() => {
-          const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
+          const stripMarker = (s) => {
+            // ★ [94-1] 직접 쓰신 칸(MYNOTE)을 자동 문장 뒤에 이어 붙여 한 단락으로 내보낸다.
+            //    표식은 화면·인쇄 어디에도 보이면 안 되므로 반드시 여기서 처리한다.
+            const raw = s || "";
+            const m = raw.match(/\n{0,2}<!--MYNOTE:([\s\S]*?)-->/);
+            const note = m ? String(m[1]).trim() : "";
+            const body = raw
+              .replace(/\n{0,2}<!--MYNOTE:[\s\S]*?-->/g, "")
+              .replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "")
+              .replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n")
+              .trim();
+            return note ? (body ? body + "\n\n" + note : note) : body;
+          };
           const referralClean = stripMarker(info.iepReferralReason);
           if (!referralClean) return null;
           const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
@@ -13565,7 +13577,19 @@ cleanedHTML + '\n' +
 
         {/* ★ [IEP 신규] 보호자 협력 방안 — IEP 계획안 직후 (선택) */}
         {isIepMode && (() => {
-          const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
+          const stripMarker = (s) => {
+            // ★ [94-1] 직접 쓰신 칸(MYNOTE)을 자동 문장 뒤에 이어 붙여 한 단락으로 내보낸다.
+            //    표식은 화면·인쇄 어디에도 보이면 안 되므로 반드시 여기서 처리한다.
+            const raw = s || "";
+            const m = raw.match(/\n{0,2}<!--MYNOTE:([\s\S]*?)-->/);
+            const note = m ? String(m[1]).trim() : "";
+            const body = raw
+              .replace(/\n{0,2}<!--MYNOTE:[\s\S]*?-->/g, "")
+              .replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "")
+              .replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n")
+              .trim();
+            return note ? (body ? body + "\n\n" + note : note) : body;
+          };
           const collabClean = stripMarker(info.iepHomeCollab);
           if (!collabClean) return null;
           const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
@@ -13583,7 +13607,19 @@ cleanedHTML + '\n' +
 
         {/* ★ [IEP 신규] 권고사항 — 마지막 (선택) */}
         {isIepMode && (() => {
-          const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
+          const stripMarker = (s) => {
+            // ★ [94-1] 직접 쓰신 칸(MYNOTE)을 자동 문장 뒤에 이어 붙여 한 단락으로 내보낸다.
+            //    표식은 화면·인쇄 어디에도 보이면 안 되므로 반드시 여기서 처리한다.
+            const raw = s || "";
+            const m = raw.match(/\n{0,2}<!--MYNOTE:([\s\S]*?)-->/);
+            const note = m ? String(m[1]).trim() : "";
+            const body = raw
+              .replace(/\n{0,2}<!--MYNOTE:[\s\S]*?-->/g, "")
+              .replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "")
+              .replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n")
+              .trim();
+            return note ? (body ? body + "\n\n" + note : note) : body;
+          };
           const recsClean = stripMarker(info.iepRecommendations);
           if (!recsClean) return null;
           const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
@@ -13657,7 +13693,19 @@ cleanedHTML + '\n' +
                       );
                     })()}
                     {(() => {
-                      const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
+                      const stripMarker = (s) => {
+            // ★ [94-1] 직접 쓰신 칸(MYNOTE)을 자동 문장 뒤에 이어 붙여 한 단락으로 내보낸다.
+            //    표식은 화면·인쇄 어디에도 보이면 안 되므로 반드시 여기서 처리한다.
+            const raw = s || "";
+            const m = raw.match(/\n{0,2}<!--MYNOTE:([\s\S]*?)-->/);
+            const note = m ? String(m[1]).trim() : "";
+            const body = raw
+              .replace(/\n{0,2}<!--MYNOTE:[\s\S]*?-->/g, "")
+              .replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "")
+              .replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n")
+              .trim();
+            return note ? (body ? body + "\n\n" + note : note) : body;
+          };
                       const refClean = stripMarker(effectiveReferralReason(info));
                       const endClean = stripMarker(info.finalEndReason);
                       return (
@@ -13822,7 +13870,19 @@ cleanedHTML + '\n' +
 
             {/* ★ [v19 흐름 개선] 중간모드 도전적 행동 변화 — 차트 영역 끝 (사실 데이터와 함께) */}
             {!isFinalMode && !isIepMode && (() => {
-              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
+              const stripMarker = (s) => {
+            // ★ [94-1] 직접 쓰신 칸(MYNOTE)을 자동 문장 뒤에 이어 붙여 한 단락으로 내보낸다.
+            //    표식은 화면·인쇄 어디에도 보이면 안 되므로 반드시 여기서 처리한다.
+            const raw = s || "";
+            const m = raw.match(/\n{0,2}<!--MYNOTE:([\s\S]*?)-->/);
+            const note = m ? String(m[1]).trim() : "";
+            const body = raw
+              .replace(/\n{0,2}<!--MYNOTE:[\s\S]*?-->/g, "")
+              .replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "")
+              .replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n")
+              .trim();
+            return note ? (body ? body + "\n\n" + note : note) : body;
+          };
               const behaviorClean = stripMarker(info.finalBehaviorChange);
               if (!behaviorClean) return null;
               const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
@@ -13959,7 +14019,19 @@ cleanedHTML + '\n' +
 
             {/* 1. 종합 현황 — ★ 종결모드에서는 제외 (종합 평가와 내용 중복) */}
             {!isFinalMode && reportSections && (() => {
-              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
+              const stripMarker = (s) => {
+            // ★ [94-1] 직접 쓰신 칸(MYNOTE)을 자동 문장 뒤에 이어 붙여 한 단락으로 내보낸다.
+            //    표식은 화면·인쇄 어디에도 보이면 안 되므로 반드시 여기서 처리한다.
+            const raw = s || "";
+            const m = raw.match(/\n{0,2}<!--MYNOTE:([\s\S]*?)-->/);
+            const note = m ? String(m[1]).trim() : "";
+            const body = raw
+              .replace(/\n{0,2}<!--MYNOTE:[\s\S]*?-->/g, "")
+              .replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "")
+              .replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n")
+              .trim();
+            return note ? (body ? body + "\n\n" + note : note) : body;
+          };
               const overviewClean = stripMarker(reportSections["종합 현황"]);
               const summaryClean = stripMarker(reportSections["총괄 요약 및 권고사항"]);
               if (overviewClean) {
@@ -14014,7 +14086,19 @@ cleanedHTML + '\n' +
 
             {/* 2. 치료사 종합 소견 (중간 모드 - 종결은 위에서 처리됨) */}
             {!isFinalMode && !isIepMode && reportSections && (() => {
-              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
+              const stripMarker = (s) => {
+            // ★ [94-1] 직접 쓰신 칸(MYNOTE)을 자동 문장 뒤에 이어 붙여 한 단락으로 내보낸다.
+            //    표식은 화면·인쇄 어디에도 보이면 안 되므로 반드시 여기서 처리한다.
+            const raw = s || "";
+            const m = raw.match(/\n{0,2}<!--MYNOTE:([\s\S]*?)-->/);
+            const note = m ? String(m[1]).trim() : "";
+            const body = raw
+              .replace(/\n{0,2}<!--MYNOTE:[\s\S]*?-->/g, "")
+              .replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "")
+              .replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n")
+              .trim();
+            return note ? (body ? body + "\n\n" + note : note) : body;
+          };
               const growthClean = stripMarker(reportSections["이번 기간의 성장과 변화"]);
               if (!growthClean) return null;
               return (
@@ -14031,7 +14115,19 @@ cleanedHTML + '\n' +
             {/* ★ [v19 흐름 개선] 종결모드 도전적 행동 변화 — 성장과 변화 직후 (회고 흐름) */}
             {/* 중간모드는 위 차트 영역 끝에서 표시됨 */}
             {isFinalMode && (() => {
-              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
+              const stripMarker = (s) => {
+            // ★ [94-1] 직접 쓰신 칸(MYNOTE)을 자동 문장 뒤에 이어 붙여 한 단락으로 내보낸다.
+            //    표식은 화면·인쇄 어디에도 보이면 안 되므로 반드시 여기서 처리한다.
+            const raw = s || "";
+            const m = raw.match(/\n{0,2}<!--MYNOTE:([\s\S]*?)-->/);
+            const note = m ? String(m[1]).trim() : "";
+            const body = raw
+              .replace(/\n{0,2}<!--MYNOTE:[\s\S]*?-->/g, "")
+              .replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "")
+              .replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n")
+              .trim();
+            return note ? (body ? body + "\n\n" + note : note) : body;
+          };
               const behaviorClean = stripMarker(info.finalBehaviorChange);
               if (!behaviorClean) return null;
               return (
@@ -14052,7 +14148,19 @@ cleanedHTML + '\n' +
 
             {/* 3. 가정에서 함께 하기 (종결모드는 finalHomeMaintenance, 아니면 reportSections) */}
             {isFinalMode ? (() => {
-              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
+              const stripMarker = (s) => {
+            // ★ [94-1] 직접 쓰신 칸(MYNOTE)을 자동 문장 뒤에 이어 붙여 한 단락으로 내보낸다.
+            //    표식은 화면·인쇄 어디에도 보이면 안 되므로 반드시 여기서 처리한다.
+            const raw = s || "";
+            const m = raw.match(/\n{0,2}<!--MYNOTE:([\s\S]*?)-->/);
+            const note = m ? String(m[1]).trim() : "";
+            const body = raw
+              .replace(/\n{0,2}<!--MYNOTE:[\s\S]*?-->/g, "")
+              .replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "")
+              .replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n")
+              .trim();
+            return note ? (body ? body + "\n\n" + note : note) : body;
+          };
               const homeClean = stripMarker(info.finalHomeMaintenance);
               if (!homeClean) return null;
               return (
@@ -14064,7 +14172,19 @@ cleanedHTML + '\n' +
               );
             })() : (
               reportSections && (() => {
-                const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
+                const stripMarker = (s) => {
+            // ★ [94-1] 직접 쓰신 칸(MYNOTE)을 자동 문장 뒤에 이어 붙여 한 단락으로 내보낸다.
+            //    표식은 화면·인쇄 어디에도 보이면 안 되므로 반드시 여기서 처리한다.
+            const raw = s || "";
+            const m = raw.match(/\n{0,2}<!--MYNOTE:([\s\S]*?)-->/);
+            const note = m ? String(m[1]).trim() : "";
+            const body = raw
+              .replace(/\n{0,2}<!--MYNOTE:[\s\S]*?-->/g, "")
+              .replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "")
+              .replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n")
+              .trim();
+            return note ? (body ? body + "\n\n" + note : note) : body;
+          };
                 const homeCoop = stripMarker(reportSections["가정에서 함께 하기"]);
                 const fallback = stripMarker(reportSections["일반화 계획 및 가정 협력 방안"]);
                 if (homeCoop) {
@@ -14091,7 +14211,19 @@ cleanedHTML + '\n' +
 
             {/* 4. 다음 목표 (중간모드 전용) — 종결모드는 별도 권고사항 섹션 */}
             {!isFinalMode && reportSections && (() => {
-              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
+              const stripMarker = (s) => {
+            // ★ [94-1] 직접 쓰신 칸(MYNOTE)을 자동 문장 뒤에 이어 붙여 한 단락으로 내보낸다.
+            //    표식은 화면·인쇄 어디에도 보이면 안 되므로 반드시 여기서 처리한다.
+            const raw = s || "";
+            const m = raw.match(/\n{0,2}<!--MYNOTE:([\s\S]*?)-->/);
+            const note = m ? String(m[1]).trim() : "";
+            const body = raw
+              .replace(/\n{0,2}<!--MYNOTE:[\s\S]*?-->/g, "")
+              .replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "")
+              .replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n")
+              .trim();
+            return note ? (body ? body + "\n\n" + note : note) : body;
+          };
               const nextGoal = stripMarker(reportSections["다음 목표"]);
               const fallback = stripMarker(reportSections["다음 목표 제안"]);
               if (nextGoal) {
@@ -14117,7 +14249,19 @@ cleanedHTML + '\n' +
 
             {/* ★ [v19 통합] 종결보고서 끝부분 — 앞으로의 방향 (권고사항 + 다음 기관 인계) */}
             {isFinalMode && (() => {
-              const stripMarker = (s) => (s || "").replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "").replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n").trim();
+              const stripMarker = (s) => {
+            // ★ [94-1] 직접 쓰신 칸(MYNOTE)을 자동 문장 뒤에 이어 붙여 한 단락으로 내보낸다.
+            //    표식은 화면·인쇄 어디에도 보이면 안 되므로 반드시 여기서 처리한다.
+            const raw = s || "";
+            const m = raw.match(/\n{0,2}<!--MYNOTE:([\s\S]*?)-->/);
+            const note = m ? String(m[1]).trim() : "";
+            const body = raw
+              .replace(/\n{0,2}<!--MYNOTE:[\s\S]*?-->/g, "")
+              .replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "")
+              .replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n")
+              .trim();
+            return note ? (body ? body + "\n\n" + note : note) : body;
+          };
               const recClean = stripMarker(effectiveRecommendations(info, goals));
               const handoverClean = stripMarker(info.finalHandover);
               if (!recClean && !handoverClean) return null;
@@ -19615,6 +19759,20 @@ function ReportGeneratorSection({
       const meta = result.__meta;
       const sectionsOnly = { ...result };
       delete sectionsOnly.__meta;
+      // ★ [94-2] [🔄 보고서 다시 생성]은 섹션을 통째로 갈아끼운다.
+      //    그 안에 직접 쓰신 칸(MYNOTE)이 들어 있으면 같이 날아가므로,
+      //    새 문장에 옛 MYNOTE를 다시 붙여 넣는다. 자동 문장만 바뀌고 직접 쓴 글은 남는다.
+      const MYNOTE_KEEP = /\n{0,2}<!--MYNOTE:([\s\S]*?)-->/;
+      Object.keys(sectionsOnly).forEach(k => {
+        const prevNote = String((reportSections || {})[k] || "").match(MYNOTE_KEEP);
+        if (!prevNote) return;
+        const fresh = String(sectionsOnly[k] || "").replace(MYNOTE_KEEP, "");
+        // 새 문장 뒤, 다른 표식(AUTOBASE·SELECTED) 앞에 오도록 맨 앞 표식 위치에 끼운다.
+        const at = fresh.search(/\n{0,2}<!--(AUTOBASE|SELECTED):/);
+        sectionsOnly[k] = at >= 0
+          ? fresh.slice(0, at) + `\n\n<!--MYNOTE:${prevNote[1]}-->` + fresh.slice(at)
+          : fresh + `\n\n<!--MYNOTE:${prevNote[1]}-->`;
+      });
       // ★ [81-1] 만든 시점의 데이터 지문을 함께 저장한다.
       //    중간보고서 섹션은 [🔄 보고서 다시 생성]을 누른 순간의 값으로 굳는데, 그 뒤
       //    과제가 늘어도 다시 누르지 않으면 옛 숫자가 그대로 인쇄됐다 — 표지는 매번 새로
@@ -20389,16 +20547,25 @@ function ReportGeneratorSection({
               //    packStored가 항상 정확히 \n\n을 붙이므로 풀 때도 딱 그만큼만 뗀다.
               const MARKER_RE = /\n{0,2}<!--SELECTED:([^>]*)-->\s*$/;
               const AUTOBASE_RE = /\n{0,2}<!--AUTOBASE:([\s\S]*?)-->/;
+              // ★ [94-1] 직접 쓰신 글을 자동 문장과 따로 담는다.
+              //    예전엔 한 칸에 섞여 있어 [보고서 다시 생성]을 누르면 통째로 덮어써졌고,
+              //    어디까지가 자동이고 어디부터 직접 쓴 것인지 앱이 알 방법이 없었다.
+              //    아래 MYNOTE 칸은 자동 생성이 절대 건드리지 않는다.
+              //    인쇄할 때는 자동 문장 뒤에 이어 붙여 한 단락으로 나간다(보고서 모양은 그대로).
+              const MYNOTE_RE = /\n{0,2}<!--MYNOTE:([\s\S]*?)-->/;
               const rawValue = reportSections[key] || "";
               const markerMatch = rawValue.match(MARKER_RE);
               const selected = markerMatch ? markerMatch[1].split("|").filter(Boolean) : [];
               const autoMatch = rawValue.match(AUTOBASE_RE);
               const autoBase = autoMatch ? autoMatch[1] : "";
-              const visibleText = rawValue.replace(MARKER_RE, "").replace(AUTOBASE_RE, "");
+              const myNoteMatch = rawValue.match(MYNOTE_RE);
+              const myNote = myNoteMatch ? myNoteMatch[1] : "";
+              const visibleText = rawValue.replace(MARKER_RE, "").replace(AUTOBASE_RE, "").replace(MYNOTE_RE, "");
               const selectedSet = new Set(selected);
 
-              const packStored = (text, arr, base) =>
+              const packStored = (text, arr, base, note = myNote) =>
                 text
+                + (note ? `\n\n<!--MYNOTE:${note}-->` : "")
                 + (base ? `\n\n<!--AUTOBASE:${base}-->` : "")
                 + (arr.length > 0 ? `\n\n<!--SELECTED:${arr.join("|")}-->` : "");
 
@@ -20502,6 +20669,28 @@ function ReportGeneratorSection({
                       boxSizing: "border-box", background: "#fafbfc"
                     }}
                   />
+                  {/* ★ [94-1] 직접 쓰는 칸 — 자동 생성이 절대 건드리지 않는다.
+                      위 칸은 [✨ 자동 생성]을 누르면 새 문장으로 바뀌지만 이 칸은 그대로 남는다.
+                      인쇄할 때는 위 문장 뒤에 이어 붙어 한 단락으로 나간다. */}
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 10.5, color: "#5a8c1f", fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
+                      <span>✍️ 직접 쓰는 칸</span>
+                      <span style={{ color: "#999", fontWeight: 400 }}>— 자동 생성해도 지워지지 않습니다</span>
+                    </div>
+                    <AutoTextarea
+                      value={myNote}
+                      onChange={e => updateSection(key, packStored(visibleText, selected, autoBase, e.target.value))}
+                      rows={2}
+                      placeholder="여기에 쓰신 내용은 [✨ 자동 생성]을 눌러도 그대로 남습니다. 인쇄할 때 위 문장 뒤에 이어집니다."
+                      style={{
+                        width: "100%", padding: "10px 12px",
+                        border: "1px solid #d4e5ba", borderRadius: 8,
+                        fontSize: 12, lineHeight: 1.8, color: "#333",
+                        fontFamily: "inherit", outline: "none", resize: "vertical",
+                        boxSizing: "border-box", background: "#fbfdf8"
+                      }}
+                    />
+                  </div>
                 </div>
               );
             }
