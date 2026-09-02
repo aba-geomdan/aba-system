@@ -10886,7 +10886,7 @@ export default function App() {
           <ReportTab 
             currentUser={currentUser}
             info={effectiveInfo} goals={includedGoals} currentAvgs={currentAvgs} balanceBarRows={balanceBarRows} baselineAvgs={baselineAvgs}
-            reportSectionsStamp={activeChild?.reportFields?.reportSectionsStamp || ""}
+            reportSectionsStamp={activeChild?.reportSectionsStamp || ""}   /* ★ [93-1] 아동 객체 최상위에 저장된다 */
             domainLevelOverrides={domainLevelOverrides}
             getTimeline={getTimeline}
             stosForReport={stosForReport}
@@ -19024,7 +19024,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, balanceBarRows = [],
           info={info}
           stos={stosForReport}
           currentTextStamp={currentTextStamp}
-          reportSectionsStamp={reportFields?.reportSectionsStamp || info?.reportSectionsStamp || ""}
+          reportSectionsStamp={reportSectionsStamp}   /* ★ [93-1] reportFields는 배열이라 여기서 못 읽는다 */
           reportPeriodStart={reportPeriodStart}
           reportPeriodEnd={reportPeriodEnd}
           awaitingNewData={awaitingNewData}
