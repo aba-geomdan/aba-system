@@ -5434,6 +5434,7 @@ export default function App() {
 
   // ★ [신규] 보관함 토글 — true면 아카이브된 아동도 함께 표시
   const [showArchived, setShowArchived] = useState(false);
+  const [teacherArchiveOpen, setTeacherArchiveOpen] = useState(false);   // ★ [84-2] 치료사용 보관함 펼침
   const [dashFilter, setDashFilter] = useState("all"); // ★ 대시보드 카드 필터: all | active | terminated
   // ★ [신규] 선생님별 '종결 아동' 접힘 상태 (선생님 이름별로 따로 관리)
   const [endedOpenMap, setEndedOpenMap] = useState({});
@@ -5702,6 +5703,21 @@ export default function App() {
     if (!target) return;
     if (currentUser?.role === "teacher" && target.info.ownerName !== currentUser.name) {
       alert("❌ 다른 선생님의 아동은 삭제할 수 없습니다.");
+      return;
+    }
+    // ★ [84-1] 치료사는 삭제 대신 보관만.
+    //    삭제는 되돌릴 수 없고, 목록에서 치우고 싶을 뿐인 경우가 대부분이다.
+    //    종결 아동처럼 기록을 남겨야 하는 아동이 실수로 지워지면 복구 수단이 없다.
+    //    (성윤준 — 종결 아동인데 삭제돼 있었고, 백업이 없었다면 되살릴 수 없었다.)
+    //    보관은 목록에서 숨기되 데이터를 남기고 언제든 되돌릴 수 있으므로 그쪽으로 보낸다.
+    if (currentUser?.role !== "admin") {
+      askConfirm(
+        `'${target.info.name || "이름없음"}' 아동을 보관함으로 옮깁니다.\n\n` +
+        `목록에서 숨겨지고 데이터는 그대로 남습니다.\n` +
+        `[🗄️ 보관 아동 N명] 버튼으로 언제든 다시 꺼낼 수 있습니다.\n\n` +
+        `완전 삭제가 필요하면 관리자에게 요청해 주세요.`,
+        () => archiveChild(id)
+      );
       return;
     }
     if (liveChildren(children).length === 1) {
@@ -8131,6 +8147,39 @@ export default function App() {
           );
         })()}
 
+        {/* ★ [84-2] 치료사용 보관함 — 관리자 패널의 '보관 아동 보기' 토글은 치료사 화면에
+            나오지 않아, 보관하면 본인이 다시 꺼낼 방법이 없었다(사실상 삭제와 같았다).
+            84-1로 치료사의 삭제를 보관으로 돌렸으므로, 되돌릴 자리를 반드시 함께 준다. */}
+        {currentUser?.role === "teacher" && (() => {
+          const mine = liveChildren(children).filter(c => (c.info?.ownerName || "") === currentUser.name);
+          const archived = mine.filter(c => c.info?.archivedAt);
+          if (archived.length === 0) return null;
+          return (
+            <div style={{ marginBottom: 10, padding: "9px 13px", background: "#fffaf0", border: "1.5px solid #e8d5a8", borderRadius: 10, fontSize: 12, color: "#7a5a10" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ flex: 1, minWidth: 200 }}>
+                  🗄️ <b>보관 아동 {archived.length}명</b> — 목록에서 숨겨져 있고 데이터는 그대로입니다.
+                </span>
+                <button onClick={() => setTeacherArchiveOpen(v => !v)} style={{ ...BS, padding: "5px 11px", fontSize: 11, whiteSpace: "nowrap" }}>
+                  {teacherArchiveOpen ? "접기" : "펼쳐서 꺼내기"}
+                </button>
+              </div>
+              {teacherArchiveOpen && (
+                <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                  {archived.map(c => (
+                    <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1px solid #eadcc0", borderRadius: 7, padding: "6px 10px" }}>
+                      <span style={{ flex: 1, color: "#5a4a30" }}>{c.info?.name || "이름없음"}</span>
+                      <span style={{ fontSize: 10, color: "#a8946a" }}>보관 {String(c.info.archivedAt).slice(0, 10)}</span>
+                      <button onClick={() => askConfirm(`'${c.info?.name || "이름없음"}' 아동을 목록으로 되돌립니다.`, () => unarchiveChild(c.id))}
+                        style={{ ...BS, padding: "3px 9px", fontSize: 10.5, whiteSpace: "nowrap" }}>↩ 꺼내기</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* ★ [83-3] 남의 담당 아동 잠금 배너 — 관리자에게만, 남의 아동일 때만 */}
         {isOthersChild && (
           <div style={{
@@ -8620,7 +8669,7 @@ export default function App() {
                                 </button>
                                 <button
                                   onClick={e => { e.stopPropagation(); deleteChild(c.id); }}
-                                  title="아동 삭제"
+                                  title={currentUser?.role === "admin" ? "아동 삭제" : "보관함으로 이동 (삭제는 관리자만)"}
                                   style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14, padding: "2px 6px", fontFamily: "inherit", fontWeight: 700, borderRadius: 4 }}
                                   onMouseEnter={e => { e.currentTarget.style.background = "#fef2f2"; e.currentTarget.style.color = "#a85020"; }}
                                   onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#ccc"; }}>
