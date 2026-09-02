@@ -4593,7 +4593,17 @@ function _pickNewerChild(a, b) {
   //    이긴 쪽 기록이 더 적으면, 목표·설정은 이긴 쪽 것을 쓰되 기록은 진 쪽에서 되살린다.
   const wn = _childDataPoints(winner);
   const ln = _childDataPoints(loser);
-  if (ln > wn) {
+  // ★ [89-1] 기록이 줄었다고 무조건 되살리면 안 된다.
+  //    잘못 넣은 회기를 지우거나 취소하는 것은 정상 작업이고, 그때도 수는 줄어든다.
+  //    그걸 되살리면 지운 기록이 자꾸 돌아와 더 나쁘다.
+  //    사람이 지우는 것과 사고로 날아가는 것은 규모가 다르다 —
+  //    손으로는 한두 칸씩 지우지, 수십 칸이 한 번에 사라지지 않는다.
+  //    그래서 '통째로 사라진 수준'일 때만 되살린다.
+  //      · 이긴 쪽 기록이 0인데 진 쪽에는 있다  (배유민 — 30일치가 0이 됐다)
+  //      · 또는 절반 넘게 사라졌다
+  //    그 아래(한두 칸, 소폭 감소)는 손댄 그대로 둔다.
+  const catastrophic = ln > 0 && (wn === 0 || wn < ln * 0.5);
+  if (catastrophic) {
     const loserDaily = new Map();   // goalId|taskId → daily
     ((loser && loser.goals) || []).forEach(g => {
       loserDaily.set("g:" + g.id, g.daily || {});
