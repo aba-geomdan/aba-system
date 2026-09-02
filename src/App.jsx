@@ -5590,6 +5590,14 @@ export default function App() {
     //    관리자 쪽 사본이 최신이 되어 담당 선생님의 기록을 덮을 수 있었다.
     //    남의 아동은 잠가 두고, 고쳐야 할 때만 위 [✏️ 편집 허용]으로 풀게 한다.
     //    (83-1이 기록 손실은 막지만, 애초에 남의 아동을 건드리지 않는 것이 더 안전하다.)
+    // ★ [91-2] 데이터를 아직 다 못 불러온 상태에서는 저장하지 않는다.
+    //    로드가 끝나기 전(loaded=false)이나 클라우드 읽기가 실패한 상태에서 저장하면,
+    //    비어 있거나 낡은 사본이 클라우드로 올라가 멀쩡한 기록을 덮는다.
+    //    화면이 이상하다고 급히 눌러도 저장으로 이어지지 않게 막는다.
+    if (!loaded) {
+      setLoadingLockNotice(Date.now());
+      return;
+    }
     if (adminReadOnlyBlocked()) {
       setAdminLockNotice(Date.now());
       return;
@@ -5612,6 +5620,7 @@ export default function App() {
   // ★ [83-3] 관리자 읽기 전용 — 남의 담당 아동일 때만. 본인 담당·치료사 본인 아동은 영향 없음.
   const [adminEditUnlocked, setAdminEditUnlocked] = useState(false);
   const [adminLockNotice, setAdminLockNotice] = useState(0);
+  const [loadingLockNotice, setLoadingLockNotice] = useState(0);   // ★ [91-2] 로딩 중 저장 시도 알림
   const activeChildRef2 = useRef(null);
   useEffect(() => { activeChildRef2.current = activeChild; }, [activeChild]);
   const isOthersChild = (() => {
@@ -6398,7 +6407,14 @@ export default function App() {
             //      83-1이 기록이 더 많은 쪽을 지키므로, 병합으로 회기 기록이 사라지지 않는다.
             //      내가 편집 중인 30초 동안은 여전히 미룬다.
             //    치료사끼리는 같은 아동을 만질 일이 없어 알림도 자동 반영도 하지 않는다 — 기존과 같음.
-            if (currentUser?.role === "admin" && Array.isArray(parsed.children)) {
+            // ★ [91-1] 예전엔 관리자만 남의 변경을 자동으로 받아왔다.
+            //    치료사는 새로고침 전까지 낡은 화면을 보게 되는데, 기기를 바꿔 열었을 때
+            //    "기록이 사라졌다"고 놀라 이것저것 누르다가 그 낡은 사본이 저장돼
+            //    클라우드의 멀쩡한 기록을 덮었다(배유민).
+            //    낡은 화면을 아예 안 보게 하는 것이 근본이라, 치료사에게도 연다.
+            //    편집 중 30초는 그대로 미룬다 — 입력하는 중에 화면이 바뀌면 안 된다.
+            //    89-1의 병합 보호가 있어 받아오다 기록이 줄어들 위험은 없다.
+            if (Array.isArray(parsed.children)) {
               const editingNow = Date.now() - lastLocalEditRef.current < 30000;
               if (!editingNow) {
                 const cloudList = parsed.children.map(migrateChild);
@@ -8586,6 +8602,18 @@ export default function App() {
               style={{ ...BS, padding: "5px 11px", fontSize: 11, whiteSpace: "nowrap" }}>
               {adminEditUnlocked ? "🔒 다시 잠그기" : "✏️ 편집 허용"}
             </button>
+          </div>
+        )}
+        {/* ★ [91-2] 불러오는 중 안내 — 화면이 비어 보여도 기다리면 채워진다는 걸 알린다 */}
+        {!loaded && (
+          <div style={{ marginBottom: 10, padding: "9px 13px", borderRadius: 10, fontSize: 12, background: "#f4f6f8", border: "1.5px solid #cfd8e0", color: "#44515c" }}>
+            ⏳ <b>데이터를 불러오는 중입니다.</b> 화면이 비어 보여도 잠시 기다려 주세요.
+            <span style={{ color: "#7a848c" }}> 불러오는 동안에는 저장되지 않습니다.</span>
+          </div>
+        )}
+        {loadingLockNotice > 0 && Date.now() - loadingLockNotice < 4000 && (
+          <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 8, fontSize: 12, background: "#fdecec", border: "1px solid #f0b8b8", color: "#a03030" }}>
+            ⏳ 아직 데이터를 불러오는 중이라 저장하지 않았습니다. 잠시 뒤 다시 시도해 주세요.
           </div>
         )}
         {adminLockNotice > 0 && Date.now() - adminLockNotice < 4000 && (
@@ -10983,6 +11011,7 @@ export default function App() {
       {viewingArchive && (
         <ArchiveViewModal
           item={viewingArchive}
+          list={archiveList}
           onClose={() => setViewingArchive(null)}
         />
       )}
@@ -11717,7 +11746,7 @@ function ExternalGoalModal({ extForm, setExtForm, onClose, onSubmit, onSubmitAnd
   );
 }
 
-function ArchiveViewModal({ item, onClose }) {
+function ArchiveViewModal({ item, onClose, list }) {
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -11756,7 +11785,7 @@ function ArchiveViewModal({ item, onClose }) {
         {/* 헤더 */}
         <div style={{ padding: "16px 22px", borderBottom: "1px solid #f0e0e5", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: PKD, marginBottom: 4 }}>📁 {archiveDisplayTitle(item)}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: PKD, marginBottom: 4 }}>📁 {archiveDisplayTitle(item, list)}</div>
             <div style={{ fontSize: 11, color: "#888" }}>
               {snapshot?.childName} · 저장: {fmtTime(item.savedAt)}
               {item.auto && <span style={{ marginLeft: 6, fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "#e6f1fb", color: "#185fa5" }}>자동 보관</span>}
@@ -19118,14 +19147,30 @@ function ReportTab({ currentUser, info, goals, currentAvgs, balanceBarRows = [],
 // ★ [58-4] 보관본 표시 제목 — 저장된 title은 보관 시점에 굳어서
 //    중간은 "2026.05~2026.08 - 1차", 종결은 "🎓 종결보고서 (…)"로 형식이 달랐다.
 //    옛 보관본까지 같은 형식으로 보이도록, 저장값 대신 조각으로 매번 만든다.
-function archiveDisplayTitle(item) {
+// ★ [92-1] 차수(order)는 저장할 때 '그때 목록 길이 + 1'로 굳는다.
+//    그래서 보관본을 하나 지우면 남은 것의 차수가 그대로 남아 어긋난다
+//    (1개뿐인데 "2차"로 표시 — 신준우·김유찬).
+//    저장값 대신 지금 목록에서 다시 센다. 앞으로 무엇을 지워도 저절로 맞는다.
+//    세는 기준: 같은 종류(중간/IEP)끼리, 저장 시각이 이른 것부터 1차.
+//    종결보고서는 차수를 쓰지 않으므로 제외한다.
+function archiveOrderIn(list, item) {
+  if (!item || item.isFinal) return null;
+  const same = (Array.isArray(list) ? list : []).filter(x =>
+    x && !x.isFinal && (!!x.isIep === !!item.isIep)
+  ).sort((a, b) => String(a.savedAt || "").localeCompare(String(b.savedAt || "")));
+  const idx = same.findIndex(x => x.id === item.id);
+  return idx >= 0 ? idx + 1 : (item.order || null);   // 목록에 없으면 저장값으로 대체
+}
+
+function archiveDisplayTitle(item, list) {
   if (!item) return "";
   const period = item.period || "";
   if (!period) return item.title || "보고서";
+  const ord = list ? archiveOrderIn(list, item) : (item.order || null);
   // ★ IEP 보관함도 같은 카드를 쓴다. isIep을 먼저 걸러야 IEP가 '중간보고서'로 찍히지 않는다.
-  if (item.isIep) return `IEP 계획안 (${period})` + (item.order ? ` · ${item.order}차` : "");
+  if (item.isIep) return `IEP 계획안 (${period})` + (ord ? ` · ${ord}차` : "");
   if (item.isFinal) return `종결보고서 (${period})`;
-  return `중간보고서 (${period})` + (item.order ? ` · ${item.order}차` : "");
+  return `중간보고서 (${period})` + (ord ? ` · ${ord}차` : "");
 }
 
 function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCutoffDisabled, isFinalMode }) {
@@ -19277,7 +19322,7 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
                     <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: item.isFinal ? "#fdf6ed" : "#fdf8f9", border: `1px solid ${item.isFinal ? "#f0e0c0" : "#f0e0e5"}`, borderRadius: 8, marginBottom: 6 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: "#333", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                          <span>{archiveDisplayTitle(item)}</span>
+                          <span>{archiveDisplayTitle(item, list)}</span>
                           {item.isFinal && <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "#fef3e0", color: "#a06010", fontWeight: 600 }}>🎓 종결</span>}
                           {item.auto && <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "#e6f1fb", color: "#185fa5", fontWeight: 500 }}>자동</span>}
                         </div>
