@@ -3360,6 +3360,24 @@ function isValidTaskName(name) {
 //    ① 한도를 42자로 올리고
 //    ② 자를 때 글자 중간이 아니라 띄어쓰기·쉼표·슬래시 단위로 끊고
 //    ③ 끝의 마침표를 떼서 "…있다.…"처럼 겹치지 않게 한다.
+// ★ [80-1] 커리큘럼 항목 앞의 책 문항 번호를 화면·보고서에서 뗀다.
+//    라벨은 "1. 거울: 자신을 보기" / "1-a. 제스처 — 맨드" 형태로 저장돼 있다.
+//    번호는 책과 대조할 때만 쓸모가 있고, 보고서에 나가면 안 되며
+//    커리큘럼 화면에서도 선생님이 "이게 보고서에 찍히나?" 하고 헷갈린다.
+//    저장값(goal.item)은 그대로 두고 보여줄 때만 뗀다 —
+//    라벨을 바꾸면 이미 담아둔 목표가 카탈로그와 다시 끊긴다.
+//
+//    규칙: 맨 앞의 "숫자." 또는 "숫자-글자." 뒤에 공백이 오는 경우만.
+//    ELCAR 722 + VB-MAPP 170 = 892개 전부로 확인함 —
+//    빈 문자열 0건, 두 번 떼도 안 변함, 소영역 안에서 이름이 겹치는 경우 0건,
+//    "1.5m에서 던지는 공 잡기"처럼 내용에 든 소수점은 건드리지 않는다(뒤에 공백이 없음).
+const ITEM_NO_PREFIX_RE = /^\s*\d{1,3}(?:-[a-z가-힣])?\.\s+/;
+function itemLabel(name) {
+  const t = String(name || "");
+  const stripped = t.replace(ITEM_NO_PREFIX_RE, "").trim();
+  return stripped || t;   // 번호만 있는 이상한 값이면 원본을 그대로 쓴다
+}
+
 function shortTaskName(name, maxLen = 42) {
   let t = String(name || "").replace(/\s*[（(][^)）]*[)）]\s*/g, " ").replace(/\s+/g, " ").trim();
   if (!t) t = String(name || "").trim();
@@ -4110,7 +4128,10 @@ function sortGoals(goalsArray) {
 
 const STORAGE_KEY_V1 = "gd-aba-iep-v1";        // 이전 버전 (단일 아동) — 마이그레이션용
 const STORAGE_KEY = "gd-aba-v5-children";      // 아동 리스트
-const ACTIVE_KEY = "gd-aba-v5-active";          // 현재 선택된 아동 ID
+// ★ [78-1] 로그인한 사람별로 나눈다. 예전엔 키가 하나뿐이라 같은 컴퓨터를
+//    여러 선생님이 쓰면 마지막 사람이 보던 아동이 다음 사람에게 그대로 떴다.
+const ACTIVE_KEY = "gd-aba-v5-active";          // (구) 사람 구분 없는 키 — 더 이상 읽지도 쓰지도 않는다
+const activeKeyFor = (userName) => "gd-aba-v5-active::" + (userName || "_");
 const FILE_KEY = "iep-data-backup";
 // ★ [60-15] 클라우드 키를 한 번이라도 성공적으로 읽은 적이 있는지 표식.
 //    storage.get은 키가 없어도 예외를 던지므로, "읽기 실패"와 "아직 키가 없음"을
@@ -5152,6 +5173,11 @@ function AdminPanel({ onClose }) {
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);  // {role: "admin"|"teacher", name: string} | null
+  // ★ [78-2] 최초 로드 이펙트는 deps가 []라 그 안에서 currentUser를 직접 읽으면
+  //    항상 null이다. 활성 아동을 담당 기준으로 고르려면 로그인 정보가 필요하므로
+  //    ref로 최신 값을 들고 간다(리렌더를 유발하지 않고 읽기만 한다).
+  const currentUserRef = useRef(null);
+  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
   const [authView, setAuthView] = useState("login");     // "setup" | "login" | "admin-panel"
   const [authMessage, setAuthMessage] = useState("");
   const [showAdminPanel, setShowAdminPanel] = useState(false);
@@ -5389,6 +5415,19 @@ export default function App() {
     }
     return list;
   }, [children, currentUser, showArchived]);
+
+  // ★ [78-3] 로그인 복원(비동기)과 아동 로드(마운트 시)가 각각 돌아서, 로드 시점에
+  //    아직 로그인 정보가 없으면 78-2의 담당 기준이 못 먹고 전체 첫 아동이 잡힌다.
+  //    타이밍에 기대지 않도록, 지금 열린 아동이 '내가 볼 수 있는 목록'에 없으면
+  //    내 목록의 첫 아동으로 되돌린다. 목록 안에 있으면 절대 건드리지 않는다 —
+  //    사용자가 직접 고른 아동을 빼앗으면 안 된다.
+  useEffect(() => {
+    if (!loaded) return;
+    if (!currentUser) return;
+    if (visibleChildren.length === 0) return;
+    if (activeChildId && visibleChildren.some(c => c.id === activeChildId)) return;
+    setActiveChildId(visibleChildren[0].id);
+  }, [loaded, currentUser, visibleChildren, activeChildId]);
 
   // ★ [신규] 아카이브 후보 — 종결 후 3개월(=약 92일) 이상 지나고 아직 아카이브 안 된 아동
   const archiveCandidates = useMemo(() => {
@@ -5735,7 +5774,13 @@ export default function App() {
 
         if (!childrenList && typeof localStorage !== "undefined") {
           const rawChildren = localStorage.getItem(STORAGE_KEY);
-          const rawActive = localStorage.getItem(ACTIVE_KEY);
+          // ★ [78-1] 사람별 키만 읽는다. 옛 공용 키(ACTIVE_KEY)는 폴백으로도 쓰지 않는다 —
+          //    거기에 남의 담당 아동 ID가 굳어 있는 상태라, 폴백을 두면 그 값이 그대로
+          //    되살아난다(관리자는 전체가 '유효한 선택'이라 새로고침해도 계속 그 아동이 열렸다).
+          //    사람별 키가 없으면 저장값 없음으로 보고 아래에서 본인 담당부터 연다.
+          //    업데이트 직후 한 번은 '마지막에 보던 아동' 기억이 사라지지만, 그 값이
+          //    바로 문제의 원인이므로 버리는 쪽이 맞다.
+          const rawActive = localStorage.getItem(activeKeyFor(currentUserRef.current?.name));
           if (rawChildren) {
             try {
               const parsed = JSON.parse(rawChildren);
@@ -5766,8 +5811,22 @@ export default function App() {
         if (childrenList && childrenList.length > 0) {
           setChildren(childrenList);
           const aliveList = liveChildren(childrenList);
-          const validActive = lastActive && aliveList.find(c => c.id === lastActive);
-          setActiveChildId(validActive ? lastActive : (aliveList[0]?.id || childrenList[0].id));
+          // ★ [78-2] 활성 아동을 '전체 목록의 첫 번째'에서 고르고 있었다.
+          //    담당 필터를 안 거쳐서, 저장된 값이 없으면 남의 담당 아동이 열렸다
+          //    (이름순으로 앞선 다른 선생님 아동). 관리자만의 문제가 아니라
+          //    치료사도 같은 경로를 타므로 똑같이 남의 아동이 잡혔다.
+          //    내 담당 아동 중에서 고르고, 없을 때만 전체에서 고른다.
+          //    관리자는 담당 개념이 옅으므로 본인 담당이 있으면 그것부터 연다.
+          const u = currentUserRef.current;
+          const mine = u?.name ? aliveList.filter(c => (c.info?.ownerName || "") === u.name) : [];
+          // 열어도 되는 범위: 관리자는 전체, 치료사는 본인 담당만.
+          //   저장된 선택은 이 범위 안이면 그대로 존중한다 —
+          //   관리자가 일부러 다른 선생님 아동을 열어 뒀다면 빼앗으면 안 된다.
+          const allowed = (u?.role === "admin" || !u) ? aliveList : mine;
+          const validActive = lastActive && allowed.find(c => c.id === lastActive);
+          // 저장된 선택이 없거나 범위 밖이면 본인 담당부터 연다.
+          const fallback = mine[0]?.id || allowed[0]?.id || aliveList[0]?.id || childrenList[0].id;
+          setActiveChildId(validActive ? lastActive : fallback);
         }
         // ★ [61-2] 로드가 아무것도 못 찾았을 때(새 기기 첫 로그인·네트워크 실패·삼켜진 예외)
         //    기존엔 else에서 자리표시자를 활성 아동으로 세웠다. 그 순간 loaded=true가 되고
@@ -5813,7 +5872,7 @@ export default function App() {
           }
           if (!skipLocalWrite) {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(children));
-            if (activeChildId) localStorage.setItem(ACTIVE_KEY, activeChildId);
+            if (activeChildId) localStorage.setItem(activeKeyFor(currentUser?.name), activeChildId);
           }
         }
       } catch (e) {}
@@ -6114,7 +6173,15 @@ export default function App() {
 
   const toggleCatalogInclude = (sourceType, domain, subDomain, item) => {
     if (!item || !domain || !subDomain) return;
-    const existing = goals.find(g => g.domain === domain && g.subDomain === subDomain && g.item === item);
+    // ★ [77-2] 기존 목표를 찾을 때 커리큘럼(source)을 안 봤다.
+    //    지금 데이터에는 domain+subDomain+item이 겹치는 조합이 없어 사고는 없었지만,
+    //    커리큘럼을 갈아끼울 때마다 겹칠 여지가 생긴다. 겹치면 ELCAR에서 누른 항목이
+    //    이름이 같은 VB-MAPP 목표를 껐다 켜는 식으로 엉뚱하게 동작한다.
+    //    source까지 맞는 것만 같은 목표로 본다. source가 없는 옛 목표는 예전처럼 셋만 비교한다.
+    const existing = goals.find(g =>
+      g.domain === domain && g.subDomain === subDomain && g.item === item &&
+      (!g.source || g.source === sourceType)
+    );
     if (existing) {
       setGoals(prev => prev.map(g => g.id === existing.id ? { ...g, includeInIep: !g.includeInIep } : g));
       return;
@@ -6811,7 +6878,8 @@ export default function App() {
           rawDomain: g.domain,
           subDomain: g.subDomain,
           goalId: g.id,      // ★ [48-1] 목표 병합 키 — goalName이 비면 STO명으로 갈라졌다
-          goalName: g.item,  // 상위 영역목표명
+          goalName: itemLabel(g.item),  // 상위 영역목표명 — ★ [80-1] 책 문항 번호는 떼고 넘긴다.
+          //   여기서 만든 stosForReport가 보고서 문장·강점·주요 변화·중단 목록의 목표명이 된다.
           source: g.source || "ELCAR",  // ★ 커리큘럼
           status,
           isOX: taskIsOX(t),   // ★ [신규] O·X(시도) 기록 여부 — % 평균에서 제외하는 판정
@@ -6905,7 +6973,7 @@ export default function App() {
       const latestPoint = allPoints.length > 0 ? allPoints[allPoints.length - 1] : null;
       return {
         id: g.id,
-        name: g.item,                    // 영역목표 이름
+        name: itemLabel(g.item),         // 영역목표 이름 — ★ [80-1] 책 문항 번호는 떼고 넘긴다
         // ★ [55-3] 집계·문장·카드 라벨에 쓰는 영역은 재매핑본.
         //    rawDomain은 평가도구(ELCAR/VB-MAPP/ESDM) 분류에만 쓴다 —
         //    classifyCurriculum이 영역 이름으로 판정하므로 원본을 남겨야 ELCAR 카드가 '기타'로 새지 않는다.
@@ -7015,7 +7083,7 @@ export default function App() {
     const title = `📋 IEP 계획안 (${period}) - ${order}차`;
     const goalsSummary = (includedGoals || []).map(g => ({
       domain: g.domain,
-      item: g.item,
+      item: itemLabel(g.item),   // ★ [80-1] 보관본 열람 시에도 번호가 안 보이게
       source: g.source,
       tasks: (g.tasks || []).map(t => ({
         name: t.name,
@@ -7078,7 +7146,7 @@ export default function App() {
     const title = finalMode ? `🎓 종결보고서 (${period})` : `${period} - ${order}차`;
     const goalsSummary = (includedGoals || []).map(g => ({
       domain: g.domain,
-      item: g.item,
+      item: itemLabel(g.item),   // ★ [80-1] 보관본 열람 시에도 번호가 안 보이게
       source: g.source,
       tasks: (g.tasks || []).map(t => ({
         name: t.name,
@@ -7158,7 +7226,7 @@ export default function App() {
       return {
         key: `${g.source || "ELCAR"}|${g.domain}|${g.subDomain}|${g.item}`,
         domain: g.domain,
-        name: g.item,
+        name: itemLabel(g.item),
         phases: [{
           lc: "", status: "진행중",
           timeline, masteryDate: ""
@@ -8608,6 +8676,11 @@ export default function App() {
                         
                         goals.forEach(g => {
                           (g.tasks || []).forEach(t => {
+                            // ★ [79-1] trials가 있는 회기만 세고 있었다.
+                            //    O·X(회기당 1회 시도) 기록은 trials가 없고 c/ic에 담기므로,
+                            //    O·X 목표의 회기가 데이터 횟수·정반응률·최근 입력일에서 통째로 빠졌다.
+                            //    O·X를 많이 쓰는 선생님일수록 실제 입력한 것보다 훨씬 적게 나왔고,
+                            //    같은 값을 c/ic까지 세는 선생님 카드와도 숫자가 어긋났다.
                             Object.entries(t.daily || {}).forEach(([date, day]) => {
                               if (Array.isArray(day?.trials)) {
                                 totalRecords++;
@@ -8616,6 +8689,11 @@ export default function App() {
                                   if (x === "+") correctCount++;
                                   if (x === "+" || x === "-") totalCount++;
                                 });
+                              } else if (((day?.c || 0) + (day?.ic || 0)) > 0) {
+                                totalRecords++;
+                                if (date > latestDate) latestDate = date;
+                                correctCount += (day.c || 0);
+                                totalCount += (day.c || 0) + (day.ic || 0);
                               }
                             });
                           });
@@ -9358,8 +9436,16 @@ export default function App() {
                 ELCAR.forEach(domain => {
                   domain.s.forEach(section => {
                     section.i.forEach(item => {
-                      if (item.toLowerCase().includes(q) || section.n.toLowerCase().includes(q) || domain.d.toLowerCase().includes(q)) {
+                      // ★ [77-1] 항목에 검색어가 든 것과 영역 이름만 걸린 것을 구분한다.
+                      //    예전엔 셋 중 아무거나 걸리면 같은 목록에 섞여 나왔다 —
+                      //    "화자"로 찾으면 180건 중 110건이 검색어가 없는 항목이었고
+                      //    ("1-a. 에코익 (1:1 상응) — 또래" 등), 그중 하나를 누르면
+                      //    추가 자체는 정확한데 찾던 것과 달라 "엉뚱한 게 추가됐다"로 보였다.
+                      const _hitItem = item.toLowerCase().includes(q);
+                      const _hitArea = section.n.toLowerCase().includes(q) || domain.d.toLowerCase().includes(q);
+                      if (_hitItem || _hitArea) {
                         results.push({
+                          matchKind: _hitItem ? "item" : "area",
                           curriculum: "ELCAR",
                           domain: domain.d,
                           section: section.n,
@@ -9376,8 +9462,16 @@ export default function App() {
                 VBMAPP_DOMAINS.forEach(domain => {
                   domain.s.forEach(section => {
                     section.i.forEach(item => {
-                      if (item.toLowerCase().includes(q) || section.n.toLowerCase().includes(q) || domain.d.toLowerCase().includes(q)) {
+                      // ★ [77-1] 항목에 검색어가 든 것과 영역 이름만 걸린 것을 구분한다.
+                      //    예전엔 셋 중 아무거나 걸리면 같은 목록에 섞여 나왔다 —
+                      //    "화자"로 찾으면 180건 중 110건이 검색어가 없는 항목이었고
+                      //    ("1-a. 에코익 (1:1 상응) — 또래" 등), 그중 하나를 누르면
+                      //    추가 자체는 정확한데 찾던 것과 달라 "엉뚱한 게 추가됐다"로 보였다.
+                      const _hitItem = item.toLowerCase().includes(q);
+                      const _hitArea = section.n.toLowerCase().includes(q) || domain.d.toLowerCase().includes(q);
+                      if (_hitItem || _hitArea) {
                         results.push({
+                          matchKind: _hitItem ? "item" : "area",
                           curriculum: "VB-MAPP",
                           domain: domain.d,
                           section: section.n,
@@ -9394,8 +9488,16 @@ export default function App() {
                 esdmCatalog.forEach(domain => {
                   domain.s.forEach(section => {
                     section.i.forEach(item => {
-                      if (item.toLowerCase().includes(q) || section.n.toLowerCase().includes(q) || domain.d.toLowerCase().includes(q)) {
+                      // ★ [77-1] 항목에 검색어가 든 것과 영역 이름만 걸린 것을 구분한다.
+                      //    예전엔 셋 중 아무거나 걸리면 같은 목록에 섞여 나왔다 —
+                      //    "화자"로 찾으면 180건 중 110건이 검색어가 없는 항목이었고
+                      //    ("1-a. 에코익 (1:1 상응) — 또래" 등), 그중 하나를 누르면
+                      //    추가 자체는 정확한데 찾던 것과 달라 "엉뚱한 게 추가됐다"로 보였다.
+                      const _hitItem = item.toLowerCase().includes(q);
+                      const _hitArea = section.n.toLowerCase().includes(q) || domain.d.toLowerCase().includes(q);
+                      if (_hitItem || _hitArea) {
                         results.push({
+                          matchKind: _hitItem ? "item" : "area",
                           curriculum: "ESDM",
                           domain: domain.d,
                           section: section.n,
@@ -9418,16 +9520,25 @@ export default function App() {
                   );
                 }
                 
+                // ★ [77-1] 항목에 검색어가 든 것을 위로. 영역 이름만 걸린 것은 아래로 내리고
+                //    아래 목록에서 회색 '영역' 표시를 달아 왜 나왔는지 알 수 있게 한다.
+                const _byKind = (a, b) => (a.matchKind === "item" ? 0 : 1) - (b.matchKind === "item" ? 0 : 1);
                 const grouped = {
-                  "ELCAR": results.filter(r => r.curriculum === "ELCAR"),
-                  "VB-MAPP": results.filter(r => r.curriculum === "VB-MAPP"),
-                  "ESDM": results.filter(r => r.curriculum === "ESDM")
+                  "ELCAR": results.filter(r => r.curriculum === "ELCAR").sort(_byKind),
+                  "VB-MAPP": results.filter(r => r.curriculum === "VB-MAPP").sort(_byKind),
+                  "ESDM": results.filter(r => r.curriculum === "ESDM").sort(_byKind)
                 };
+                const _itemHits = results.filter(r => r.matchKind === "item").length;
                 
                 return (
                   <div>
                     <div style={{ fontSize: 11, color: "#666", marginBottom: 10 }}>
-                      🎯 <b style={{ color: PKD }}>{results.length}건</b>의 결과를 찾았습니다
+                      🎯 <b style={{ color: PKD }}>{_itemHits}건</b>의 항목이 검색어와 일치합니다
+                      {results.length > _itemHits && (
+                        <span style={{ color: "#aaa", marginLeft: 6 }}>
+                          · 영역 이름이 맞아 함께 나온 항목 {results.length - _itemHits}건은 아래에
+                        </span>
+                      )}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                       {Object.entries(grouped).map(([curr, items]) => {
@@ -9468,8 +9579,11 @@ export default function App() {
                                     onMouseLeave={e => { e.currentTarget.style.background = "#fff"; }}
                                   >
                                     <div style={{ flex: 1 }}>
-                                      <div style={{ fontSize: 12, fontWeight: 600, color: "#333", marginBottom: 2 }}>
-                                        {r.item}
+                                      <div style={{ fontSize: 12, fontWeight: 600, color: r.matchKind === "item" ? "#333" : "#999", marginBottom: 2 }}>
+                                        {r.matchKind === "area" && (
+                                          <span style={{ fontSize: 9, padding: "1px 5px", background: "#f0efeb", color: "#8a857b", borderRadius: 6, marginRight: 5, fontWeight: 600 }}>영역</span>
+                                        )}
+                                        {itemLabel(r.item)}
                                       </div>
                                       <div style={{ fontSize: 10, color: "#888" }}>
                                         {r.domain} › {r.section}
@@ -11546,7 +11660,7 @@ function GoalCard({ goal, active, onToggle, onRemove, onUpdate, onToggleStatus, 
         </div>
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: "#333", textDecoration: goal.status === "mastered" ? "line-through" : "none", textDecorationColor: GREEN, textDecorationThickness: 1.5, wordBreak: "keep-all", overflowWrap: "break-word" }}>{goal.item}</span>
+            <span style={{ fontSize: 13, fontWeight: 500, color: "#333", textDecoration: goal.status === "mastered" ? "line-through" : "none", textDecorationColor: GREEN, textDecorationThickness: 1.5, wordBreak: "keep-all", overflowWrap: "break-word" }}>{itemLabel(goal.item)}</span>
             {goal.status === "mastered" && (
               <span style={{ fontSize: 9, padding: "2px 7px", background: GREEN, color: "#fff", borderRadius: 8, fontWeight: 700, whiteSpace: "nowrap" }}>✓ 습득 완료</span>
             )}
@@ -12857,7 +12971,7 @@ cleanedHTML + '\n' +
                             {gItems.map((g, i) => (
                               <div key={g.id} style={{ marginBottom: i < gItems.length - 1 ? 4 : 0 }}>
                                 <span style={{ color: "#888", marginRight: 4 }}>-</span>
-                                <span>{g.item}</span>
+                                <span>{itemLabel(g.item)}</span>
                               </div>
                             ))}
                           </div>
@@ -13171,7 +13285,7 @@ cleanedHTML + '\n' +
                     pausedItems.push({
                       // ★ [49-4] 목록에 단계 내용(t.name)만 찍어서 어떤 목표인지 알 수 없었다.
                       //    ('왼쪽-오른쪽 / 있다-없다 / …' 는 '반대어 이해' L2의 학습 내용이다)
-                      goalName: shortTaskName(g.item || "") || "(이름 없음)",
+                      goalName: shortTaskName(itemLabel(g.item)) || "(이름 없음)",
                       stepName: t.name || "",
                       partial: stillActive,
                       // ★ [49-4] 다른 곳은 모두 cleanDomainKey를 거치는데 여기만 원문을 찍어
@@ -14110,7 +14224,7 @@ function PrintGoalTaskTable({ goals, listGroup, color, emptyMsg }) {
                     <tr key={t.id}>
                       {idx === 0 && (
                         <td rowSpan={tasks.length} style={{ ...tdIep, verticalAlign: "top" }}>
-                          <div style={{ fontWeight: 600, marginBottom: 3 }}>{g.item}</div>
+                          <div style={{ fontWeight: 600, marginBottom: 3 }}>{itemLabel(g.item)}</div>
                           <div style={{ fontSize: 9, color: "#888", marginBottom: 3 }}>{g.subDomain}</div>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
                             {g.vbmapp && (
@@ -14312,7 +14426,7 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
           result.push({
             type: "soonMaster",
             goalId: g.id, taskId: t.id,
-            goalName: g.item, taskName: t.name,
+            goalName: itemLabel(g.item), taskName: t.name,
             domain: g.domain,
             message: `최근 3회 연속 ${last3.join("·")}%`,
             action: "다음 단계 준비 또는 일반화 검토 권장",
@@ -14327,7 +14441,7 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
             result.push({
               type: "suddenDrop",
               goalId: g.id, taskId: t.id,
-              goalName: g.item, taskName: t.name,
+              goalName: itemLabel(g.item), taskName: t.name,
               domain: g.domain,
               message: `이전 평균 ${earlierAvg}% → 최근 ${latestAvg}% (${earlierAvg - latestAvg}%p 하락)`,
               action: "긴급 점검: 강화 체계·촉구 수준·환경 변화 확인 권장",
@@ -14338,7 +14452,7 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
             result.push({
               type: "noProgress",
               goalId: g.id, taskId: t.id,
-              goalName: g.item, taskName: t.name,
+              goalName: itemLabel(g.item), taskName: t.name,
               domain: g.domain,
               message: `최근 ${recentRates.length}회 평균 ${recentAvg}%`,
               action: "중재 전략 재검토 또는 STO 분할 권장",
@@ -14350,7 +14464,7 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
           result.push({
             type: "noProgress",
             goalId: g.id, taskId: t.id,
-            goalName: g.item, taskName: t.name,
+            goalName: itemLabel(g.item), taskName: t.name,
             domain: g.domain,
             message: `최근 ${recentRates.length}회 평균 ${recentAvg}%`,
             action: "중재 전략 재검토 또는 STO 분할 권장",
@@ -15002,7 +15116,7 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
                           {entries.map(({ goal: pg, task: pt }) => (
                             <div key={pt.id} style={{ marginBottom: 6, paddingLeft: 6 }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, flexWrap: "wrap" }}>
-                                <span style={{ fontSize: 10.5, color: "#888" }}>{pg.item}</span>
+                                <span style={{ fontSize: 10.5, color: "#888" }}>{itemLabel(pg.item)}</span>
                                 <span style={{ fontSize: 10.5, color: "#999" }}>›</span>
                                 <span style={{ fontSize: 11, fontWeight: 600, color: "#333" }}>{pt.name}</span>
                                 <span style={{ fontSize: 9, padding: "1px 5px", background: "#a87108", color: "#fff", borderRadius: 8, fontWeight: 700 }}>중단</span>
@@ -15076,7 +15190,7 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
                             return (
                               <div key={g.id} style={{ marginBottom: 6, paddingLeft: 6 }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, flexWrap: "wrap" }}>
-                                  <span style={{ fontSize: 11, fontWeight: 600, color: publishedAt ? "#5a6f8a" : "#333" }}>{g.item}</span>
+                                  <span style={{ fontSize: 11, fontWeight: 600, color: publishedAt ? "#5a6f8a" : "#333" }}>{itemLabel(g.item)}</span>
                                   <span style={{ fontSize: 9, padding: "1px 5px", background: publishedAt ? "#5a6f8a" : "#4a7316", color: "#fff", borderRadius: 8, fontWeight: 700 }}>완료</span>
                                   {completedAt && (
                                     <span style={{ fontSize: 9, color: publishedAt ? "#5a6f8a" : "#7a9968" }}>· {completedAt}</span>
@@ -15234,7 +15348,7 @@ function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask
         <div style={{ flex: 1, minWidth: 200, cursor: "pointer" }} onClick={() => setCollapsed(v => !v)}>
           <div style={{ fontSize: 13.5, fontWeight: 600, color: "#333", lineHeight: 1.4 }}>
             <span style={{ display: "inline-block", width: 12, color: "#bbb", fontSize: 10 }}>{collapsed ? "▶" : "▼"}</span>
-            {goal.item}
+            {itemLabel(goal.item)}
             {!hasActiveTask && (
               <span style={{ marginLeft: 7, padding: "1px 7px", background: "#F1F1F0", border: "1px solid #DED9D2", borderRadius: 8, fontSize: 9, fontWeight: 700, color: "#7A736A", verticalAlign: "middle" }}>진행 과제 없음</span>
             )}
@@ -19832,7 +19946,7 @@ function TaskProgressTable({ goals, calcDayRate, listGroup, title, color, archiv
                     {/* 영역목표 (그룹의 첫 줄에만 표시 · rowspan) */}
                     {idx === 0 && (
                       <td rowSpan={items.length} style={{ padding: "8px 10px", border: `1px solid ${isMastered ? "#d4e5ba" : "#f0e0e5"}`, background: isMastered ? "#f9fcf5" : "#fdf8f9", width: "28%", verticalAlign: "top" }}>
-                        <div style={{ fontSize: 11.5, fontWeight: 600, color: isMastered ? "#4a7316" : PKD, lineHeight: 1.4 }}>{goal.item}</div>
+                        <div style={{ fontSize: 11.5, fontWeight: 600, color: isMastered ? "#4a7316" : PKD, lineHeight: 1.4 }}>{itemLabel(goal.item)}</div>
                         <div style={{ fontSize: 9, color: "#aaa", marginTop: 2 }}>{shortDomain(goal.domain)}{goal.subDomain ? ` · ${goal.subDomain}` : ""}</div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 4 }}>
                           {goal.vbmapp && <span style={{ fontSize: 8.5, padding: "1px 5px", background: "#e6f1fb", color: "#2a6cb2", borderRadius: 5, fontWeight: 600 }}>VB: {goal.vbmapp.v} L{goal.vbmapp.lv}</span>}
@@ -19910,7 +20024,7 @@ function MasteredTable({ goals }) {
                   <div style={{ fontSize: 8.5, color: "#aaa" }}>{g.subDomain}</div>
                 </td>
                 <td style={{ padding: "7px 10px", border: "1px solid #d4e5ba", fontSize: 11 }}>
-                  <div style={{ textDecoration: "line-through", textDecorationColor: GREEN, textDecorationThickness: 1 }}>{g.item}</div>
+                  <div style={{ textDecoration: "line-through", textDecorationColor: GREEN, textDecorationThickness: 1 }}>{itemLabel(g.item)}</div>
                   <div style={{ marginTop: 3, display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {g.vbmapp && <span style={{ fontSize: 9, padding: "1px 6px", background: "#e6f1fb", color: "#2a6cb2", borderRadius: 6, fontWeight: 600 }}>VB: {g.vbmapp.v} L{g.vbmapp.lv}</span>}
                     {g.esdm && <span style={{ fontSize: 9, padding: "1px 6px", background: "#eaf3de", color: "#4a7316", borderRadius: 6, fontWeight: 600 }}>ESDM: {g.esdm.v}</span>}
@@ -19978,7 +20092,7 @@ function GoalStatusTable({ goals, listGroup, title, color }) {
                     <div style={{ fontSize: 8.5, color: "#aaa" }}>{g.subDomain}</div>
                   </td>
                   <td style={{ padding: "7px 10px", border: "1px solid #f0e0e5", fontSize: 11 }}>
-                    <div>{g.item}</div>
+                    <div>{itemLabel(g.item)}</div>
                     <div style={{ marginTop: 3, display: "flex", gap: 4, flexWrap: "wrap" }}>
                       {g.vbmapp && <span style={{ fontSize: 9, padding: "1px 6px", background: "#e6f1fb", color: "#2a6cb2", borderRadius: 6, fontWeight: 600 }}>VB: {g.vbmapp.v} L{g.vbmapp.lv}</span>}
                       {g.esdm && <span style={{ fontSize: 9, padding: "1px 6px", background: "#eaf3de", color: "#4a7316", borderRadius: 6, fontWeight: 600 }}>ESDM: {g.esdm.v}</span>}
