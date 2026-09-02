@@ -19132,6 +19132,7 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [moreOpen, setMoreOpen] = useState(null);   // ★ [90-2] 삭제를 감춰 두는 '⋯'
   const [confirmSave, setConfirmSave] = useState(false);  // ★ 보관 확인 모드
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState("recent");  // "recent" / "old" / "order"
@@ -19285,7 +19286,22 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
                       <button onClick={() => onView(item)} style={{ ...BS, fontSize: 10, padding: "4px 10px" }} title="이 시점의 보고서 보기">👁 보기</button>
                       {confirmDelete === item.id ? (
                         <>
-                          <button onClick={async () => { await onDelete(item.id); setConfirmDelete(null); }} style={{ ...BS, fontSize: 10, padding: "4px 10px", background: "#fef2f2", borderColor: "#fca5a5", color: "#991b1b", fontWeight: 600 }}>확인</button>
+                          {/* ★ [90-1] '확인' 한 번으로 지워졌다. 삭제는 되돌릴 수 없는데
+                              그래프를 되살리려다 잘못 누르기 쉬운 자리라 경고를 한 겹 더 둔다. */}
+                          <button
+                            onClick={() => {
+                              const ok = typeof window !== "undefined" && window.confirm(
+                                `'${item.title || item.period || "보관본"}'을(를) 영구 삭제합니다.\n` +
+                                `되돌릴 수 없습니다.\n\n` +
+                                `※ 그래프에서 이전 데이터를 다시 보고 싶으신 거라면\n` +
+                                `   [↩ 그래프 복원]을 쓰세요. 그건 언제든 되돌릴 수 있고\n` +
+                                `   보관본도 그대로 남습니다.\n\n` +
+                                `정말 삭제할까요?`
+                              );
+                              if (!ok) { setConfirmDelete(null); return; }
+                              (async () => { await onDelete(item.id); setConfirmDelete(null); })();
+                            }}
+                            style={{ ...BS, fontSize: 10, padding: "4px 10px", background: "#fef2f2", borderColor: "#fca5a5", color: "#991b1b", fontWeight: 600 }}>영구 삭제</button>
                           <button onClick={() => setConfirmDelete(null)} style={{ ...BS, fontSize: 10, padding: "4px 10px" }}>취소</button>
                         </>
                       ) : isLatest ? (
@@ -19299,10 +19315,22 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
                               <button onClick={() => setCutoffDisabled(true)} style={{ ...BS, fontSize: 10, padding: "4px 10px", color: "#1d4d80", borderColor: "#9bc4e8", background: "#eff5fc", fontWeight: 600 }} title="보관본은 유지하면서 컷오프만 일시 해제 — 그래프에 모든 데이터 표시">↩ 그래프 복원</button>
                             )
                           )}
-                          <button onClick={() => setConfirmDelete(item.id)} style={{ ...BS, fontSize: 10, padding: "4px 10px", color: "#a85020", borderColor: "#fca5a5" }} title="이 보관본을 영구 삭제 (실수로 보관한 경우 되돌리기)">🗑 삭제</button>
+                          {/* ★ [90-2] 삭제를 '⋯' 안으로 숨긴다.
+                              [↩ 그래프 복원]과 [🗑 삭제]가 나란히 있으면 결과가 비슷해 보여
+                              (둘 다 그래프에 이전 데이터가 다시 나온다) 잘못 누르기 쉽다.
+                              되돌릴 수 있는 쪽만 앞에 두고, 되돌릴 수 없는 쪽은 한 단계 안으로. */}
+                          {moreOpen === item.id ? (
+                            <button onClick={() => { setMoreOpen(null); setConfirmDelete(item.id); }} style={{ ...BS, fontSize: 10, padding: "4px 10px", color: "#a85020", borderColor: "#fca5a5" }} title="이 보관본을 영구 삭제 — 되돌릴 수 없습니다">🗑 삭제</button>
+                          ) : (
+                            <button onClick={() => setMoreOpen(item.id)} style={{ ...BS, fontSize: 10, padding: "4px 8px", color: "#bbb" }} title="더보기">⋯</button>
+                          )}
                         </>
                       ) : (
-                        <button onClick={() => setConfirmDelete(item.id)} style={{ ...BS, fontSize: 10, padding: "4px 10px", color: "#a85020", borderColor: "#fca5a5" }} title="이 보관본 삭제 (그래프 컷오프 영향 없음)">🗑 삭제</button>
+                        moreOpen === item.id ? (
+                          <button onClick={() => { setMoreOpen(null); setConfirmDelete(item.id); }} style={{ ...BS, fontSize: 10, padding: "4px 10px", color: "#a85020", borderColor: "#fca5a5" }} title="이 보관본을 영구 삭제 — 되돌릴 수 없습니다">🗑 삭제</button>
+                        ) : (
+                          <button onClick={() => setMoreOpen(item.id)} style={{ ...BS, fontSize: 10, padding: "4px 8px", color: "#bbb" }} title="더보기">⋯</button>
+                        )
                       )}
                     </div>
                   );
@@ -19338,7 +19366,9 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
                 <div style={{ paddingLeft: 4 }}>
                   <b>👁 보기</b> — 그때 저장된 보고서를 그대로 열어봅니다 (현재 데이터에 영향 없음)<br />
                   <b>🔒 컷오프 적용 / ↩ 그래프 복원</b> — 그래프에서 이전 데이터를 숨기거나 다시 봅니다. 보관본 자체는 그대로 두므로 언제든 되돌릴 수 있습니다<br />
-                  <b>🗑 삭제</b> — 보관본을 영구 삭제합니다. 가장 최근 것을 삭제하면 컷오프가 풀려 이전 데이터가 그래프에 다시 나옵니다
+                  <b>🗑 삭제</b> — 보관본(저장된 보고서)을 <b>영구 삭제</b>합니다. <b>되돌릴 수 없습니다.</b><br />
+                  <span style={{ color: "#a85020" }}>그래프만 되살리려면 위 [↩ 그래프 복원]을 쓰세요 — 삭제할 필요가 없습니다.</span><br />
+                  <span style={{ color: "#888" }}>(아동의 회기 기록은 지워지지 않습니다. 그 보고서만 없어집니다.)</span>
                 </div>
               </div>
             )}
