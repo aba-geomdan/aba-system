@@ -3584,7 +3584,17 @@ function dayIsOX(day) {
   if (!day) return false;
   if (Array.isArray(day.trials)) return false;
   if (day.mode === "pct") return false;
-  return ((day.c || 0) + (day.ic || 0)) > 0;
+  // ★ [98-1] 예전엔 > 0 이었다. 그래서 회기당 여러 번 센 옛 카운터 기록
+  //    ({c:7, ic:3} 같은 모양)까지 O·X로 잡혔다.
+  //    O·X는 하루 한 번만 누르는 기록이므로 합이 정확히 1이어야 한다.
+  //    오판되면 그 목표가 통째로 O·X로 분류되어 영역 평균·성장 그래프·
+  //    영역별 진전도에서 전부 빠진다 — 기록도 계산도 멀쩡한데 보고서에만 안 나왔다.
+  //    (2026-09-03 실제 데이터 확인: 옛 카운트 20일치가 있으나 모두 삭제된 아동의
+  //     것이라, 지금 화면에 보이는 아동 29명·목표 926개에는 판정이 바뀌는 목표가 없다.
+  //     O·X 판정 목표 수 71개 그대로. 보고서 숫자는 움직이지 않는다.
+  //     그래도 고치는 이유: 삭제 아동을 되살리거나 옛 백업을 불러오면 바로 걸린다.)
+  //    지금 입력 UI(setTaskDayOX)는 항상 c+ic===1만 만들므로 새 기록은 영향 없다.
+  return ((day.c || 0) + (day.ic || 0)) === 1;
 }
 
 // ★ [신규] O·X(시도) 목표 판정 — 단일 기준으로 통일.
@@ -4568,6 +4578,14 @@ const migrateGoal = (g) => {
       measureMode: "raw",   // 기본값 — t.measureMode가 있으면 아래 spread로 덮어씀
       plannedTrials: 10,    // 기본값 — t.plannedTrials가 있으면 덮어씀
       resumedAt: null,      // 재실시 날짜 (paused → 1로 갈 때 setTaskListGroup이 기록)
+      // ★ [99-1] 지운 회기 날짜 표식 { "2026-08-01": "삭제한 시각(ISO)" }.
+      //    예전엔 회기를 지우면 daily에서 키를 그냥 없앴다. 그러면 다른 기기 입장에서는
+      //    '원래 안 넣은 날'과 '지운 날'이 똑같아 보여서, 병합할 때 둘을 구분할 수 없었다.
+      //    그래서 기록을 날짜별로 합치지 못하고 아동을 통째로 바꿔치기했고,
+      //    두 기기가 같은 아동에 각각 입력하면 나중에 저장한 쪽만 남았다
+      //    (60회기를 넣어도 다른 기기에서 1회기만 넣으면 60개가 다 사라졌다).
+      //    지운 사실을 남겨두면 날짜별로 합치면서도 지운 것은 되살리지 않을 수 있다.
+      deletedDays: {},
       ...t
     }));
     base.tasks = base.tasks.map(t =>
@@ -4650,6 +4668,155 @@ function _childDataPoints(c) {
   return n;
 }
 
+// ★ [99-2] 회기 삭제 표식 다루기.
+//    회기를 지울 때 daily에서 키만 없애면, 다른 기기에서는 '원래 안 넣은 날'과
+//    구분이 안 된다. 지운 시각을 남겨두면 병합할 때 둘을 가릴 수 있다.
+//    다시 입력하면 표식을 지워, 지웠다가 다시 넣은 날이 사라지지 않게 한다.
+function _markDeletedDay(deletedDays, date) {
+  return { ...(deletedDays || {}), [date]: new Date().toISOString() };
+}
+function _clearDeletedDay(deletedDays, date) {
+  if (!deletedDays || !(date in deletedDays)) return deletedDays || {};
+  const next = { ...deletedDays };
+  delete next[date];
+  return next;
+}
+// 두 기기의 삭제 표식을 합친다 — 같은 날짜는 나중에 지운 쪽을 남긴다.
+function _mergeDeletedDays(a, b) {
+  const _obj = (v) => (v && typeof v === "object" && !Array.isArray(v)) ? v : {};
+  const out = { ..._obj(a) };
+  for (const [d, ts] of Object.entries(_obj(b))) {
+    if (!out[d] || String(ts) > String(out[d])) out[d] = ts;
+  }
+  return out;
+}
+// 한 과제의 하루 기록을 양쪽에서 합친다.
+//   · 양쪽에 다 있으면 나중에 저장한 값을 쓴다
+//   · 한쪽에만 있어도 살린다  ← 이게 없어서 두 기기 입력 중 한쪽이 통째로 사라졌다
+//   · 단, 그 기록보다 나중에 지워졌으면 지운 것을 존중한다
+// savedAt이 없는 옛 기록은 시각을 모르므로, 삭제 표식이 있으면 삭제를 따른다
+// (표식은 이번 수정 이후에만 생기므로, 옛 기록보다 항상 나중이다).
+function _mergeTaskDaily(winDaily, loseDaily, deletedDays) {
+  const out = { ...(loseDaily || {}) };
+  for (const [d, v] of Object.entries(winDaily || {})) {
+    const cur = out[d];
+    if (!cur) { out[d] = v; continue; }
+    const a = cur && cur.savedAt, b = v && v.savedAt;
+    out[d] = (a && b) ? (String(b) >= String(a) ? v : cur) : v;   // 시각 모르면 이긴 쪽
+  }
+  for (const [d, delTs] of Object.entries(deletedDays || {})) {
+    const entry = out[d];
+    if (!entry) continue;
+    const saved = entry.savedAt;
+    if (!saved || String(delTs) > String(saved)) delete out[d];   // 지운 게 더 나중
+  }
+  return out;
+}
+
+
+// ★ [99-5] 진 쪽에만 있는 목표·과제를 살릴지 판단한다.
+//    삭제 표식(99-4)이 있으면 그것으로 충분하지만, 이 수정 이전에 지운 것들에는
+//    표식이 없다. 표식만 믿으면 배포 전에 지운 목표가 낡은 사본에서 되살아난다.
+//    구분 기준은 '두 사본이 얼마나 떨어져 있느냐'다.
+//      · 두 기기가 같은 시간대에 각각 추가한 경우 → 저장 시각이 몇 초~몇 분 차이다.
+//        (20초마다 동기화하므로 그 이상 벌어지기 어렵다)
+//      · 오래 안 켠 기기의 낡은 사본 → 몇 시간~며칠 차이가 난다.
+//        그 사본에 있는 목표는 '새로 추가한 것'이 아니라 '아직 삭제를 못 받은 것'이다.
+//    그래서 두 사본의 저장 시각이 가까울 때만 진 쪽 항목을 살린다.
+//    표식이 쌓이면(배포 후 지운 것들) 이 창과 무관하게 삭제가 항상 존중된다.
+const MERGE_ADD_WINDOW_MS = 10 * 60 * 1000;   // 10분
+function _closeEnoughToAdd(winner, loser) {
+  const w = Date.parse((winner && winner.updatedAt) || "");
+  const l = Date.parse((loser && loser.updatedAt) || "");
+  if (!Number.isFinite(w) || !Number.isFinite(l)) return false;
+  return Math.abs(w - l) <= MERGE_ADD_WINDOW_MS;
+}
+
+// ★ [100-1] 칸별 마지막 수정 시각.
+//    아동 하나에 fieldTimes = { "info.room": "ISO", "reportFields.0": "ISO", ... } 를 둔다.
+//    goals·daily·dailyMemos는 이미 99번에서 항목 단위로 합치므로 여기서 다루지 않는다.
+//    여기 대상은 '통째로 덮이던' 자유 텍스트와 설정값이다.
+const _FIELD_KEYS = [
+  "reportSelStrats", "reportSelStratsCustom", "reportSelPrein", "reportSelSrein",
+  "reportReinfSchedule", "reportBehaviors", "domainLevelOverrides", "mediaList",
+];
+// patch에 담긴 것 중 실제로 값이 바뀐 칸만 시각을 새로 찍는다.
+// (같은 값을 다시 저장하는 경우까지 최신으로 만들면, 안 고친 쪽이 고친 쪽을 이긴다.)
+function _stampFields(before, patch, now) {
+  const out = { ...(before && before.fieldTimes) };
+  if (!patch) return out;
+  const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+
+  if (patch.info && before) {
+    const bi = before.info || {};
+    for (const k of Object.keys(patch.info)) {
+      if (!same(bi[k], patch.info[k])) out["info." + k] = now;
+    }
+  }
+  if (Array.isArray(patch.reportFields)) {
+    const bf = (before && before.reportFields) || [];
+    patch.reportFields.forEach((v, i) => { if (!same(bf[i], v)) out["reportFields." + i] = now; });
+  }
+  if (patch.reportSections && before) {
+    const bs = before.reportSections || {};
+    for (const k of Object.keys(patch.reportSections)) {
+      if (!same(bs[k], patch.reportSections[k])) out["reportSections." + k] = now;
+    }
+  }
+  for (const k of _FIELD_KEYS) {
+    if (k in patch && !same(before && before[k], patch[k])) out[k] = now;
+  }
+  return out;
+}
+
+// 목표·과제처럼 평평한 객체의 칸 시각을 찍는다 (아동의 _stampFields와 같은 규칙).
+function _stampPlain(before, patch) {
+  const out = { ...(before && before.fieldTimes) };
+  if (!patch) return out;
+  const now = new Date().toISOString();
+  const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+  for (const k of Object.keys(patch)) {
+    if (k === "fieldTimes" || k === "tasks" || k === "daily" || k === "deletedDays" || k === "deletedTasks") continue;
+    if (!same(before && before[k], patch[k])) out[k] = now;
+  }
+  return out;
+}
+
+// 평평한 객체를 칸 단위로 합친다 — 시각을 아는 칸은 나중 것, 모르면 이긴 쪽.
+function _mergePlain(win, lose) {
+  if (!lose) return win;
+  const out = { ...lose, ...win };
+  const wt = (win && win.fieldTimes) || {}, lt = (lose && lose.fieldTimes) || {};
+  for (const k of new Set([...Object.keys(wt), ...Object.keys(lt)])) {
+    if (wt[k] && lt[k]) out[k] = String(lt[k]) > String(wt[k]) ? lose[k] : win[k];
+    else if (lt[k] && !wt[k]) out[k] = lose[k];
+  }
+  out.fieldTimes = _mergeFieldTimes(wt, lt);
+  return out;
+}
+
+// 두 사본의 칸별 시각을 합친다 — 같은 칸은 나중 것.
+function _mergeFieldTimes(a, b) {
+  const out = { ...(a || {}) };
+  for (const [k, ts] of Object.entries(b || {})) {
+    if (!out[k] || String(ts) > String(out[k])) out[k] = ts;
+  }
+  return out;
+}
+
+// 한 칸에 대해 어느 쪽 값을 쓸지 고른다.
+//   · 양쪽 시각을 알면 나중에 고친 쪽
+//   · 한쪽만 시각이 있으면 그쪽 (다른 쪽은 이 칸을 손댄 적이 없다)
+//   · 둘 다 모르면 이긴 쪽 (예전 동작 유지)
+function _pickField(key, winner, loser, winVal, loseVal) {
+  const wt = (winner && winner.fieldTimes && winner.fieldTimes[key]) || "";
+  const lt = (loser && loser.fieldTimes && loser.fieldTimes[key]) || "";
+  if (!wt && !lt) return winVal;
+  if (wt && !lt) return winVal;
+  if (!wt && lt) return loseVal;
+  return String(lt) > String(wt) ? loseVal : winVal;
+}
+
 function _pickNewerChild(a, b) {
   const aTime = Math.max(_childTime(a), _childDelTime(a));
   const bTime = Math.max(_childTime(b), _childDelTime(b));
@@ -4660,54 +4827,135 @@ function _pickNewerChild(a, b) {
   if (winner && winner.deletedAt) return winner;
 
   // ★ [83-1] 시각이 늦다는 이유만으로 회기 기록이 통째로 사라지던 것.
-  //    병합은 아동을 항목별로 합치지 않고 한쪽으로 바꿔치기한다. 그래서
-  //    기록이 빠진 사본을 든 기기가 나중에 저장하면, 기록이 있던 쪽을 덮어 지웠다.
-  //      (배유민 — 선생님이 전날 넣은 기록이 다음 날 통째로 사라짐)
-  //    "늦게 저장한 쪽"이 아니라 "기록이 남아 있는 쪽"을 살린다.
-  //    이긴 쪽 기록이 더 적으면, 목표·설정은 이긴 쪽 것을 쓰되 기록은 진 쪽에서 되살린다.
-  const wn = _childDataPoints(winner);
-  const ln = _childDataPoints(loser);
-  // ★ [89-1] 기록이 줄었다고 무조건 되살리면 안 된다.
-  //    잘못 넣은 회기를 지우거나 취소하는 것은 정상 작업이고, 그때도 수는 줄어든다.
-  //    그걸 되살리면 지운 기록이 자꾸 돌아와 더 나쁘다.
-  //    사람이 지우는 것과 사고로 날아가는 것은 규모가 다르다 —
-  //    손으로는 한두 칸씩 지우지, 수십 칸이 한 번에 사라지지 않는다.
-  //    그래서 '통째로 사라진 수준'일 때만 되살린다.
-  //      · 이긴 쪽 기록이 0인데 진 쪽에는 있다  (배유민 — 30일치가 0이 됐다)
-  //      · 또는 절반 넘게 사라졌다
-  //    그 아래(한두 칸, 소폭 감소)는 손댄 그대로 둔다.
-  const catastrophic = ln > 0 && (wn === 0 || wn < ln * 0.5);
-  if (catastrophic) {
-    const loserDaily = new Map();   // goalId|taskId → daily
-    ((loser && loser.goals) || []).forEach(g => {
-      loserDaily.set("g:" + g.id, g.daily || {});
-      ((g && g.tasks) || []).forEach(t => loserDaily.set("t:" + g.id + "|" + t.id, t.daily || {}));
+  //    병합은 아동을 한쪽으로 바꿔치기했다. 그래서 기록이 빠진 사본을 든 기기가
+  //    나중에 저장하면, 기록이 있던 쪽을 덮어 지웠다.
+  // ★ [99-3] 그런데 83-1·89-1의 되살리기는 '절반 넘게 사라졌을 때'만 돌았다.
+  //    평소에는 여전히 통째로 바꿔치기했고, 그래서 두 기기가 같은 아동에
+  //    각각 회기를 넣으면 나중에 저장한 쪽만 남았다.
+  //    (실측: 한 기기에서 60회기를 넣어도 다른 기기에서 1회기만 넣으면 60개가 사라졌다.
+  //     같은 선생님이 폰과 컴퓨터를 오갈 때, 또는 한쪽이 끊겼다 붙을 때 생긴다.)
+  //    이제는 규모와 상관없이 항상 회기를 날짜 단위로 합친다.
+  //    지운 회기가 되살아나는 문제는 99-2의 삭제 표식(deletedDays)으로 막는다 —
+  //    '안 넣은 날'과 '지운 날'을 구분할 수 있게 됐으므로 둘 다 지킬 수 있다.
+  //    목표 목록은 96-3대로 이긴 쪽을 그대로 믿는다(사람이 지워야만 없어지므로).
+  const addOk = _closeEnoughToAdd(winner, loser);   // ★ [99-5]
+  // 배열이 아닌 값이 들어와도 병합이 멈추지 않게 한다.
+  // 여기서 예외가 나면 자동저장이 통째로 중단돼 그 시점 기록이 클라우드로 못 간다.
+  const _arr = (v) => (Array.isArray(v) ? v : []);
+  const loseByGoal = new Map();
+  _arr(loser && loser.goals).forEach(g => {
+    if (g && g.id != null) loseByGoal.set(g.id, g);
+  });
+
+  // ★ [99-4] 지운 목표·과제 표식을 양쪽에서 합친다.
+  //    목표·과제 id는 재사용되지 않으므로, 표식이 있으면 그 항목은 지워진 것이 맞다.
+  const delGoals = _mergeDeletedDays(winner && winner.deletedGoals, loser && loser.deletedGoals);
+
+  const mergedGoals = _arr(winner && winner.goals).map(g => {
+    const lg = loseByGoal.get(g.id);
+    if (!lg) return g;
+
+    // 옛 구조(목표에 직접 붙은 기록)도 날짜 단위로 합친다.
+    const daily = { ...(lg.daily || {}), ...(g.daily || {}) };
+
+    const delTasks = _mergeDeletedDays(g.deletedTasks, lg.deletedTasks);
+    const loseTasks = new Map(_arr(lg && lg.tasks).filter(t => t && t.id != null).map(t => [t.id, t]));
+    const tasks = _arr(g && g.tasks).map(t => {
+      const lt = loseTasks.get(t.id);
+      if (!lt) return t;
+      const deletedDays = _mergeDeletedDays(t.deletedDays, lt.deletedDays);
+      const merged = _mergeTaskDaily(t.daily, lt.daily, deletedDays);
+      // ★ [100-3] 과제 이름·목표횟수 등도 칸 단위로 고른다.
+      return { ..._mergePlain(t, lt), daily: merged, deletedDays };
     });
-    const mergedGoals = ((winner && winner.goals) || []).map(g => {
-      const gd = loserDaily.get("g:" + g.id);
-      const tasks = ((g && g.tasks) || []).map(t => {
-        const td = loserDaily.get("t:" + g.id + "|" + t.id);
-        // 양쪽 기록을 날짜 단위로 합친다. 같은 날은 이긴 쪽(최신 저장) 값을 쓴다.
-        return (td && Object.keys(td).length) ? { ...t, daily: { ...td, ...(t.daily || {}) } } : t;
-      });
-      const daily = (gd && Object.keys(gd).length) ? { ...gd, ...(g.daily || {}) } : g.daily;
-      return { ...g, daily, tasks };
+    // ★ [99-4] 진 쪽에만 있는 과제는 '다른 기기에서 새로 추가한 것'이므로 살린다.
+    //    지운 것은 표식으로 걸러진다. 예전엔 이걸 안 해서, 두 기기가 각각
+    //    과제를 추가하면 나중에 저장한 쪽 것만 남았다.
+    const winTaskIds = new Set(tasks.map(t => t.id));
+    _arr(lg && lg.tasks).forEach(t => {
+      if (t && t.id != null && !winTaskIds.has(t.id) && !delTasks[t.id] && addOk) tasks.push(t);
     });
-    // ★ [96-3] 여기서 "진 쪽에만 있던 목표"를 되살리고 있었다.
-    //    89-1이 daily 쪽에는 '통째로 사라진 수준' 기준을 걸었는데, 목표 쪽에는
-    //    아무 기준이 없어 catastrophic 분기에 들어가기만 하면 무조건 다 되살렸다.
-    //    문제는 목표를 여러 개 지우는 행위 자체가 catastrophic 조건을 만든다는 것이다 —
-    //    목표 3개 중 2개를 지우면 기록이 67% 줄어 catastrophic이 되고,
-    //    그 순간 방금 지운 목표 2개가 그대로 돌아왔다. (89가 잡으려던 증상 그대로)
-    //    목표는 daily와 달리 저절로 사라지지 않는다. 사람이 명시적으로 지워야만 없어진다.
-    //    (배유민 때도 목표 13개는 멀쩡히 남아 있었고 daily만 0이었다 —
-    //     83-1이 원래 지키려던 것도 목표가 아니라 기록이다.)
-    //    그래서 목표 목록은 이긴 쪽을 그대로 믿고, 기록 복원만 남긴다.
-    //    맞바꾸는 것: 목표까지 통째로 날아가는 사고가 나면 그건 못 살린다.
-    //    그런 사고는 아직 없었고, 지운 목표가 돌아오는 것은 지금 확실히 일어나는 일이다.
-    return { ...winner, goals: mergedGoals };
+
+    // ★ [99-6] 다른 기기에서 지운 과제는 이쪽에 남아 있어도 지운다.
+    //    표식이 진 쪽에만 있을 때, 이긴 쪽이 아직 삭제를 못 받은 상태이기 때문이다.
+    //    과제 id는 재사용되지 않으므로 표식은 언제나 그 과제만 가리킨다.
+    const keptTasks = tasks.filter(t => !delTasks[t.id]);
+
+    // ★ [100-3] 목표의 전략·촉구단계·메모 등도 칸 단위로 고른다.
+    return { ..._mergePlain(g, lg), daily, tasks: keptTasks, deletedTasks: delTasks };
+  });
+
+  // ★ [99-4] 진 쪽에만 있는 목표도 같은 이유로 살린다.
+  //    96-3에서 이걸 통째로 뺐던 것은 지운 목표가 되살아났기 때문인데,
+  //    이제 표식으로 구분되므로 '새로 추가한 목표'만 안전하게 살릴 수 있다.
+  const winGoalIds = new Set(mergedGoals.map(g => g.id));
+  _arr(loser && loser.goals).forEach(g => {
+    if (g && g.id != null && !winGoalIds.has(g.id) && !delGoals[g.id] && addOk) mergedGoals.push(g);
+  });
+  // ★ [99-6] 다른 기기에서 지운 목표는 이쪽에 남아 있어도 지운다 — 과제와 같은 이유.
+  for (let i = mergedGoals.length - 1; i >= 0; i--) {
+    if (delGoals[mergedGoals[i].id]) mergedGoals.splice(i, 1);
   }
-  return winner;
+
+  // ★ [99-4] 일일 메모는 날짜별이라 회기 기록과 똑같이 합칠 수 있다.
+  //    같은 날짜를 양쪽이 썼으면 나중에 저장한 쪽(이긴 쪽)을 쓴다.
+  const delMemos = _mergeDeletedDays(winner && winner.deletedMemos, loser && loser.deletedMemos);
+  const dailyMemos = { ...(loser && loser.dailyMemos), ...(winner && winner.dailyMemos) };
+  // 지운 메모는 되살리지 않는다.
+  // 메모 자체에는 저장 시각이 없으므로, 메모를 아직 들고 있는 쪽의 '아동 최종 수정 시각'과
+  // 삭제 시각을 비교한다. 그 기기가 삭제보다 나중에 손댔다면 다시 쓴 것으로 보고 살린다.
+  // 그보다 이전이면 아직 삭제를 못 받은 낡은 사본이므로 지운다.
+  const _memoKept = (side, d, ts) => {
+    if (!side || !side.dailyMemos || !side.dailyMemos[d]) return false;
+    if ((side.deletedMemos || {})[d]) return false;
+    return String(side.updatedAt || "") > String(ts);
+  };
+  Object.keys(delMemos).forEach(d => {
+    if (!_memoKept(winner, d, delMemos[d]) && !_memoKept(loser, d, delMemos[d])) delete dailyMemos[d];
+  });
+
+  return { ...winner, goals: mergedGoals, deletedGoals: delGoals, dailyMemos, deletedMemos: delMemos,
+    ..._mergeFields(winner, loser), fieldTimes: _mergeFieldTimes(winner && winner.fieldTimes, loser && loser.fieldTimes) };
+}
+
+// ★ [100-2] 자유 텍스트·설정값을 칸 단위로 고른다.
+//    예전엔 { ...winner } 하나로 전부 이긴 쪽 값이 됐다. 그래서 폰에서 소견을 쓰고
+//    컴퓨터에서 다른 칸만 고쳐도 소견이 통째로 사라졌다.
+//    이제는 칸마다 마지막 수정 시각(100-1)을 비교해 나중에 고친 쪽을 남긴다.
+//    서로 다른 칸을 고친 경우는 둘 다 살아남는다.
+function _mergeFields(winner, loser) {
+  if (!loser) return {};
+  const out = {};
+
+  // 아동 정보 — 키 단위
+  const info = { ...(loser.info || {}), ...(winner.info || {}) };
+  const infoKeys = new Set([...Object.keys(loser.info || {}), ...Object.keys(winner.info || {})]);
+  infoKeys.forEach(k => {
+    info[k] = _pickField("info." + k, winner, loser,
+      (winner.info || {})[k], (loser.info || {})[k]);
+  });
+  out.info = info;
+
+  // 보고서 직접 입력 칸 — 칸 번호 단위 (94단계 '직접 쓰는 칸')
+  const wf = winner.reportFields || [], lf = loser.reportFields || [];
+  const n = Math.max(wf.length, lf.length, 5);
+  const fields = [];
+  for (let i = 0; i < n; i++) fields.push(_pickField("reportFields." + i, winner, loser, wf[i], lf[i]) ?? "");
+  out.reportFields = fields;
+
+  // 보고서 섹션 메모 — 키 단위
+  const ws = winner.reportSections || {}, ls = loser.reportSections || {};
+  const secs = { ...ls, ...ws };
+  new Set([...Object.keys(ls), ...Object.keys(ws)]).forEach(k => {
+    secs[k] = _pickField("reportSections." + k, winner, loser, ws[k], ls[k]);
+  });
+  out.reportSections = secs;
+
+  // 나머지 통째 칸들
+  for (const k of _FIELD_KEYS) {
+    out[k] = _pickField(k, winner, loser, winner[k], loser[k]);
+  }
+  return out;
 }
 function mergeChildren(localList, cloudList) {
   const local = Array.isArray(localList) ? localList : [];
@@ -5688,11 +5936,19 @@ export default function App() {
     setChildren(prev => {
       const targetId = activeChildIdRef.current || prev[0]?.id;
       if (!targetId) return prev;
-      const newChildren = prev.map(c =>
-        c.id === targetId
-          ? { ...c, ...(typeof patch === "function" ? patch(c) : patch), updatedAt: new Date().toISOString() }
-          : c
-      );
+      const now = new Date().toISOString();
+      const newChildren = prev.map(c => {
+        if (c.id !== targetId) return c;
+        const p = typeof patch === "function" ? patch(c) : patch;
+        // ★ [100-1] 어떤 칸을 고쳤는지 시각을 남긴다.
+        //    예전엔 병합이 아동을 통째로 바꿔치기해서, 폰에서 소견을 쓰고
+        //    컴퓨터에서 평가기간만 고쳐도 소견이 통째로 밀렸다.
+        //    칸마다 마지막 수정 시각이 있으면 칸 단위로 최신을 고를 수 있다.
+        //    (같은 칸을 양쪽이 각각 쓴 경우는 여전히 나중 것이 이긴다 —
+        //     서로 다른 글을 기계가 합칠 수는 없다.)
+        //    이 함수가 모든 수정이 지나가는 길목이라 여기 한 곳만 손대면 된다.
+        return { ...c, ...p, fieldTimes: _stampFields(c, p, now), updatedAt: now };
+      });
       if (!validateChildrenBeforeSave(newChildren)) {
         return prev;  // 검증 실패 → 변경 안 함
       }
@@ -5783,9 +6039,12 @@ export default function App() {
     updateActiveChild(c => {
       const memos = { ...(c.dailyMemos || {}) };
       const trimmed = (memo || "").trim();
-      if (trimmed) memos[date] = trimmed;
-      else delete memos[date];
-      return { dailyMemos: memos };
+      const del = { ...(c.deletedMemos || {}) };
+      // ★ [99-4] 메모도 회기 기록과 같다 — 지웠으면 표식을 남겨야
+      //    다른 기기의 낡은 사본에서 되살아나지 않는다.
+      if (trimmed) { memos[date] = trimmed; delete del[date]; }
+      else { delete memos[date]; del[date] = new Date().toISOString(); }
+      return { dailyMemos: memos, deletedMemos: del };
     });
   };
 
@@ -6752,12 +7011,23 @@ export default function App() {
   };
 
   const removeGoal = (id) => {
-    setGoals(prev => prev.filter(g => g.id !== id));
+    // ★ [99-4] 지운 목표를 표식으로 남긴다.
+    //    이게 없으면 병합할 때 '아직 안 받은 목표'와 '지운 목표'를 구분할 수 없어,
+    //    진 쪽에만 있는 목표를 살릴 수가 없었다(96-3에서 통째로 빼둔 이유).
+    //    표식이 있으면 새로 추가된 목표는 살리고 지운 목표는 안 살릴 수 있다.
+    //    목표 id는 재사용되지 않으므로 표식은 언제나 그 목표만 가리킨다.
+    updateActiveChild(c => ({
+      goals: (c.goals || []).filter(g => g.id !== id),
+      deletedGoals: { ...(c.deletedGoals || {}), [id]: new Date().toISOString() },
+    }));
     if (activeGoalId === id) setActiveGoalId(null);
   };
 
   const updateGoal = (id, patch) => {
-    setGoals(prev => prev.map(g => g.id === id ? { ...g, ...patch } : g));
+    // ★ [100-3] 목표 안의 칸(전략·촉구단계·메모 등)도 고친 시각을 남긴다.
+    //    아동 단위 fieldTimes와 같은 이유 — 다른 기기에서 같은 목표의 다른 칸을
+    //    고쳤을 때 통째로 밀리지 않게 한다.
+    setGoals(prev => prev.map(g => g.id === id ? { ...g, ...patch, fieldTimes: _stampPlain(g, patch) } : g));
   };
 
   const toggleStatus = (id) => {
@@ -6833,14 +7103,20 @@ export default function App() {
   const removeTask = (goalId, taskId) => {
     setGoals(prev => prev.map(g => {
       if (g.id !== goalId) return g;
-      return { ...g, tasks: (g.tasks || []).filter(t => t.id !== taskId) };
+      // ★ [99-4] 지운 과제도 표식을 남긴다 — 목표와 같은 이유.
+      return {
+        ...g,
+        tasks: (g.tasks || []).filter(t => t.id !== taskId),
+        deletedTasks: { ...(g.deletedTasks || {}), [taskId]: new Date().toISOString() },
+      };
     }));
   };
 
   const renameTask = (goalId, taskId, name) => {
     setGoals(prev => prev.map(g => {
       if (g.id !== goalId) return g;
-      return { ...g, tasks: (g.tasks || []).map(t => t.id === taskId ? { ...t, name } : t) };
+      return { ...g, tasks: (g.tasks || []).map(t =>
+        t.id === taskId ? { ...t, name, fieldTimes: _stampPlain(t, { name }) } : t) };   // ★ [100-3]
     }));
   };
 
@@ -6869,6 +7145,7 @@ export default function App() {
             const daily = { ...t.daily };
             delete daily[date];
             next.daily = daily;
+            next.deletedDays = _markDeletedDay(t.deletedDays, date);   // ★ [99-2]
           }
           return next;
         })
@@ -6909,8 +7186,8 @@ export default function App() {
           const daily = { ...(t.daily || {}) };
           const day = daily[date] || { c: 0, ic: 0 };
           const nextVal = Math.max(0, (day[type] || 0) + delta);
-          daily[date] = { ...day, [type]: nextVal, enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10) };
-          return { ...t, daily };
+          daily[date] = { ...day, [type]: nextVal, enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10), savedAt: new Date().toISOString() };
+          return { ...t, daily, deletedDays: _clearDeletedDay(t.deletedDays, date) };
         })
       };
     }));
@@ -6928,17 +7205,22 @@ export default function App() {
           const daily = { ...(t.daily || {}) };
           const day = daily[date] || {};
           const cur = (day.c > 0) ? "+" : (day.ic > 0) ? "-" : null;
+          let deletedDays;
           if (cur === value) {
+            // 같은 버튼을 다시 눌러 취소 — 지웠다는 사실을 남긴다 [99-2]
             delete daily[date];
+            deletedDays = _markDeletedDay(t.deletedDays, date);
           } else {
             daily[date] = {
               ...day,
               c: value === "+" ? 1 : 0,
               ic: value === "-" ? 1 : 0,
-              enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10)
+              enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10),
+              savedAt: new Date().toISOString()   // ★ [99-2] 삭제 표식과 시각을 비교하기 위한 저장 시각
             };
+            deletedDays = _clearDeletedDay(t.deletedDays, date);
           }
-          return { ...t, daily };
+          return { ...t, daily, deletedDays };
         })
       };
     }));
@@ -6971,8 +7253,8 @@ export default function App() {
           } else {
             trials[index] = value;
           }
-          daily[date] = { ...day, trials, plannedN, enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10) };
-          return { ...t, daily };
+          daily[date] = { ...day, trials, plannedN, enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10), savedAt: new Date().toISOString() };
+          return { ...t, daily, deletedDays: _clearDeletedDay(t.deletedDays, date) };
         })
       };
     }));
@@ -6987,7 +7269,8 @@ export default function App() {
           if (t.id !== taskId) return t;
           const daily = { ...(t.daily || {}) };
           delete daily[date];
-          return { ...t, daily };
+          // ★ [99-2] 초기화도 삭제다 — 표식을 남겨야 다른 기기에서 되살아나지 않는다.
+          return { ...t, daily, deletedDays: _markDeletedDay(t.deletedDays, date) };
         })
       };
     }));
@@ -7013,8 +7296,8 @@ export default function App() {
               trials[i] = value;
             }
           }
-          daily[date] = { ...day, trials, plannedN, enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10) };
-          return { ...t, daily };
+          daily[date] = { ...day, trials, plannedN, enteredOn: day.enteredOn || new Date().toISOString().slice(0, 10), savedAt: new Date().toISOString() };
+          return { ...t, daily, deletedDays: _clearDeletedDay(t.deletedDays, date) };
         })
       };
     }));
@@ -8018,7 +8301,32 @@ export default function App() {
             // Supabase Auth 로그인
             const res = await abaSignIn(email.trim(), pw);
             if (res.error) {
-              setAuthMessage("⚠️ 로그인 실패: 이메일 또는 비밀번호를 확인하세요.");
+              // ★ [98-2] 예전엔 어떤 이유든 "이메일 또는 비밀번호를 확인하세요" 하나로 뭉갰다.
+              //    abaSignIn은 Supabase가 준 진짜 이유를 res.error에 담아 오는데 그걸 버렸다.
+              //    2026-09-03 — 프로젝트가 할당량 초과로 정지돼 모든 로그인이 거부됐는데,
+              //    화면에는 비밀번호 문제처럼만 떠서 원인 찾는 데 몇 시간이 걸렸다.
+              //    (관리자·선생님 전원이 막힌 상태였고, 계정 문제가 아니었다.)
+              //    자주 나오는 것은 무엇을 해야 하는지까지 적고, 나머지는 원문을 그대로 보여준다.
+              const raw = String(res.error || "");
+              const low = raw.toLowerCase();
+              let msg;
+              if (low.includes("invalid login") || low.includes("invalid credentials") || low.includes("invalid_credentials") || low.includes("invalid grant")) {
+                msg = "⚠️ 이메일 또는 비밀번호가 맞지 않습니다.";
+              } else if (low.includes("email not confirmed")) {
+                msg = "⚠️ 아직 이메일 인증이 안 된 계정입니다. 관리자에게 계정 확인을 요청하세요.";
+              } else if (low.includes("rate limit") || low.includes("too many")) {
+                msg = "⚠️ 로그인 시도가 많아 잠시 막혔습니다. 한 시간쯤 뒤에 다시 시도해주세요.";
+              } else if (low.includes("quota") || raw.includes("402") || low.includes("restricted")) {
+                msg = "⚠️ 서버 사용량 한도를 넘어 접속이 막혀 있습니다. 계정 문제가 아니니 관리자에게 알려주세요.";
+              } else if (low.includes("disabled") || low.includes("not enabled")) {
+                msg = "⚠️ 이메일 로그인이 꺼져 있습니다. 관리자에게 알려주세요.";
+              } else if (low.includes("네트워크") || low.includes("network") || low.includes("failed to fetch")) {
+                msg = "⚠️ 서버에 연결하지 못했습니다. 인터넷 연결을 확인해주세요.";
+              } else {
+                msg = "⚠️ 로그인 실패: " + (raw || "알 수 없는 오류");
+              }
+              console.warn("[로그인 실패]", raw);   // 원문은 항상 콘솔에 남긴다
+              setAuthMessage(msg);
               return;
             }
             // 로그인한 사용자 정보 조회 (role, display_name)
