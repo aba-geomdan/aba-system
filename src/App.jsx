@@ -4714,22 +4714,33 @@ function _mergeTaskDaily(winDaily, loseDaily, deletedDays) {
 }
 
 
-// ★ [99-5] 진 쪽에만 있는 목표·과제를 살릴지 판단한다.
-//    삭제 표식(99-4)이 있으면 그것으로 충분하지만, 이 수정 이전에 지운 것들에는
-//    표식이 없다. 표식만 믿으면 배포 전에 지운 목표가 낡은 사본에서 되살아난다.
-//    구분 기준은 '두 사본이 얼마나 떨어져 있느냐'다.
-//      · 두 기기가 같은 시간대에 각각 추가한 경우 → 저장 시각이 몇 초~몇 분 차이다.
-//        (20초마다 동기화하므로 그 이상 벌어지기 어렵다)
-//      · 오래 안 켠 기기의 낡은 사본 → 몇 시간~며칠 차이가 난다.
-//        그 사본에 있는 목표는 '새로 추가한 것'이 아니라 '아직 삭제를 못 받은 것'이다.
-//    그래서 두 사본의 저장 시각이 가까울 때만 진 쪽 항목을 살린다.
-//    표식이 쌓이면(배포 후 지운 것들) 이 창과 무관하게 삭제가 항상 존중된다.
-const MERGE_ADD_WINDOW_MS = 10 * 60 * 1000;   // 10분
-function _closeEnoughToAdd(winner, loser) {
+// ★ [101-1] 진 쪽에만 있는 목표·과제는 조건 없이 살린다.
+//    99-5에서 '두 사본의 저장 시각이 10분 이내일 때만' 살리게 했었다.
+//    배포 전에 지운 항목(삭제 표식이 없는 것)이 낡은 사본에서 되살아나는 것을
+//    막으려던 것인데, 실제로는 정상적인 추가까지 버렸다.
+//    클라우드의 그 아동이 마지막으로 저장된 게 어제·그제인 경우가 보통이라,
+//    과제를 하나 추가하면 두 시각 차이가 10분을 넘어 새 과제가 사라졌다.
+//    (2026-09-03 실사용에서 확인 — 과제 추가 후 새로고침하면 없어짐)
+//
+//    맞바꾸는 것: 99 배포 이전에 지운 목표·과제가, 그때 이전 사본을 든 기기가
+//    한 번 동기화할 때 되살아날 수 있다. 다만 그건 한 번뿐이고(그 뒤로는
+//    모든 삭제에 표식이 남는다) 눈에 보이므로 다시 지우면 된다.
+//    반면 방금 추가한 것이 사라지는 것은 매번 일어나고 알아채기도 어렵다.
+//
+//    다만 한 가지는 구분할 수 있다. 목표·과제 id에는 만들어진 시각이 밀리초로
+//    박혀 있다(g_1786889410120_1z8j). 진 쪽에만 있는 항목이 '이긴 쪽 사본이
+//    만들어지기 한참 전'에 생긴 것이라면, 이긴 쪽은 그것을 보고 지운 것일 가능성이
+//    높다. 반대로 최근에 만들어진 것은 아직 전파되지 않은 새 항목이다.
+//    그래서 표식이 없는 옛 항목만, 그것도 아주 오래된 경우에만 살리지 않는다.
+//    (이 판단은 표식이 없을 때만 쓴다 — 표식이 있으면 표식이 항상 우선한다.)
+const STALE_ITEM_MS = 24 * 60 * 60 * 1000;   // 하루
+function _looksLikeOldDeletion(id, winner) {
+  const m = /^[a-z]+_(\d{13})/.exec(String(id || ""));
+  if (!m) return false;                       // 시각을 못 읽으면 살린다(안전한 쪽)
+  const made = Number(m[1]);
   const w = Date.parse((winner && winner.updatedAt) || "");
-  const l = Date.parse((loser && loser.updatedAt) || "");
-  if (!Number.isFinite(w) || !Number.isFinite(l)) return false;
-  return Math.abs(w - l) <= MERGE_ADD_WINDOW_MS;
+  if (!Number.isFinite(w)) return false;
+  return (w - made) > STALE_ITEM_MS;          // 이긴 쪽보다 하루 넘게 전에 만들어짐
 }
 
 // ★ [100-1] 칸별 마지막 수정 시각.
@@ -4838,7 +4849,6 @@ function _pickNewerChild(a, b) {
   //    지운 회기가 되살아나는 문제는 99-2의 삭제 표식(deletedDays)으로 막는다 —
   //    '안 넣은 날'과 '지운 날'을 구분할 수 있게 됐으므로 둘 다 지킬 수 있다.
   //    목표 목록은 96-3대로 이긴 쪽을 그대로 믿는다(사람이 지워야만 없어지므로).
-  const addOk = _closeEnoughToAdd(winner, loser);   // ★ [99-5]
   // 배열이 아닌 값이 들어와도 병합이 멈추지 않게 한다.
   // 여기서 예외가 나면 자동저장이 통째로 중단돼 그 시점 기록이 클라우드로 못 간다.
   const _arr = (v) => (Array.isArray(v) ? v : []);
@@ -4873,7 +4883,8 @@ function _pickNewerChild(a, b) {
     //    과제를 추가하면 나중에 저장한 쪽 것만 남았다.
     const winTaskIds = new Set(tasks.map(t => t.id));
     _arr(lg && lg.tasks).forEach(t => {
-      if (t && t.id != null && !winTaskIds.has(t.id) && !delTasks[t.id] && addOk) tasks.push(t);
+      if (t && t.id != null && !winTaskIds.has(t.id) && !delTasks[t.id]
+          && !_looksLikeOldDeletion(t.id, winner)) tasks.push(t);
     });
 
     // ★ [99-6] 다른 기기에서 지운 과제는 이쪽에 남아 있어도 지운다.
@@ -4890,7 +4901,8 @@ function _pickNewerChild(a, b) {
   //    이제 표식으로 구분되므로 '새로 추가한 목표'만 안전하게 살릴 수 있다.
   const winGoalIds = new Set(mergedGoals.map(g => g.id));
   _arr(loser && loser.goals).forEach(g => {
-    if (g && g.id != null && !winGoalIds.has(g.id) && !delGoals[g.id] && addOk) mergedGoals.push(g);
+    if (g && g.id != null && !winGoalIds.has(g.id) && !delGoals[g.id]
+        && !_looksLikeOldDeletion(g.id, winner)) mergedGoals.push(g);
   });
   // ★ [99-6] 다른 기기에서 지운 목표는 이쪽에 남아 있어도 지운다 — 과제와 같은 이유.
   for (let i = mergedGoals.length - 1; i >= 0; i--) {
