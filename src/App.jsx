@@ -192,28 +192,102 @@ async function abaAdminListUsers() {
 
 // ── 데이터 저장/조회 (aba_data — 관리자 소유 고정, 모두 공유) ─────
 window.storage = {
+  // ★ [95-1] 읽기 실패는 반드시 예외로 알린다 — "키 없음"과 구분해야 한다.
+  //    저장 경로의 [60-15] 가드(cloudReadOk)는 get()이 실패에 예외를 던지던
+  //    옛 어댑터를 전제로 짜여 있다. 이 Supabase 어댑터가 실패에도 null을
+  //    돌려주면서 그 가드가 죽어 있었다 — 읽기가 실패해도 cloudReadOk=true가 되어
+  //    cloudChildren이 null인 채 병합을 건너뛰고, 이 기기 사본만 클라우드로
+  //    통째 올라갔다(storage.set은 키 전체를 갈아치운다).
+  //    83-1·89-1의 병합 보호는 멀쩡한데 mergeChildren을 아예 안 타므로
+  //    호출조차 되지 않는 자리였다.
+  //      (배유민 — 목표 13개는 그대로인데 daily만 0.
+  //       코드에 daily를 비우는 경로가 없는 게 맞다. 지워진 게 아니라,
+  //       daily가 없던 낡은 로컬 사본이 멀쩡한 클라우드를 덮은 것이다.)
+  //    행이 0건인 것(= 아직 저장된 적 없는 키)만 null로 두고, 장애는 던진다.
+  //    호출부 18곳은 모두 try/catch 안에 있어 예외가 새어 나가지 않는다.
   async get(key /*, shared */) {
+    const headers = await _authHeaders();
+    const url = `${SUPABASE_URL}/rest/v1/aba_data?user_id=eq.${ABA_OWNER_ID}&key=eq.${encodeURIComponent(key)}&select=value`;
+    let r;
     try {
-      const headers = await _authHeaders();
-      const url = `${SUPABASE_URL}/rest/v1/aba_data?user_id=eq.${ABA_OWNER_ID}&key=eq.${encodeURIComponent(key)}&select=value`;
-      const r = await fetch(url, { headers });
-      if (!r.ok) { console.warn("[aba get]", r.status); return null; }
-      const rows = await r.json();
-      return (rows && rows.length > 0) ? { value: rows[0].value } : null;
-    } catch (e) { console.warn("[aba get 예외]", e); return null; }
+      r = await fetch(url, { headers });
+    } catch (e) {
+      console.warn("[aba get 예외]", key, e);
+      throw new Error("cloud read failed (network): " + (e && e.message ? e.message : "unknown"));
+    }
+    if (!r.ok) {
+      console.warn("[aba get]", key, r.status);
+      throw new Error("cloud read failed (HTTP " + r.status + ")");
+    }
+    let rows;
+    try {
+      rows = await r.json();
+    } catch (e) {
+      console.warn("[aba get 본문 파싱 실패]", key, e);
+      throw new Error("cloud read failed (bad body)");
+    }
+    return (rows && rows.length > 0) ? { value: rows[0].value } : null;
   },
 
-  async set(key, value /*, shared */) {
+  // ★ [97-1] 값(value)은 빼고 updated_at 컬럼 하나만 읽는다.
+  //    5초 폴링이 하던 일은 "누가 나보다 나중에 고쳤나" 시각 비교뿐인데,
+  //    그걸 위해 get()으로 아동 전체·목표 전체·회기 기록 전체를 통째로 내려받고 있었다.
+  //    한 번에 약 380KB × 5초마다 × 선생님 수 × 하루 8시간 = 하루 6.5GB.
+  //    무료 한도가 월 5GB인데 8월 한 달에 37.4GB(748%)를 써서 프로젝트 전체가 정지됐다.
+  //    (2026-09-03. 아무도 로그인할 수 없었다.)
+  //    이 함수는 한 번에 약 30바이트다 — 같은 일을 1만분의 3의 전송량으로 한다.
+  //    실제로 바뀌었을 때만 아래에서 get()으로 본문을 받는다.
+  //    실패 처리는 get과 동일: 장애는 던지고, 행이 없을 때만 null.
+  async getStamp(key /*, shared */) {
+    const headers = await _authHeaders();
+    const url = `${SUPABASE_URL}/rest/v1/aba_data?user_id=eq.${ABA_OWNER_ID}&key=eq.${encodeURIComponent(key)}&select=updated_at`;
+    let r;
     try {
-      const headers = await _authHeaders();
-      const r = await fetch(`${SUPABASE_URL}/rest/v1/aba_data`, {
+      r = await fetch(url, { headers });
+    } catch (e) {
+      console.warn("[aba getStamp 예외]", key, e);
+      throw new Error("cloud read failed (network): " + (e && e.message ? e.message : "unknown"));
+    }
+    if (!r.ok) {
+      console.warn("[aba getStamp]", key, r.status);
+      throw new Error("cloud read failed (HTTP " + r.status + ")");
+    }
+    let rows;
+    try {
+      rows = await r.json();
+    } catch (e) {
+      console.warn("[aba getStamp 본문 파싱 실패]", key, e);
+      throw new Error("cloud read failed (bad body)");
+    }
+    return (rows && rows.length > 0) ? { updatedAt: rows[0].updated_at } : null;
+  },
+
+  // ★ [96-1] 저장 실패도 예외로 알린다 — get과 같은 이유.
+  //    실패에 null을 돌려주면 호출부는 저장된 줄 알고 다음 단계로 넘어간다.
+  //    가장 위험한 자리는 스냅샷 되돌리기다: 되돌리기 전에 '지금 상태'를 안전 스냅샷으로
+  //    남기고 나서 children을 덮어쓰는데, 그 안전 스냅샷 저장이 조용히 실패해도
+  //    덮어쓰기는 그대로 진행됐다 — 되돌린 뒤 그날 이후 기록을 복구할 방법이 사라진다.
+  //    예외를 던지면 덮어쓰기 전에 catch로 빠져 되돌리기 자체가 중단된다.
+  //    스냅샷 저장도 본체와 목록이 함께 실패하게 되어, 없는 스냅샷이 목록에 남지 않는다.
+  //    호출부 18곳은 모두 try/catch 또는 .catch() 안에 있어 예외가 새어 나가지 않는다.
+  async set(key, value /*, shared */) {
+    const headers = await _authHeaders();
+    let r;
+    try {
+      r = await fetch(`${SUPABASE_URL}/rest/v1/aba_data`, {
         method: "POST",
         headers: { ...headers, "Prefer": "resolution=merge-duplicates,return=minimal" },
         body: JSON.stringify({ user_id: ABA_OWNER_ID, key, value, updated_at: new Date().toISOString() }),
       });
-      if (!r.ok) { console.warn("[aba set]", r.status); return null; }
-      return { value };
-    } catch (e) { console.warn("[aba set 예외]", e); return null; }
+    } catch (e) {
+      console.warn("[aba set 예외]", key, e);
+      throw new Error("cloud write failed (network): " + (e && e.message ? e.message : "unknown"));
+    }
+    if (!r.ok) {
+      console.warn("[aba set]", key, r.status);
+      throw new Error("cloud write failed (HTTP " + r.status + ")");
+    }
+    return { value };
   },
 
   async delete(key /*, shared */) {
@@ -4619,10 +4693,19 @@ function _pickNewerChild(a, b) {
       const daily = (gd && Object.keys(gd).length) ? { ...gd, ...(g.daily || {}) } : g.daily;
       return { ...g, daily, tasks };
     });
-    // 진 쪽에만 있던 목표도 잃지 않는다.
-    const winIds = new Set(((winner && winner.goals) || []).map(g => g.id));
-    const onlyInLoser = ((loser && loser.goals) || []).filter(g => !winIds.has(g.id));
-    return { ...winner, goals: [...mergedGoals, ...onlyInLoser] };
+    // ★ [96-3] 여기서 "진 쪽에만 있던 목표"를 되살리고 있었다.
+    //    89-1이 daily 쪽에는 '통째로 사라진 수준' 기준을 걸었는데, 목표 쪽에는
+    //    아무 기준이 없어 catastrophic 분기에 들어가기만 하면 무조건 다 되살렸다.
+    //    문제는 목표를 여러 개 지우는 행위 자체가 catastrophic 조건을 만든다는 것이다 —
+    //    목표 3개 중 2개를 지우면 기록이 67% 줄어 catastrophic이 되고,
+    //    그 순간 방금 지운 목표 2개가 그대로 돌아왔다. (89가 잡으려던 증상 그대로)
+    //    목표는 daily와 달리 저절로 사라지지 않는다. 사람이 명시적으로 지워야만 없어진다.
+    //    (배유민 때도 목표 13개는 멀쩡히 남아 있었고 daily만 0이었다 —
+    //     83-1이 원래 지키려던 것도 목표가 아니라 기록이다.)
+    //    그래서 목표 목록은 이긴 쪽을 그대로 믿고, 기록 복원만 남긴다.
+    //    맞바꾸는 것: 목표까지 통째로 날아가는 사고가 나면 그건 못 살린다.
+    //    그런 사고는 아직 없었고, 지운 목표가 돌아오는 것은 지금 확실히 일어나는 일이다.
+    return { ...winner, goals: mergedGoals };
   }
   return winner;
 }
@@ -5621,6 +5704,22 @@ export default function App() {
   const [adminEditUnlocked, setAdminEditUnlocked] = useState(false);
   const [adminLockNotice, setAdminLockNotice] = useState(0);
   const [loadingLockNotice, setLoadingLockNotice] = useState(0);   // ★ [91-2] 로딩 중 저장 시도 알림
+  // ★ [95-3] 클라우드 읽기 실패 표시.
+  //    95-1로 읽기가 실패하면 클라우드 저장이 막힌다(낡은 사본이 멀쩡한 기록을 덮지 않게).
+  //    그런데 화면엔 아무 표시가 없어, 선생님은 daily가 빈 낡은 화면을 보면서 이유를 모른다.
+  //    91-1 주석이 적어둔 그 상황("기록이 사라졌다고 놀라 이것저것 누르다가") 그대로다.
+  //    5초 폴링이 성공하면 스스로 꺼지므로, 잠깐 끊긴 경우엔 알아서 사라진다.
+  const [cloudReadFailed, setCloudReadFailed] = useState(false);
+  // ★ [96-2] 클라우드 저장 실패 표시.
+  //    96-1로 저장 실패가 예외가 되지만, 자동저장은 catch가 삼켜서 화면엔 아무 표시가 없다.
+  //    읽기는 되는데 쓰기만 안 되는 상태(RLS 변경, 토큰 만료, 용량 초과)에서는
+  //    선생님이 하루치를 다 넣고도 그게 이 기기에만 있다는 걸 모른다.
+  //    로컬에는 남아 있으므로 데이터를 잃지는 않지만, 다른 기기에서 열면 안 보인다.
+  const [cloudSaveFailed, setCloudSaveFailed] = useState(false);
+  // ★ [97-5] 마지막으로 확인한 클라우드 updated_at.
+  //    폴링과 자동저장이 같이 쓴다 — 내가 올린 변경을 폴링이 도로 내려받지 않게 하려면
+  //    저장 쪽에서도 이 값을 갱신할 수 있어야 한다.
+  const cloudStampRef = useRef(null);
   const activeChildRef2 = useRef(null);
   useEffect(() => { activeChildRef2.current = activeChild; }, [activeChild]);
   const isOthersChild = (() => {
@@ -6034,6 +6133,7 @@ export default function App() {
           try {
             const res = await window.storage.get(FILE_KEY, true);  // true = shared
             markCloudSeen();   // ★ [60-15] 읽기 성공 — 이후 읽기 실패는 진짜 장애로 본다
+            setCloudReadFailed(false);   // ★ [95-3]
             if (res?.value) {
               try {
                 const d = JSON.parse(res.value);
@@ -6049,7 +6149,11 @@ export default function App() {
                 }
               } catch (e) { /* ignore */ }
             }
-          } catch (e) { /* ignore */ }
+          } catch (e) {
+            // ★ [95-3] 읽기 실패 — 아래 localStorage 사본으로 물러난다.
+            //    그 사본이 낡았을 수 있으므로 화면에 알리고, 저장은 [60-15]가 막는다.
+            setCloudReadFailed(true);
+          }
         }
 
         if (!childrenList && typeof localStorage !== "undefined") {
@@ -6171,19 +6275,32 @@ export default function App() {
               //    (지금 눈에 띈 '이름 없는 (미할당) 아동'도 같은 뿌리 —
               //     읽기 실패를 데이터 없음으로 보고 자리표시자를 올려버린 것.)
               let cloudReadOk = false;
+              // ★ [95-2] 클라우드에 값이 분명히 있는데 그걸 아동 목록으로 못 읽어낸 경우.
+              //    (JSON.parse 실패, children이 배열이 아님 — 잘린 저장·형식 변경 등)
+              //    이때 cloudChildren은 null이라 아래에서 병합을 건너뛰고 로컬만 올린다.
+              //    읽기 실패와 결과가 똑같으므로 똑같이 막는다.
+              let cloudHasValue = false;
               try {
                 const res = await window.storage.get(FILE_KEY, true);
                 cloudReadOk = true;
                 markCloudSeen();
                 if (res?.value) {
+                  cloudHasValue = true;
                   const parsed = JSON.parse(res.value);
                   if (Array.isArray(parsed.children)) cloudChildren = parsed.children.map(migrateChild);
                 }
               } catch (e) {}
               // 한 번도 읽힌 적 없는 키면 최초 생성이므로 그대로 올린다.
-              // (storage.get은 키가 없을 때도 예외를 던져, 예외만으로는 장애와 구분되지 않는다.
+              // (읽기 실패는 [95-1]로 예외가 되어 cloudReadOk가 false로 남는다.
+              //  키가 없는 것만 null로 오므로, 이제 장애와 '아직 없음'이 구분된다.
               //  여기서 무조건 막으면 클라우드 데이터가 영영 만들어지지 않는다.)
-              if (!cloudReadOk && hasCloudEverBeenRead()) return;
+              if (!cloudReadOk && hasCloudEverBeenRead()) { setCloudReadFailed(true); return; }
+              if (cloudHasValue && !cloudChildren) {
+                console.warn("[자동저장 보류] 클라우드 값을 읽었으나 아동 목록으로 해석하지 못함 — 덮어쓰기 중단");
+                setCloudReadFailed(true);
+                return;
+              }
+              if (cloudReadOk) setCloudReadFailed(false);   // ★ [95-3] 읽기가 되면 스스로 꺼진다
               // ★ [60-8] 업로드 대상에서 빈 자리표시자를 뺀다.
               //    로컬(localStorage)에는 그대로 둔다 — 아동이 0명일 때 화면이 기댈 자리가
               //    필요하고, 로컬은 이 기기 밖으로 안 나가므로 번지지 않는다.
@@ -6193,13 +6310,30 @@ export default function App() {
               // 보낼 게 아무것도 없으면 저장 자체를 건너뛴다 — 빈 배열을 올리면
               // 다른 기기의 아동이 지워지는 게 아니라(병합은 id 합집합) 무의미한 쓰기만 는다.
               if (toSave.length === 0) return;
-              await window.storage.set(FILE_KEY, JSON.stringify({
-                children: toSave,
-                activeChildId,
-                savedAt: new Date().toISOString(),
-                lastEditor: currentUser?.name || "(unknown)",
-                lastEditTime: Date.now()
-              }), true);
+              try {
+                await window.storage.set(FILE_KEY, JSON.stringify({
+                  children: toSave,
+                  activeChildId,
+                  savedAt: new Date().toISOString(),
+                  lastEditor: currentUser?.name || "(unknown)",
+                  lastEditTime: Date.now()
+                }), true);
+                setCloudSaveFailed(false);   // ★ [96-2] 저장이 되면 스스로 꺼진다
+                // ★ [97-5] 방금 내가 올린 것을 폴링이 '남의 변경'으로 보고
+                //    380KB를 도로 내려받던 것을 막는다.
+                //    저장 직후 스탬프(약 30바이트)만 한 번 읽어 기준값으로 삼는다.
+                //    선생님이 하루 150번 저장하면 150번의 전체 수신이 통째로 사라진다.
+                try {
+                  const st = await window.storage.getStamp(FILE_KEY, true);
+                  if (st?.updatedAt) cloudStampRef.current = st.updatedAt;
+                } catch (e) { /* 실패해도 폴링이 알아서 따라잡는다 */ }
+              } catch (e) {
+                // ★ [96-2] 로컬에는 이미 저장돼 있다(위 localStorage.setItem).
+                //    데이터를 잃은 것은 아니지만 이 기기 밖으로 나가지 못한 상태다.
+                console.warn("[자동저장 실패]", e?.message);
+                setCloudSaveFailed(true);
+                return;
+              }
               // 병합 결과가 현재 메모리와 다르면(다른 사람 아동이 합쳐졌으면) 화면에도 반영
               if (cloudChildren) {
                 const mergedIds = toSave.map(c => c.id).join("|");
@@ -6371,10 +6505,32 @@ export default function App() {
     if (!currentUser) return;
     
     const checkInterval = setInterval(async () => {
+      // ★ [97-3] 탭이 안 보이면 건너뛴다.
+      //    선생님들은 앱을 켜둔 채 다른 일을 하는 시간이 대부분인데,
+      //    그동안에도 5초마다 전체 데이터를 받고 있었다. 켜두기만 해도 전송량이 쌓였다.
+      if (typeof document !== "undefined" && document.hidden) return;
       try {
         if (typeof window !== "undefined" && window.storage) {
-          const res = await window.storage.get(FILE_KEY, true);
+          // ★ [97-2] 먼저 updated_at 하나만 읽는다(약 30바이트).
+          //    바뀌지 않았으면 여기서 끝 — 본문(약 380KB)은 받지 않는다.
+          //    이 앱 전송량의 99% 이상이 이 지점에서 나가고 있었다.
+          const stamp = await window.storage.getStamp(FILE_KEY, true);
           markCloudSeen();   // ★ [60-15]
+          setCloudReadFailed(false);   // ★ [95-3] 여기까지 왔으면 클라우드가 살아났다
+          if (!stamp?.updatedAt) return;
+          if (cloudStampRef.current === stamp.updatedAt) return;   // 변경 없음 → 본문 생략
+
+          // ★ [97-4] 내가 방금 편집 중이면 본문을 받지 않는다.
+          //    아래 병합은 editingNow(30초)면 어차피 적용을 미룬다 — 예전엔 380KB를
+          //    다 받아놓고 그때 버렸다. 기록 입력 중은 저장이 가장 잦은 시간이라
+          //    여기서 받는 양이 제일 컸다.
+          //    lastStampRef를 갱신하지 않고 그대로 두므로, 입력이 끝나면
+          //    다음 확인에서 같은 변경을 다시 발견해 그때 받아온다 — 놓치지 않는다.
+          if (Date.now() - lastLocalEditRef.current < 30000) return;
+
+          cloudStampRef.current = stamp.updatedAt;
+
+          const res = await window.storage.get(FILE_KEY, true);
           if (!res?.value) return;
           
           let parsed;
@@ -6431,8 +6587,10 @@ export default function App() {
           lastKnownEditorRef.current = parsed.lastEditor;
         }
       } catch (e) {
+        setCloudReadFailed(true);   // ★ [95-3] 클라우드를 못 읽는 상태가 계속되고 있다
       }
-    }, 5000);  // 5초마다
+    }, 20000);  // ★ [97-3] 5초 → 20초. 같은 아동을 두 선생님이 동시에 만지는 일은 드물고,
+                //    20초면 남의 변경을 받아오는 데 충분하다. 확인 횟수가 1/4로 준다.
     
     return () => clearInterval(checkInterval);
   }, [loaded, currentUser]);
@@ -8609,6 +8767,27 @@ export default function App() {
           <div style={{ marginBottom: 10, padding: "9px 13px", borderRadius: 10, fontSize: 12, background: "#f4f6f8", border: "1.5px solid #cfd8e0", color: "#44515c" }}>
             ⏳ <b>데이터를 불러오는 중입니다.</b> 화면이 비어 보여도 잠시 기다려 주세요.
             <span style={{ color: "#7a848c" }}> 불러오는 동안에는 저장되지 않습니다.</span>
+          </div>
+        )}
+        {/* ★ [95-3] 클라우드를 못 읽는 중 — 화면이 낡았을 수 있고 저장이 잠겨 있다.
+            아무 표시 없이 낡은 화면만 보이면 놀라서 이것저것 누르게 되고,
+            그러다 낡은 사본이 저장돼 멀쩡한 기록을 덮은 것이 배유민 건이었다.
+            클라우드가 돌아오면 5초 폴링이 스스로 끈다. */}
+        {loaded && cloudReadFailed && (
+          <div style={{ marginBottom: 10, padding: "10px 13px", borderRadius: 10, fontSize: 12, background: "#fff6e6", border: "1.5px solid #e8b866", color: "#8a5a10", lineHeight: 1.65 }}>
+            ⚠️ <b>클라우드에 연결하지 못했습니다.</b> 지금 보이는 화면은 이 기기에 남아 있던 사본이라 <b>최신이 아닐 수 있습니다.</b><br />
+            기록이 비어 보여도 <b>사라진 것이 아닙니다.</b> 덮어쓰지 않도록 클라우드 저장은 잠가 두었습니다.<br />
+            <span style={{ color: "#a8813f" }}>인터넷 연결을 확인하고 새로고침해 주세요. 연결되면 이 안내는 저절로 사라집니다. 그때까지 새 기록은 넣지 말아 주세요.</span>
+          </div>
+        )}
+        {/* ★ [96-2] 클라우드 저장이 안 되는 중 — 읽기는 되는데 쓰기만 막힌 상태.
+            로컬에는 남아 있어 데이터를 잃지는 않지만, 다른 기기에서는 안 보인다.
+            읽기까지 막혔으면 위 배너가 이미 떠 있으므로 이 배너는 숨긴다. */}
+        {loaded && cloudSaveFailed && !cloudReadFailed && (
+          <div style={{ marginBottom: 10, padding: "10px 13px", borderRadius: 10, fontSize: 12, background: "#fdecec", border: "1.5px solid #e88b8b", color: "#a03030", lineHeight: 1.65 }}>
+            🚨 <b>클라우드에 저장되지 않고 있습니다.</b> 방금 넣은 기록은 <b>이 기기에만</b> 있습니다.<br />
+            다른 기기나 다른 선생님 화면에서는 아직 보이지 않습니다.<br />
+            <span style={{ color: "#c05555" }}>인터넷 연결을 확인해 주세요. 계속 뜨면 <b>[💾 백업]</b>으로 파일을 먼저 내려받아 두시고, 이 기기에서 로그아웃하지 말아 주세요.</span>
           </div>
         )}
         {loadingLockNotice > 0 && Date.now() - loadingLockNotice < 4000 && (
