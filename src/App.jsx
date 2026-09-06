@@ -262,78 +262,6 @@ window.storage = {
     return (rows && rows.length > 0) ? { updatedAt: rows[0].updated_at } : null;
   },
 
-  // ═══════════════════════════════════════════════════════════════
-  // ★ [B-1] 아동별 저장 구조를 위한 조회 함수들.
-  //    아직 어디에서도 호출하지 않는다 — 이 단계는 동작을 전혀 바꾸지 않는다.
-  //
-  //    지금은 아동 48명이 한 덩어리(2,418KB)로 저장돼 있어서, 누가 무엇을
-  //    고치든 전원이 그 전체를 다시 받는다. 전송량이 선생님 수의 제곱으로 늘어
-  //    2026-08에 무료 한도(월 5GB)를 넘겨 37.4GB를 썼고 프로젝트가 정지됐다.
-  //    아동 한 명을 행 하나로 두면(중앙값 43KB) 바뀐 아동만 오간다.
-  //
-  //    목록(index) 행은 따로 두지 않는다. 목록을 따로 관리하면 실제 데이터와
-  //    어긋날 수 있어서, 대신 저장된 행 자체에 물어본다.
-  //    실패 처리는 get·getStamp와 동일 — 장애는 던지고, 없으면 빈 결과.
-  // ═══════════════════════════════════════════════════════════════
-
-  // 공통: 질의 하나를 보내고 행 배열을 돌려준다.
-  async _query(qs, label) {
-    const headers = await _authHeaders();
-    const url = `${SUPABASE_URL}/rest/v1/aba_data?user_id=eq.${ABA_OWNER_ID}&${qs}`;
-    let r;
-    try {
-      r = await fetch(url, { headers });
-    } catch (e) {
-      console.warn(`[aba ${label} 예외]`, e);
-      throw new Error("cloud read failed (network): " + (e && e.message ? e.message : "unknown"));
-    }
-    if (!r.ok) {
-      console.warn(`[aba ${label}]`, r.status);
-      throw new Error("cloud read failed (HTTP " + r.status + ")");
-    }
-    try {
-      const rows = await r.json();
-      return Array.isArray(rows) ? rows : [];
-    } catch (e) {
-      console.warn(`[aba ${label} 본문 파싱 실패]`, e);
-      throw new Error("cloud read failed (bad body)");
-    }
-  },
-
-  // ① 그 접두어의 행 중 가장 최근에 바뀐 시각 하나. 약 40바이트.
-  //    폴링은 이것만 돈다 — 그대로면 아무것도 더 받지 않는다.
-  async getLatestStamp(prefix) {
-    const rows = await this._query(
-      `key=like.${encodeURIComponent(prefix + "*")}&select=updated_at&order=updated_at.desc&limit=1`,
-      "getLatestStamp");
-    return rows.length > 0 ? rows[0].updated_at : null;
-  },
-
-  // ② 누가 언제 바뀌었는지 목록. 아동 48명 기준 약 2.2KB.
-  //    ①이 달라졌을 때만 부른다. 여기서 바뀐 아동을 골라낸다.
-  //    { "child:c_xxx": "2026-09-03T...", ... }
-  async getStampList(prefix) {
-    const rows = await this._query(
-      `key=like.${encodeURIComponent(prefix + "*")}&select=key,updated_at`,
-      "getStampList");
-    const out = {};
-    rows.forEach(r => { if (r && r.key) out[r.key] = r.updated_at; });
-    return out;
-  },
-
-  // ③ 그 접두어의 행을 값까지 전부. 앱을 켤 때 한 번만 쓴다.
-  //    { "child:c_xxx": { value, updatedAt }, ... }
-  //    updated_at도 같이 받는다 — 이게 없으면 로드 직후 첫 폴링이
-  //    '아직 못 본 행'으로 오해해 전원을 다시 받는다(2.5MB).
-  async getMany(prefix) {
-    const rows = await this._query(
-      `key=like.${encodeURIComponent(prefix + "*")}&select=key,value,updated_at`,
-      "getMany");
-    const out = {};
-    rows.forEach(r => { if (r && r.key) out[r.key] = { value: r.value, updatedAt: r.updated_at }; });
-    return out;
-  },
-
   // ★ [96-1] 저장 실패도 예외로 알린다 — get과 같은 이유.
   //    실패에 null을 돌려주면 호출부는 저장된 줄 알고 다음 단계로 넘어간다.
   //    가장 위험한 자리는 스냅샷 되돌리기다: 되돌리기 전에 '지금 상태'를 안전 스냅샷으로
@@ -4289,16 +4217,6 @@ const STORAGE_KEY = "gd-aba-v5-children";      // 아동 리스트
 const ACTIVE_KEY = "gd-aba-v5-active";          // (구) 사람 구분 없는 키 — 더 이상 읽지도 쓰지도 않는다
 const activeKeyFor = (userName) => "gd-aba-v5-active::" + (userName || "_");
 const FILE_KEY = "iep-data-backup";
-// ★ [B-2] 아동 한 명당 행 하나. key = "child:" + 아동id
-//    옛 덩어리(FILE_KEY)는 아동 48명이 2,418KB로 뭉쳐 있어, 누가 무엇을 고치든
-//    전원이 그 전체를 다시 받아야 했다. 아동별로 나누면 바뀐 아동(중앙값 43KB)만 오간다.
-const CHILD_KEY_PREFIX = "child:";
-// 이 기기가 아동별 행에 마지막으로 쓴 내용의 시각. 기기마다 다르므로 localStorage.
-const CHILD_ROW_STAMPS_KEY = "gd-aba-child-row-stamps";
-// ★ [B-3] 아동별 행을 읽기의 정답으로 삼을지. false면 3단계 이전과 완전히 같게 동작한다.
-//    문제가 생기면 이 한 줄을 false로 되돌리고 배포하면 즉시 원상복구된다.
-//    (2단계에서 옛 덩어리에도 계속 쓰고 있으므로 옛 구조는 항상 최신이다.)
-const USE_CHILD_ROWS = true;
 // ★ [60-15] 클라우드 키를 한 번이라도 성공적으로 읽은 적이 있는지 표식.
 //    storage.get은 키가 없어도 예외를 던지므로, "읽기 실패"와 "아직 키가 없음"을
 //    예외만으로는 못 가른다. 표식이 없으면 최초 생성으로 보고 업로드를 허용하고,
@@ -4804,10 +4722,17 @@ function _mergeTaskDaily(winDaily, loseDaily, deletedDays) {
 //    과제를 하나 추가하면 두 시각 차이가 10분을 넘어 새 과제가 사라졌다.
 //    (2026-09-03 실사용에서 확인 — 과제 추가 후 새로고침하면 없어짐)
 //
-//    대신 목표·과제 id에 박힌 생성 시각으로 구분한다(g_1786889410120_1z8j).
-//    이긴 쪽 사본보다 하루 넘게 전에 만들어진 항목이 이긴 쪽에 없다면,
-//    이긴 쪽에서 지운 것으로 본다. 최근에 만들어진 것은 아직 전파되지 않은
-//    새 항목이므로 살린다. 표식이 있으면 표식이 언제나 우선한다.
+//    맞바꾸는 것: 99 배포 이전에 지운 목표·과제가, 그때 이전 사본을 든 기기가
+//    한 번 동기화할 때 되살아날 수 있다. 다만 그건 한 번뿐이고(그 뒤로는
+//    모든 삭제에 표식이 남는다) 눈에 보이므로 다시 지우면 된다.
+//    반면 방금 추가한 것이 사라지는 것은 매번 일어나고 알아채기도 어렵다.
+//
+//    다만 한 가지는 구분할 수 있다. 목표·과제 id에는 만들어진 시각이 밀리초로
+//    박혀 있다(g_1786889410120_1z8j). 진 쪽에만 있는 항목이 '이긴 쪽 사본이
+//    만들어지기 한참 전'에 생긴 것이라면, 이긴 쪽은 그것을 보고 지운 것일 가능성이
+//    높다. 반대로 최근에 만들어진 것은 아직 전파되지 않은 새 항목이다.
+//    그래서 표식이 없는 옛 항목만, 그것도 아주 오래된 경우에만 살리지 않는다.
+//    (이 판단은 표식이 없을 때만 쓴다 — 표식이 있으면 표식이 항상 우선한다.)
 const STALE_ITEM_MS = 24 * 60 * 60 * 1000;   // 하루
 function _looksLikeOldDeletion(id, winner) {
   const m = /^[a-z]+_(\d{13})/.exec(String(id || ""));
@@ -4815,7 +4740,7 @@ function _looksLikeOldDeletion(id, winner) {
   const made = Number(m[1]);
   const w = Date.parse((winner && winner.updatedAt) || "");
   if (!Number.isFinite(w)) return false;
-  return (w - made) > STALE_ITEM_MS;
+  return (w - made) > STALE_ITEM_MS;          // 이긴 쪽보다 하루 넘게 전에 만들어짐
 }
 
 // ★ [100-1] 칸별 마지막 수정 시각.
@@ -4901,22 +4826,6 @@ function _pickField(key, winner, loser, winVal, loseVal) {
   if (wt && !lt) return winVal;
   if (!wt && lt) return loseVal;
   return String(lt) > String(wt) ? loseVal : winVal;
-}
-
-// ★ [B-3] 아동별 행의 값을 아동 객체로 되돌린다.
-//    지금 형식: { v:1, child:{...}, editor, editTime }
-//    혹시 봉투 없이 아동이 그대로 들어 있는 행을 만나도 읽을 수 있게 한다.
-function _unwrapChildRow(raw) {
-  const d = typeof raw === "string" ? JSON.parse(raw) : raw;
-  if (!d || typeof d !== "object") return null;
-  if (d.child && typeof d.child === "object") return d.child;
-  return d.id ? d : null;
-}
-function _childRowMeta(raw) {
-  try {
-    const d = typeof raw === "string" ? JSON.parse(raw) : raw;
-    return { editor: d && d.editor, editTime: d && d.editTime };
-  } catch (e) { return {}; }
 }
 
 function _pickNewerChild(a, b) {
@@ -6079,28 +5988,6 @@ export default function App() {
   //    폴링과 자동저장이 같이 쓴다 — 내가 올린 변경을 폴링이 도로 내려받지 않게 하려면
   //    저장 쪽에서도 이 값을 갱신할 수 있어야 한다.
   const cloudStampRef = useRef(null);
-  // ★ [B-2] 아동별 행에 마지막으로 쓴 updatedAt. { 아동id: updatedAt }
-  //    이 기기가 이미 올린 내용을 다시 올리지 않기 위한 기록이다.
-  //    화면에 쓰이지 않으므로 state가 아니라 ref로 둔다.
-  //    localStorage에 남긴다 — 메모리에만 두면 앱을 켤 때마다 비어서
-  //    첫 저장이 아동 48명 전부를 다시 쓴다(2.3MB). 하루에 몇 번만 열어도
-  //    그것만으로 무료 한도의 상당 부분을 쓰게 된다.
-  const childRowStampsRef = useRef({});
-  // ★ [B-3] 각 아동 행의 서버 updated_at 중 이 기기가 마지막으로 받아본 값.
-  //    childRowStampsRef(내가 쓴 내용의 시각)와는 다른 값이다 —
-  //    이쪽은 '받았는가', 저쪽은 '보냈는가'를 본다.
-  const rowSeenAtRef = useRef({});
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(CHILD_ROW_STAMPS_KEY);
-      const parsed = raw ? JSON.parse(raw) : null;
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) childRowStampsRef.current = parsed;
-    } catch (e) { /* 못 읽으면 빈 채로 시작 — 한 번 더 쓸 뿐 데이터는 안전하다 */ }
-  }, []);
-  const _persistChildRowStamps = () => {
-    try { localStorage.setItem(CHILD_ROW_STAMPS_KEY, JSON.stringify(childRowStampsRef.current)); }
-    catch (e) { /* 용량 초과 등 — 다음 저장 때 다시 쓰면 된다 */ }
-  };
   const activeChildRef2 = useRef(null);
   useEffect(() => { activeChildRef2.current = activeChild; }, [activeChild]);
   const isOthersChild = (() => {
@@ -6515,63 +6402,10 @@ export default function App() {
 
         if (typeof window !== "undefined" && window.storage) {
           try {
-            // ═══ ★ [B-3] 아동별 행을 먼저 읽는다 ═══
-            //    행이 하나도 없으면(아직 안 옮겨졌으면) 아래 옛 덩어리로 자연스럽게 내려간다.
-            //    읽다가 장애가 나면 예외가 나므로 바깥 catch가 받아 localStorage로 물러난다 —
-            //    옛 구조와 동작이 같다.
-            if (USE_CHILD_ROWS) {
-              const rows = await window.storage.getMany(CHILD_KEY_PREFIX, true);
-              const keys = Object.keys(rows || {});
-              if (keys.length > 0) {
-                const list = [];
-                const seenAt = {};
-                let broken = 0, maxStamp = "";
-                for (const k of keys) {
-                  try {
-                    const c = _unwrapChildRow(rows[k].value);
-                    if (c && c.id) {
-                      list.push(migrateChild(c));
-                      seenAt[c.id] = rows[k].updatedAt;
-                      if (String(rows[k].updatedAt || "") > maxStamp) maxStamp = rows[k].updatedAt || "";
-                    } else broken++;
-                  } catch (e) { broken++; }
-                }
-                // 일부 행이 깨졌으면 새 구조를 믿지 않고 옛 덩어리로 간다.
-                // 아동 몇 명이 조용히 빠진 목록을 화면에 올리면, 그 상태로 저장돼
-                // 클라우드까지 오염된다 — 95-2와 같은 이유다.
-                if (broken > 0) {
-                  console.warn(`[B-3] 아동별 행 ${broken}개가 깨져 옛 덩어리로 읽습니다`);
-                } else if (list.length > 0) {
-                  childrenList = list;
-                  // 이 기기가 이미 올린 내용을 다시 올리지 않도록 기준값을 채운다.
-                  const st = {};
-                  list.forEach(c => { st[c.id] = c.updatedAt || ""; });
-                  childRowStampsRef.current = st;
-                  try { localStorage.setItem(CHILD_ROW_STAMPS_KEY, JSON.stringify(st)); } catch (e) {}
-                  // ★ 여기서 '어디까지 받아봤는지'를 채워두지 않으면, 로드 직후 첫 폴링이
-                  //    모든 행을 처음 보는 것으로 오해해 전원(2.5MB)을 다시 받는다.
-                  rowSeenAtRef.current = seenAt;
-                  if (maxStamp) cloudStampRef.current = maxStamp;
-                  console.info(`[B-3] 아동별 행에서 ${list.length}명 읽음`);
-                }
-              }
-            }
-
-            // ★ [B-3] 새 구조로 읽었으면 옛 덩어리는 받지 않는다.
-            //    둘 다 받으면 앱을 켤 때마다 4.9MB가 되어 전보다 나빠진다.
-            //    마지막에 보던 아동은 localStorage(사람별 키)에서 오므로 잃지 않고,
-            //    그것도 없으면 아래에서 담당 아동을 자동으로 고른다.
-            if (childrenList) {
-              markCloudSeen();
-              setCloudReadFailed(false);
-              try {
-                lastActive = localStorage.getItem(activeKeyFor(currentUserRef.current?.name));
-              } catch (e) {}
-            } else {
-              const res = await window.storage.get(FILE_KEY, true);  // true = shared
-              markCloudSeen();   // ★ [60-15] 읽기 성공 — 이후 읽기 실패는 진짜 장애로 본다
-              setCloudReadFailed(false);   // ★ [95-3]
-              if (res?.value) {
+            const res = await window.storage.get(FILE_KEY, true);  // true = shared
+            markCloudSeen();   // ★ [60-15] 읽기 성공 — 이후 읽기 실패는 진짜 장애로 본다
+            setCloudReadFailed(false);   // ★ [95-3]
+            if (res?.value) {
               try {
                 const d = JSON.parse(res.value);
                 if (Array.isArray(d.children) && d.children.length > 0) {
@@ -6585,7 +6419,6 @@ export default function App() {
                   })];
                 }
               } catch (e) { /* ignore */ }
-              }
             }
           } catch (e) {
             // ★ [95-3] 읽기 실패 — 아래 localStorage 사본으로 물러난다.
@@ -6719,40 +6552,13 @@ export default function App() {
               //    읽기 실패와 결과가 똑같으므로 똑같이 막는다.
               let cloudHasValue = false;
               try {
-                if (USE_CHILD_ROWS) {
-                  // ★ [B-3] 저장 전 병합용 읽기도 바뀐 아동만 받는다.
-                  //    예전엔 여기서 2,418KB 전체를 받아 병합했다. 저장할 때마다였다.
-                  //    다른 기기가 손댄 아동만 받으면 되고, 아무도 안 건드렸으면 하나도 안 받는다.
-                  //    (95-1·95-2의 안전장치는 그대로 — 읽기가 실패하면 예외가 나고
-                  //     cloudReadOk가 false로 남아 덮어쓰기가 막힌다.)
-                  const stampList = await window.storage.getStampList(CHILD_KEY_PREFIX, true);
-                  cloudReadOk = true;
-                  markCloudSeen();
-                  const changed = Object.keys(stampList).filter(k =>
-                    rowSeenAtRef.current[k.slice(CHILD_KEY_PREFIX.length)] !== stampList[k]);
-                  if (Object.keys(stampList).length > 0) cloudHasValue = true;
-                  if (changed.length > 0) {
-                    const list = [];
-                    for (const k of changed) {
-                      const raw = await window.storage.get(k, true);
-                      if (!raw?.value) continue;
-                      const c = _unwrapChildRow(raw.value);
-                      if (c && c.id) { list.push(migrateChild(c)); rowSeenAtRef.current[c.id] = stampList[k]; }
-                    }
-                    if (list.length > 0) cloudChildren = list;
-                  } else if (cloudHasValue) {
-                    // 아무도 안 건드렸다 — 병합할 것이 없다는 뜻이지 읽기 실패가 아니다.
-                    cloudChildren = [];
-                  }
-                } else {
-                  const res = await window.storage.get(FILE_KEY, true);
-                  cloudReadOk = true;
-                  markCloudSeen();
-                  if (res?.value) {
-                    cloudHasValue = true;
-                    const parsed = JSON.parse(res.value);
-                    if (Array.isArray(parsed.children)) cloudChildren = parsed.children.map(migrateChild);
-                  }
+                const res = await window.storage.get(FILE_KEY, true);
+                cloudReadOk = true;
+                markCloudSeen();
+                if (res?.value) {
+                  cloudHasValue = true;
+                  const parsed = JSON.parse(res.value);
+                  if (Array.isArray(parsed.children)) cloudChildren = parsed.children.map(migrateChild);
                 }
               } catch (e) {}
               // 한 번도 읽힌 적 없는 키면 최초 생성이므로 그대로 올린다.
@@ -6760,7 +6566,7 @@ export default function App() {
               //  키가 없는 것만 null로 오므로, 이제 장애와 '아직 없음'이 구분된다.
               //  여기서 무조건 막으면 클라우드 데이터가 영영 만들어지지 않는다.)
               if (!cloudReadOk && hasCloudEverBeenRead()) { setCloudReadFailed(true); return; }
-              if (cloudHasValue && cloudChildren === null) {
+              if (cloudHasValue && !cloudChildren) {
                 console.warn("[자동저장 보류] 클라우드 값을 읽었으나 아동 목록으로 해석하지 못함 — 덮어쓰기 중단");
                 setCloudReadFailed(true);
                 return;
@@ -6771,8 +6577,7 @@ export default function App() {
               //    필요하고, 로컬은 이 기기 밖으로 안 나가므로 번지지 않는다.
               //    클라우드는 모든 기기가 병합해 가는 곳이라 여기만 막으면 된다.
               const _localToSend = children.filter(c => !isBlankPlaceholderChild(c));
-              const toSave = (cloudChildren && cloudChildren.length > 0)
-                ? mergeChildren(_localToSend, cloudChildren) : _localToSend;
+              const toSave = cloudChildren ? mergeChildren(_localToSend, cloudChildren) : _localToSend;
               // 보낼 게 아무것도 없으면 저장 자체를 건너뛴다 — 빈 배열을 올리면
               // 다른 기기의 아동이 지워지는 게 아니라(병합은 id 합집합) 무의미한 쓰기만 는다.
               if (toSave.length === 0) return;
@@ -6785,40 +6590,6 @@ export default function App() {
                   lastEditTime: Date.now()
                 }), true);
                 setCloudSaveFailed(false);   // ★ [96-2] 저장이 되면 스스로 꺼진다
-
-                // ═══ ★ [B-2] 아동별 행에도 같이 쓴다 ═══
-                //    아직 아무도 이 행들을 읽지 않는다. 위의 옛 덩어리가 여전히 정답이고,
-                //    여기가 실패하거나 비어 있어도 데이터에는 아무 영향이 없다.
-                //    3단계에서 읽기를 옮기기 전에, 두 구조가 같은 내용인지 대조하기 위한
-                //    준비 단계다.
-                //    바뀐 아동만 쓴다 — 매번 48명을 다 쓰면 쓰기 전송량이 도리어 는다.
-                //    실패는 조용히 넘어가되 콘솔에는 남긴다. 이 단계에서 저장 실패로
-                //    처리하면, 멀쩡히 저장된 옛 덩어리까지 실패로 보여 사용자를 혼란스럽게 한다.
-                try {
-                  const stamps = childRowStampsRef.current;
-                  let wrote = 0, failed = 0;
-                  for (const c of toSave) {
-                    if (!c || !c.id) continue;
-                    const at = c.updatedAt || "";
-                    if (stamps[c.id] === at) continue;     // 이 기기가 마지막으로 쓴 뒤 안 바뀜
-                    try {
-                      // 봉투에 담아 쓴다 — 누가 언제 고쳤는지를 아동 데이터와 섞지 않기 위해서다.
-                      // 폴링이 '남이 고쳤나'를 판단할 때 이 값을 쓴다(옛 덩어리의 lastEditor 역할).
-                      await window.storage.set(CHILD_KEY_PREFIX + c.id, JSON.stringify({
-                        v: 1,
-                        child: c,
-                        editor: currentUser?.name || "(unknown)",
-                        editTime: Date.now(),
-                      }), true);
-                      stamps[c.id] = at;
-                      wrote++;
-                    } catch (e) { failed++; }
-                  }
-                  if (wrote) _persistChildRowStamps();
-                  if (wrote || failed) console.info(`[B-2 아동별 저장] 기록 ${wrote}명${failed ? ` · 실패 ${failed}명` : ""}`);
-                } catch (e) {
-                  console.warn("[B-2 아동별 저장 건너뜀]", e?.message);
-                }
                 // ★ [97-5] 방금 내가 올린 것을 폴링이 '남의 변경'으로 보고
                 //    380KB를 도로 내려받던 것을 막는다.
                 //    저장 직후 스탬프(약 30바이트)만 한 번 읽어 기준값으로 삼는다.
@@ -7014,11 +6785,7 @@ export default function App() {
           // ★ [97-2] 먼저 updated_at 하나만 읽는다(약 30바이트).
           //    바뀌지 않았으면 여기서 끝 — 본문(약 380KB)은 받지 않는다.
           //    이 앱 전송량의 99% 이상이 이 지점에서 나가고 있었다.
-          // ★ [B-3] 아동별 행을 쓸 때는 그중 가장 최근 시각 하나만 본다(약 40바이트).
-          //    옛 덩어리를 볼 때와 하는 일은 같다 — "뭐라도 바뀌었나".
-          const stamp = USE_CHILD_ROWS
-            ? { updatedAt: await window.storage.getLatestStamp(CHILD_KEY_PREFIX, true) }
-            : await window.storage.getStamp(FILE_KEY, true);
+          const stamp = await window.storage.getStamp(FILE_KEY, true);
           markCloudSeen();   // ★ [60-15]
           setCloudReadFailed(false);   // ★ [95-3] 여기까지 왔으면 클라우드가 살아났다
           if (!stamp?.updatedAt) return;
@@ -7034,45 +6801,14 @@ export default function App() {
 
           cloudStampRef.current = stamp.updatedAt;
 
+          const res = await window.storage.get(FILE_KEY, true);
+          if (!res?.value) return;
+          
           let parsed;
-          if (USE_CHILD_ROWS) {
-            // ═══ ★ [B-3] 바뀐 아동만 받는다 ═══
-            //    먼저 누가 언제 바뀌었는지 목록만 본다(아동 48명 기준 약 2.6KB).
-            //    그중 이 기기가 아는 것과 다른 아동만 본문을 받는다(1명당 약 43KB).
-            //    옛 덩어리를 받던 2,418KB가 여기서 사라진다.
-            const stampList = await window.storage.getStampList(CHILD_KEY_PREFIX, true);
-            const changedKeys = Object.keys(stampList).filter(k => {
-              const id = k.slice(CHILD_KEY_PREFIX.length);
-              return rowSeenAtRef.current[id] !== stampList[k];
-            });
-            if (changedKeys.length === 0) return;
-
-            const fetched = [];
-            let editor = "", editTime = 0;
-            for (const k of changedKeys) {
-              let raw;
-              try { raw = await window.storage.get(k, true); } catch (e) { return; }   // 장애면 이번 회차 포기
-              if (!raw?.value) continue;
-              let c;
-              try { c = _unwrapChildRow(raw.value); } catch (e) { continue; }
-              if (!c || !c.id) continue;
-              fetched.push(migrateChild(c));
-              const meta = _childRowMeta(raw.value);
-              if (meta.editTime && meta.editTime > editTime) { editTime = meta.editTime; editor = meta.editor || ""; }
-              rowSeenAtRef.current[c.id] = stampList[k];
-            }
-            if (fetched.length === 0) return;
-            console.info(`[B-3] 바뀐 아동 ${fetched.length}명만 받음`);
-            // 아래 병합 코드가 그대로 쓰도록 옛 덩어리와 같은 모양으로 맞춘다.
-            parsed = { children: fetched, lastEditor: editor || "(unknown)", lastEditTime: editTime || Date.now() };
-          } else {
-            const res = await window.storage.get(FILE_KEY, true);
-            if (!res?.value) return;
-            try {
-              parsed = JSON.parse(res.value);
-            } catch (e) { return; }
-          }
-
+          try {
+            parsed = JSON.parse(res.value);
+          } catch (e) { return; }
+          
           if (!parsed.lastEditTime || !parsed.lastEditor) return;
           
           if (!isInitializedRef.current) {
