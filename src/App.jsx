@@ -4364,25 +4364,73 @@ function cutoffOf(item) {
   return item.savedAt ? String(item.savedAt).slice(0, 10) : null;
 }
 
-async function loadArchiveList(childId) {
-  if (!childId) return [];
+// ★ [보관 A-1] 보관 목록(인덱스)은 클라우드가 원본이다 — 로컬은 예비용.
+//    옛 코드는 로컬을 먼저 읽고 값이 있으면 클라우드를 아예 보지 않았다.
+//    아티팩트 시절(서버 없음)엔 맞는 순서였지만, window.storage가 Supabase로
+//    바뀐 뒤로는 뜻이 뒤집혔다 — 예비용이 아니라 원본이 됐다.
+//    그 결과 선생님마다 목록이 다르게 보이고, 저장할 때 낡은 로컬 목록이
+//    클라우드를 덮어써서 다른 선생님이 넣은 보고서가 목록에서 사라졌다.
+//    ([95-1]에서 아동 데이터에 났던 사고와 같은 패턴. 보관함은 그때 손대지 않았다.)
+//
+//    본문(ARCHIVE_ITEM_PREFIX)은 id가 고유해 서로 덮을 일이 없으므로
+//    로컬 우선을 그대로 둔다 — 클라우드 전송량도 아낀다. 충돌은 인덱스에서만 난다.
+
+// 클라우드 인덱스를 직접 읽는다.
+//   { ok: true }  = 응답 정상 (list가 비면 '아직 저장된 적 없음')
+//   { ok: false } = 네트워크·서버 장애
+// 이 구분이 핵심이다. 장애를 '비어 있음'으로 오해하고 로컬 목록을 올리면
+// 클라우드의 멀쩡한 목록을 통째로 날린다.
+async function readCloudArchiveIndex(childId) {
+  if (typeof window === "undefined" || !window.storage) return { ok: false, list: [] };
+  try {
+    const r = await window.storage.get(ARCHIVE_INDEX_PREFIX + childId);
+    if (!r || !r.value) return { ok: true, list: [] };
+    const list = JSON.parse(r.value);
+    return { ok: true, list: Array.isArray(list) ? list : [] };
+  } catch (e) {
+    console.warn("[보관 인덱스 클라우드 읽기 실패]", childId, e);
+    return { ok: false, list: [] };
+  }
+}
+
+function readLocalArchiveIndex(childId) {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(ARCHIVE_INDEX_PREFIX + childId);
+    if (!raw) return null;
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list : null;
+  } catch (e) { return null; }
+}
+
+function writeLocalArchiveIndex(childId, list) {
   try {
     if (typeof localStorage !== "undefined") {
-      const raw = localStorage.getItem(ARCHIVE_INDEX_PREFIX + childId);
-      if (raw) {
-        const list = JSON.parse(raw);
-        if (Array.isArray(list)) return list.sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
-      }
-    }
-    if (typeof window !== "undefined" && window.storage) {
-      const r = await window.storage.get(ARCHIVE_INDEX_PREFIX + childId);
-      if (r?.value) {
-        const list = JSON.parse(r.value);
-        if (Array.isArray(list)) return list.sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
-      }
+      localStorage.setItem(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(list));
     }
   } catch (e) {}
-  return [];
+}
+
+function sortArchiveList(list) {
+  return [...list].sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
+}
+
+async function loadArchiveList(childId) {
+  if (!childId) return [];
+  const cloud = await readCloudArchiveIndex(childId);
+  if (cloud.ok) {
+    if (cloud.list.length > 0) {
+      writeLocalArchiveIndex(childId, cloud.list);   // 로컬은 캐시로만 갱신
+      return sortArchiveList(cloud.list);
+    }
+    // 클라우드에 아직 없는 아동 — 이 기기에만 남은 옛 사본이 있으면 그걸 쓴다
+    const local = readLocalArchiveIndex(childId);
+    if (local && local.length > 0) return sortArchiveList(local);
+    return [];
+  }
+  // 클라우드 장애 — 로컬로 버틴다 (쓰기는 saveArchiveItem에서 막는다)
+  const local = readLocalArchiveIndex(childId);
+  return local ? sortArchiveList(local) : [];
 }
 
 async function loadArchiveItem(archiveId) {
@@ -4404,7 +4452,15 @@ async function saveArchiveItem(snapshot, autoMode) {
   if (!snapshot || !snapshot.childId) return null;
   try {
     const childId = snapshot.childId;
-    let list = await loadArchiveList(childId);
+    // ★ [보관 A-2] 목록은 반드시 클라우드 최신본 위에 얹는다.
+    //    loadArchiveList를 쓰면 '클라우드가 비었다'와 '클라우드를 못 읽었다'가
+    //    구분되지 않는다. 장애 상황에서 로컬 목록으로 클라우드를 덮으면
+    //    다른 선생님 보고서가 목록에서 사라진다 — 지금 고치려는 그 사고다.
+    const cloudIdx = await readCloudArchiveIndex(childId);
+    const cloudIndexOk = cloudIdx.ok;
+    let list = (cloudIndexOk && cloudIdx.list.length > 0)
+      ? cloudIdx.list
+      : (readLocalArchiveIndex(childId) || []);
     if (autoMode) {
       const now = Date.now();
       const sameRecent = list.find(item =>
@@ -4428,11 +4484,14 @@ async function saveArchiveItem(snapshot, autoMode) {
           if (typeof localStorage !== "undefined") localStorage.setItem(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(list));
         } catch (e) {}
         try {
-          if (typeof window !== "undefined" && window.storage) {
+          // 클라우드 목록을 못 읽었으면 올리지 않는다 — 덮어쓰면 남의 보고서가 지워진다.
+          if (cloudIndexOk && typeof window !== "undefined" && window.storage) {
             await window.storage.set(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(list)).catch(() => {});
+          } else if (!cloudIndexOk) {
+            console.warn("[보관] 클라우드 목록을 읽지 못해 이 기기에만 저장했습니다.", childId);
           }
         } catch (e) {}
-        return { id: fullId, overwrite: true, savedAt: fullSnap.savedAt };
+        return { id: fullId, overwrite: true, savedAt: fullSnap.savedAt, cloudIndexSkipped: !cloudIndexOk };
       }
     }
     const id = "rpt_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
@@ -4452,11 +4511,14 @@ async function saveArchiveItem(snapshot, autoMode) {
       if (typeof localStorage !== "undefined") localStorage.setItem(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(newList));
     } catch (e) {}
     try {
-      if (typeof window !== "undefined" && window.storage) {
+      // 위와 같은 이유 — 클라우드 목록을 못 읽은 상태에서는 올리지 않는다.
+      if (cloudIndexOk && typeof window !== "undefined" && window.storage) {
         await window.storage.set(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(newList)).catch(() => {});
+      } else if (!cloudIndexOk) {
+        console.warn("[보관] 클라우드 목록을 읽지 못해 이 기기에만 저장했습니다.", childId);
       }
     } catch (e) {}
-    return { id, overwrite: false, savedAt: fullSnap.savedAt };
+    return { id, overwrite: false, savedAt: fullSnap.savedAt, cloudIndexSkipped: !cloudIndexOk };
   } catch (e) {
     console.warn("[보관] 저장 실패:", e);
     return null;
@@ -4474,14 +4536,21 @@ async function deleteArchiveItem(childId, archiveId) {
         await window.storage.delete(ARCHIVE_ITEM_PREFIX + archiveId).catch(() => {});
       }
     } catch (e) {}
-    let list = await loadArchiveList(childId);
+    // ★ [보관 A-3] 삭제도 클라우드 최신 목록에서 빼야 한다.
+    //    낡은 로컬 목록에서 하나만 빼서 올리면, 그 사이 다른 선생님이 넣은
+    //    보고서까지 함께 사라진다.
+    const cloudIdx = await readCloudArchiveIndex(childId);
+    const cloudIndexOk = cloudIdx.ok;
+    const list = (cloudIndexOk && cloudIdx.list.length > 0)
+      ? cloudIdx.list
+      : (readLocalArchiveIndex(childId) || []);
     const newList = list.filter(item => item.id !== archiveId);
+    writeLocalArchiveIndex(childId, newList);
     try {
-      if (typeof localStorage !== "undefined") localStorage.setItem(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(newList));
-    } catch (e) {}
-    try {
-      if (typeof window !== "undefined" && window.storage) {
+      if (cloudIndexOk && typeof window !== "undefined" && window.storage) {
         await window.storage.set(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(newList)).catch(() => {});
+      } else if (!cloudIndexOk) {
+        console.warn("[보관] 클라우드 목록을 읽지 못해 삭제가 이 기기에만 반영됐습니다.", childId);
       }
     } catch (e) {}
     return true;
