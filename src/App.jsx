@@ -3415,6 +3415,46 @@ function orderDateRange(a, b) {
   return [sa, sb];
 }
 
+// ★ [101-1] 담당 치료사 변경 기록 — info.therapistChanges = [{ id, date, from, to }]
+//    보고 기간 '안에서' 바뀐 것만 보고서에 표시한다.
+//    변경일이 기간 시작일과 같거나 그 전이면 기간 전체를 새 선생님이 맡은 것이므로 제외.
+function therapistChangesInRange(info, start, end) {
+  const list = Array.isArray(info?.therapistChanges) ? info.therapistChanges : [];
+  const [s, e] = orderDateRange(start, end);
+  return list
+    .filter(c => c && /^\d{4}-\d{2}-\d{2}$/.test(c.date || ""))
+    .filter(c => (!s || c.date > s) && (!e || c.date <= e))
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+// 2026-07-15 → 2026.07.15
+function dotDate(d) {
+  return String(d || "").replace(/-/g, ".");
+}
+// 변경일 전날 (이전 선생님의 마지막 날)
+function prevDayOf(d) {
+  const m = String(d || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return "";
+  const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) - 1);
+  const p = n => String(n).padStart(2, "0");
+  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
+}
+// 오늘 날짜 (기기 현지 시간 기준 — toISOString은 UTC라 새벽에 전날로 찍힌다)
+function localToday() {
+  const dt = new Date();
+  const p = n => String(n).padStart(2, "0");
+  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
+}
+// 이전 담당 구간 문구: "이OO (~2026.07.14)" / 여러 번이면 "이OO (~06.30), 박OO (07.01~07.14)"
+function previousTherapistText(changes) {
+  if (!changes || changes.length === 0) return "";
+  return changes.map((c, i) => {
+    const endD = dotDate(prevDayOf(c.date));
+    const startD = i > 0 ? dotDate(changes[i - 1].date) : "";
+    return `${c.from || "—"} (${startD}~${endD})`;
+  }).join(", ");
+}
+
 // 과제명이 보고서 문장에 넣어도 될 만큼 유효한지 판단
 // (자모만 있거나 2글자 미만이면 부적합 → 이름 생략)
 function isValidTaskName(name) {
@@ -10232,6 +10272,18 @@ export default function App() {
                           if (newOwner && (!oldTherapist || oldTherapist === oldOwner)) {
                             next.therapist = newOwner;
                           }
+                          // ★ [101-1] 담당이 A → B로 바뀐 경우만 변경 기록을 남긴다.
+                          //    (미할당 → 배정, 배정 → 미할당은 '선생님이 바뀐 것'이 아니라 기록하지 않음)
+                          //    날짜는 오늘로 넣고, 실제 인수일이 다르면 아래 '담당 변경 기록'에서 고친다.
+                          if (oldOwner && newOwner && oldOwner !== newOwner) {
+                            const rec = {
+                              id: "tc_" + Date.now() + "_" + Math.random().toString(36).slice(2, 5),
+                              date: localToday(),
+                              from: oldTherapist || oldOwner,
+                              to: newOwner
+                            };
+                            next.therapistChanges = [...(Array.isArray(p.therapistChanges) ? p.therapistChanges : []), rec];
+                          }
                           return next;
                         });
                         if (newOwner !== oldOwner) {
@@ -10255,6 +10307,47 @@ export default function App() {
                   </div>
                 )}
               </div>
+              {/* ★ [101-1] 담당 변경 기록 (관리자만) — 변경일을 실제 인수일로 고치거나 잘못 남은 기록을 지운다.
+                  보고 기간 안에 있는 변경만 보고서 기본정보·그래프에 표시된다. */}
+              {currentUser?.role === "admin" && Array.isArray(info.therapistChanges) && info.therapistChanges.length > 0 && (
+                <div style={{ marginTop: 12, padding: "10px 12px", background: PKL, borderRadius: 8, border: `1px solid ${PK}` }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 6 }}>담당 변경 기록</div>
+                  {info.therapistChanges.slice().sort((a, b) => String(a.date || "").localeCompare(String(b.date || ""))).map(c => (
+                    <div key={c.id || c.date} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                      <input
+                        type="date"
+                        style={{ ...IS, width: 150, padding: "4px 8px" }}
+                        value={c.date || ""}
+                        onChange={e => {
+                          const newDate = e.target.value;
+                          if (!newDate) return;
+                          const oldDate = c.date || "";
+                          setInfo(p => ({
+                            ...p,
+                            therapistChanges: (p.therapistChanges || []).map(x => (x.id === c.id ? { ...x, date: newDate } : x))
+                          }));
+                          if (newDate !== oldDate) {
+                            addHistory("info_update", `담당 변경일 수정 (${c.from} → ${c.to}): ${oldDate} → ${newDate}`, oldDate, newDate, "therapistChanges");
+                          }
+                        }}
+                      />
+                      <span style={{ fontSize: 12, color: "#444" }}>{c.from || "—"} → {c.to || "—"}</span>
+                      <button
+                        style={{ fontSize: 11, padding: "2px 8px", border: "1px solid #ddd", borderRadius: 6, background: "#fff", color: "#999", cursor: "pointer" }}
+                        onClick={() => {
+                          if (!window.confirm(`${dotDate(c.date)} ${c.from} → ${c.to} 변경 기록을 지울까요?\n(보고서에서도 표시되지 않습니다)`)) return;
+                          setInfo(p => ({ ...p, therapistChanges: (p.therapistChanges || []).filter(x => x.id !== c.id) }));
+                          addHistory("info_update", `담당 변경 기록 삭제: ${c.date} ${c.from} → ${c.to}`, c.date, "", "therapistChanges");
+                        }}>
+                        삭제
+                      </button>
+                    </div>
+                  ))}
+                  <div style={{ fontSize: 10.5, color: "#999", marginTop: 4 }}>
+                    변경일은 새 선생님이 수업을 시작한 날로 맞춰 주세요. 보고 기간 안의 변경만 보고서에 표시됩니다.
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* ★ [신규] 종결 상태 경고 카드 — 현재 아동이 종결 상태일 때만 표시 */}
@@ -13762,7 +13855,20 @@ cleanedHTML + '\n' +
               <tbody>
                 {[
                   ["아동명", info.name || "—", "생년월일", info.birth || "—"],
-                  ["소속반", info.room || "개별 ABA", "담당 치료사", info.therapist || "—"],
+                  ["소속반", info.room || "개별 ABA", "담당 치료사", (() => {
+                    // ★ [101-1] 보고 기간 중간에 담당이 바뀌었으면 시작일과 이전 담당을 함께 적는다.
+                    //    바뀐 적이 없으면 지금처럼 이름만.
+                    const chg = therapistChangesInRange(info, reportPeriodStart, reportPeriodEnd);
+                    if (chg.length === 0) return info.therapist || "—";
+                    const last = chg[chg.length - 1];
+                    return (
+                      <span style={{ lineHeight: 1.6 }}>
+                        {info.therapist || last.to || "—"} <span style={{ fontSize: 10.5, color: "#888" }}>({dotDate(last.date)}~)</span>
+                        <br />
+                        <span style={{ fontSize: 10.5, color: "#888" }}>이전: {previousTherapistText(chg)}</span>
+                      </span>
+                    );
+                  })()],
                   ["치료기간", (() => {
                     if (isFinalMode) {
                       const [s0, e0] = orderDateRange(reportPeriodStart, reportPeriodEnd);
@@ -14428,7 +14534,7 @@ cleanedHTML + '\n' +
                   <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                     ※ 영역별로 묶은 목표마다 진행 상태와 시작부터 지금까지의 추이선 · 회기당 1회 시도 목표는 O(성공)·X(실패)로 표시
                   </div>
-                  <GoalDashboard stos={goalsForReport} />
+                  <GoalDashboard stos={goalsForReport} therapistChanges={info?.therapistChanges} />
                 </PrintSection>
               )
             )}
@@ -18788,7 +18894,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, balanceBarRows = [],
                 💡 <b>그래프 컷오프 적용 중</b> — 직전 보관 보고서의 마지막 데이터({cutoffOf(effectiveArchiveList[0])}) 이후 데이터만 표시되고 있습니다. 이전 데이터를 다시 보려면 아래 보관함에서 해당 보고서를 삭제하세요.
               </div>
             )}
-            <GoalDashboard stos={goalsForReport} />
+            <GoalDashboard stos={goalsForReport} therapistChanges={info?.therapistChanges} />
           </div>
         )
       )}
@@ -20421,7 +20527,7 @@ function ReportGeneratorSection({
   <div class="meta">
     <strong>아동:</strong> ${info.name || "—"} &nbsp;&nbsp;
     <strong>생년월일:</strong> ${info.birth || "—"} &nbsp;&nbsp;
-    <strong>치료사:</strong> ${info.therapist || "—"}<br/>
+    <strong>치료사:</strong> ${info.therapist || "—"}${(() => { const _tc = therapistChangesInRange(info, reportPeriodStart, reportPeriodEnd); return _tc.length ? ` (${dotDate(_tc[_tc.length - 1].date)}~ · 이전: ${previousTherapistText(_tc)})` : ""; })()}<br/>
     <strong>보고 기간:</strong> ${reportPeriodStart || info.pStart || "—"} ~ ${reportPeriodEnd || info.pEnd || "—"} &nbsp;&nbsp;
     <strong>치료 강도:</strong> 주 ${info.sWeek || "—"}회 / ${sessionMinText(info) || "—"}<br/>
     <strong>발행일:</strong> ${today} &nbsp;&nbsp;
@@ -21761,8 +21867,18 @@ function GrowthLineChart({ goals, dates, getTimeline }) {
   );
 }
 
-function GoalDashboard({ stos }) {
+function GoalDashboard({ stos, therapistChanges }) {
   if (!stos || stos.length === 0) return null;
+  // ★ [101-1] 이 목표의 데이터 기간 안에서 담당 치료사가 바뀐 기록.
+  //    첫 기록일 이전·마지막 기록일 이후의 변경은 그래프 안에 들어오지 않으므로 표시하지 않는다.
+  const changesForPoints = (pts) => {
+    if (!pts || pts.length < 2 || !Array.isArray(therapistChanges)) return [];
+    const f = pts[0].date, l = pts[pts.length - 1].date;
+    return therapistChanges
+      .filter(c => c && c.date && c.date > f && c.date <= l)
+      .slice()
+      .sort((a, b) => a.date.localeCompare(b.date));
+  };
   const SC_DASH = { 완료: "#639922", 진행중: "#378ADD", 진행예정: "#EF9F27", 중단: "#B4B2A9" };
 
   const CURR_COLOR = {
@@ -21871,7 +21987,7 @@ function GoalDashboard({ stos }) {
     );
   };
 
-  const BigChart = ({ points, color, listBoundaries, pdf }) => {
+  const BigChart = ({ points, color, listBoundaries, pdf, changes }) => {
     if (!points || points.length < 1) return null;
     const STAGE_COLORS = ["#e34948", "#eb6834", "#eda100", "#1baf7a", "#2a78d6", "#3f51b5", "#8e44ad"];
     const stageColorOf = (n) => STAGE_COLORS[((Number(n) || 1) - 1) % STAGE_COLORS.length];
@@ -22035,6 +22151,18 @@ function GoalDashboard({ stos }) {
             </g>
           );
         })}
+        {/* ★ [101-1] 담당 치료사 변경 표식 — 날짜 줄 아래 빈 자리에 작은 삼각형만.
+            세로선은 단계(L1/L2) 경계선과 모양이 같아 헷갈리므로 쓰지 않는다.
+            x축이 날짜가 아니라 회기 순서라, 변경일 직전 회기와 직후 회기의 가운데에 둔다. */}
+        {(changes || []).map((chg, ci) => {
+          const idx = coords.findIndex(c => c.date >= chg.date);
+          if (idx <= 0) return null;
+          const x = (coords[idx - 1].x + coords[idx].x) / 2;
+          const yTop = H - 9;
+          return (
+            <polygon key={"tc" + ci} points={`${x},${yTop} ${x - 4},${yTop + 7} ${x + 4},${yTop + 7}`} fill="#D4537E" />
+          );
+        })}
       </svg>
     );
   };
@@ -22166,7 +22294,13 @@ function GoalDashboard({ stos }) {
                         <div style={{ background: "#FAFAFA", borderRadius: 10, padding: "10px 8px 6px", marginBottom: 10 }}>
                           {s.isOX
                             ? <OXStrip points={points} />
-                            : <BigChart points={points} color={meta.chartLine} listBoundaries={s.listBoundaries} pdf={true} />}
+                            : <BigChart points={points} color={meta.chartLine} listBoundaries={s.listBoundaries} pdf={true} changes={changesForPoints(points)} />}
+                          {/* ★ [101-1] 담당 치료사 변경 주석 — 그래프 밖 한 줄. O·X 목표도 같은 문구를 붙인다. */}
+                          {changesForPoints(points).map((chg, ci) => (
+                            <div key={"tcn" + ci} style={{ fontSize: 10, color: "#888", marginTop: 4, paddingLeft: 4 }}>
+                              <span style={{ color: "#D4537E" }}>{s.isOX ? "※" : "▲"}</span> {dotDate(chg.date)} 담당 치료사 변경 ({chg.from || "—"} → {chg.to || "—"})
+                            </div>
+                          ))}
                         </div>
                       )}
                       {/* ★ [신규] 기록이 없는 목표 — 빈 카드로 두면 오류처럼 보이므로 사유를 밝힌다 */}
