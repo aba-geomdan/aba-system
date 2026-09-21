@@ -5696,6 +5696,390 @@ function AdminPanel({ onClose }) {
   );
 }
 
+/* ── ★ [설문-1] 설문 시스템 문항 정의 (survey 앱과 동일) ─────────── */
+const SV_REIN_Q = [
+  { sec: "작성 정보" },
+  { id: "relation", n: 1, label: "아동과의 관계", type: "single",
+    options: ["어머니", "아버지", "조부모"], etc: true, required: true },
+
+  { sec: "안전 확인", note: "수업에서 반드시 지켜야 할 내용입니다." },
+  { id: "allergy", n: 2, label: "알레르기가 있거나 먹으면 안 되는 음식이 있습니까?",
+    type: "yesno", detailLabel: "어떤 음식인지 적어주세요", required: true },
+  { id: "choking", n: 3, label: "삼킴 위험이나 질감 때문에 피해야 할 것이 있습니까?",
+    type: "yesno", detailLabel: "예: 견과류, 작은 부품", required: true },
+
+  { sec: "좋아하는 것", note: "해당하는 것을 모두 눌러주세요. 없으면 넘어가셔도 됩니다." },
+  { id: "food", n: 4, label: "음식·간식", type: "multi",
+    options: ["과자류", "초콜릿류", "젤리·사탕", "빵·케이크", "과일", "아이스크림", "시리얼"],
+    etc: true, detailLabel: "구체적인 제품명을 아시면 적어주세요" },
+  { id: "drink", n: 5, label: "음료", type: "multi",
+    options: ["물", "우유", "주스", "요구르트", "탄산음료"], etc: true },
+  { id: "toy", n: 6, label: "장난감·책", type: "multi",
+    options: ["자동차·기차", "블록·레고", "인형·피규어", "퍼즐", "공", "그림책", "소리 나는 장난감"],
+    etc: true, detailLabel: "특별히 좋아하는 이름이 있으면 적어주세요" },
+  { id: "media", n: 7, label: "영상·노래·캐릭터", type: "multi",
+    options: ["유튜브", "TV 만화", "노래·동요", "특정 캐릭터"],
+    etc: true, detailLabel: "채널명·프로그램명·캐릭터 이름" },
+  { id: "activity", n: 8, label: "활동", type: "multi",
+    options: ["비눗방울", "트램폴린", "그네·미끄럼틀", "물놀이", "그림 그리기", "블록 쌓기", "산책", "춤추기", "까꿍놀이"],
+    etc: true },
+  { id: "sensory", n: 9, label: "감각 자극", type: "multi",
+    options: ["꽉 안아주기", "빙글빙글 돌기", "진동", "물·모래 만지기", "특정 촉감의 천·인형", "불빛 보기", "소리 듣기"],
+    etc: true },
+  { id: "social", n: 10, label: "사회적·신체적 접촉", type: "multi",
+    options: ["간지럽히기", "머리 쓰다듬기", "안아주기", "하이파이브", "박수·칭찬", "비행기 태우기"],
+    etc: true },
+  { id: "place", n: 11, label: "장소", type: "multi",
+    options: ["놀이터", "키즈카페", "마트", "공원", "차 안", "집 특정 공간"], etc: true },
+  { id: "person", n: 12, label: "가장 좋아하는 사람", type: "multi",
+    options: ["엄마", "아빠", "형제자매", "조부모", "또래 친구"], etc: true },
+
+  { sec: "순위", note: "앞에서 고르신 것들이 아래에 뜹니다. 눌러서 채우거나 직접 적어주세요." },
+  { id: "rank", n: 13, label: "가장 좋아하는 것을 순서대로 적어주세요", type: "rank", required: true },
+
+  { sec: "집에서는 어떤가요" },
+  { id: "always", n: 14, label: "집에서 아이가 언제든 가질 수 있는 것", type: "pick" },
+  { id: "special", n: 15, label: "특별한 때만 주는 것", type: "pick" },
+
+  { sec: "수업에서의 사용" },
+  { id: "avoid", n: 16, label: "수업에서 사용하지 않았으면 하는 것이 있습니까?",
+    type: "yesno", detailLabel: "무엇을, 어떤 이유인지 적어주세요", required: true },
+  { id: "unlimited", n: 17, label: "수업에서 제한 없이 사용해도 되는 것", type: "pick" },
+
+  { sec: "그 밖에" },
+  { id: "dislike", n: 18, label: "아이가 정말 싫어하는 것", type: "multi",
+    options: ["큰 소리", "특정 촉감", "낯선 사람", "기다리기", "정리하기", "옷 갈아입기"], etc: true },
+  { id: "extra", n: 19, label: "더 알려주고 싶은 것이 있으면 자유롭게 적어주세요", type: "text" },
+];
+
+const SV_CONCERNS = [
+  "말·의사소통",
+  "행동",
+  "또래·사회성",
+  "학습·학교 준비",
+  "일상생활",
+  "아직 잘 모르겠음",
+];
+
+const SV_INQ_Q = [
+  { sec: "아동 정보" },
+  { id: "childName", n: 1, label: "아동 이름", type: "line", required: true },
+  { id: "birth", n: 2, label: "생년월일", type: "date", required: true },
+  { id: "sex", n: 3, label: "성별", type: "single", options: ["남", "여"] },
+
+  { sec: "보호자 연락처" },
+  { id: "guardian", n: 4, label: "보호자 성함", type: "line", required: true },
+  { id: "relation", n: 5, label: "아동과의 관계", type: "single",
+    options: ["어머니", "아버지", "조부모"], etc: true },
+  { id: "phone", n: 6, label: "연락처", type: "tel", required: true,
+    placeholder: "010-0000-0000" },
+  { id: "callTime", n: 7, label: "연락 가능한 시간대", type: "single",
+    options: ["오전", "오후", "저녁", "아무 때나"] },
+
+  { sec: "현재 상황" },
+  { id: "school", n: 8, label: "교육기관", type: "single",
+    options: ["미등원", "어린이집", "유치원", "초등학교", "중학교 이상"] },
+  { id: "grade", n: 9, label: "학년·반", type: "line" },
+
+  { sec: "어떤 부분이 궁금하신가요",
+    note: "아이를 판단하기 위한 것이 아니라, 상담 때 무엇부터 이야기 나눌지 정하기 위한 것입니다. 고르신 것에 맞는 질문만 아래에 나옵니다." },
+  { id: "concern", n: 10, label: "요즘 가장 도움이 필요한 부분", type: "multi",
+    options: SV_CONCERNS, required: true },
+
+  /* ── 행동 ────────────────────────────────────────────── */
+  { sec: "행동에 대해", showIf: { id: "concern", anyOf: ["행동"] } },
+  { id: "bWhen", n: "B1", label: "어떤 상황에서 주로 나타나나요?", type: "multi",
+    options: ["하고 싶은 걸 못 하게 할 때", "하기 싫은 걸 시킬 때", "원하는 게 있을 때",
+      "갑자기 계획이 바뀔 때", "사람이 많거나 시끄러울 때", "특별한 상황 없이", "잘 모르겠음"],
+    etc: true, showIf: { id: "concern", anyOf: ["행동"] } },
+  { id: "bHow", n: "B2", label: "어떤 모습으로 나타나나요?", type: "multi",
+    options: ["울거나 소리 지름", "바닥에 눕거나 버팀", "물건을 던지거나 부숨",
+      "사람을 때리거나 밈", "자기 몸을 때리거나 부딪침", "자리를 벗어남", "말로 거칠게 표현함"],
+    etc: true, showIf: { id: "concern", anyOf: ["행동"] } },
+  { id: "bFreq", n: "B3", label: "얼마나 자주 있나요?", type: "single",
+    options: ["하루에 여러 번", "하루 한 번쯤", "일주일에 몇 번", "가끔"],
+    showIf: { id: "concern", anyOf: ["행동"] } },
+  { id: "bResponse", n: "B4", label: "그럴 때 보호자께서는 주로 어떻게 하시나요?", type: "text",
+    note: "예: 안아서 진정시킨다 · 원하는 걸 들어준다 · 잠시 두고 본다",
+    showIf: { id: "concern", anyOf: ["행동"] } },
+  { id: "bInjury", n: "B5", label: "다치거나 다치게 한 적이 있나요?", type: "yesno",
+    detailLabel: "어떤 상황이었는지 간단히 적어주세요",
+    showIf: { id: "concern", anyOf: ["행동"] } },
+  { id: "bGood", n: "B6", label: "반대로, 잘 지내는 상황도 알려주세요", type: "text",
+    note: "예: 혼자 놀 때는 괜찮다 · 아빠랑 있을 때는 덜하다",
+    showIf: { id: "concern", anyOf: ["행동"] } },
+
+  /* ── 말·의사소통 ──────────────────────────────────────── */
+  { sec: "말·의사소통에 대해", showIf: { id: "concern", anyOf: ["말·의사소통"] } },
+  { id: "lExpress", n: "L1", label: "지금 어떻게 표현하나요?", type: "single",
+    options: ["아직 말이 나오지 않음", "단어 하나", "두세 단어 조합", "문장으로 말함"],
+    showIf: { id: "concern", anyOf: ["말·의사소통"] } },
+  { id: "lUnderstand", n: "L2", label: "어른 말은 얼마나 이해하나요?", type: "single",
+    options: ["이름 부르면 반응", "간단한 지시를 따름", "두 단계 지시를 따름", "잘 모르겠음"],
+    showIf: { id: "concern", anyOf: ["말·의사소통"] } },
+  { id: "lAac", n: "L3", label: "말 외에 쓰는 방법이 있나요?", type: "multi",
+    options: ["손짓·가리키기", "그림카드", "기기", "없음"], etc: true,
+    showIf: { id: "concern", anyOf: ["말·의사소통"] } },
+
+  /* ── 또래·사회성 ──────────────────────────────────────── */
+  { sec: "또래·사회성에 대해", showIf: { id: "concern", anyOf: ["또래·사회성"] } },
+  { id: "sPeer", n: "S1", label: "또래와 있을 때 어떤가요?", type: "single",
+    options: ["관심 없어 보임", "관심은 있는데 다가가지 못함", "다가가지만 방식이 서툼", "잘 어울림"],
+    showIf: { id: "concern", anyOf: ["또래·사회성"] } },
+  { id: "sEye", n: "S2", label: "눈맞춤은 어떤가요?", type: "single",
+    options: ["잘 안 함", "가끔 함", "자주 함"],
+    showIf: { id: "concern", anyOf: ["또래·사회성"] } },
+  { id: "sHard", n: "S3", label: "특별히 어려워하는 상황", type: "text",
+    showIf: { id: "concern", anyOf: ["또래·사회성"] } },
+
+  /* ── 학습·학교 준비 ───────────────────────────────────── */
+  { sec: "학습·학교 준비에 대해", showIf: { id: "concern", anyOf: ["학습·학교 준비"] } },
+  { id: "aSit", n: "A1", label: "앉아서 하는 활동을 얼마나 유지하나요?", type: "single",
+    options: ["1~2분", "5분쯤", "10분 이상"],
+    showIf: { id: "concern", anyOf: ["학습·학교 준비"] } },
+  { id: "aHard", n: "A2", label: "어려워하는 부분", type: "multi",
+    options: ["지시 따르기", "차례 기다리기", "집중 유지", "글자·숫자", "손 쓰는 활동"],
+    etc: true, showIf: { id: "concern", anyOf: ["학습·학교 준비"] } },
+  { id: "aFeedback", n: "A3", label: "학교·유치원에서 들은 이야기가 있나요?", type: "text",
+    showIf: { id: "concern", anyOf: ["학습·학교 준비"] } },
+
+  /* ── 일상생활 ─────────────────────────────────────────── */
+  { sec: "일상생활에 대해", showIf: { id: "concern", anyOf: ["일상생활"] } },
+  { id: "dToilet", n: "D1", label: "배변", type: "single",
+    options: ["아직 기저귀를 사용해요", "어른이 시간 맞춰 데려가요", "스스로 표현해요", "스스로 해결해요"],
+    showIf: { id: "concern", anyOf: ["일상생활"] } },
+  { id: "dMeal", n: "D2", label: "식사", type: "single",
+    options: ["도움이 많이 필요", "조금 도와주면 됨", "스스로 함"],
+    showIf: { id: "concern", anyOf: ["일상생활"] } },
+  { id: "dHard", n: "D3", label: "특별히 힘든 부분", type: "text",
+    showIf: { id: "concern", anyOf: ["일상생활"] } },
+
+  { sec: "희망 사항" },
+  { id: "days", n: 11, label: "희망 요일", type: "multi",
+    options: ["월", "화", "수", "목", "금", "토"] },
+  { id: "times", n: 12, label: "희망 시간대", type: "multi",
+    options: ["오전", "이른 오후", "늦은 오후", "저녁"] },
+  { id: "start", n: 13, label: "언제부터 시작하고 싶으신가요?", type: "single",
+    options: ["바로", "1개월 내", "2~3개월 내", "아직 미정"] },
+  { id: "report", n: 14, label: "검사 보고서를 가지고 계신가요?", type: "single",
+    options: ["있음", "없음", "진행 중"], note: "있으시면 상담 때 가져와 주세요." },
+  { id: "source", n: 15, label: "저희를 어떻게 알게 되셨나요?", type: "single", required: true,
+    options: ["홈페이지", "인스타그램", "블로그", "지인 소개", "인쇄물·현수막", "검색"], etc: true },
+  { id: "question", n: 16, label: "궁금하신 점", type: "text" },
+];
+
+function svIsVisible(q, answers) {
+  const c = q && q.showIf;
+  if (!c) return true;
+  const a = answers && answers[c.id];
+  if (!a) return false;
+  const picked = Array.isArray(a.v) ? a.v : (a.v ? [a.v] : []);
+  return (c.anyOf || []).some(function (x) {
+    return picked.indexOf(x) !== -1;
+  });
+}
+
+function svAnswerText(q, val) {
+  if (!val) return "";
+  if (q.type === "single") {
+    const parts = [];
+    if (val.v) parts.push(val.v);
+    if (val.etc) parts.push(val.etc);
+    return parts.join(" · ");
+  }
+  if (q.type === "multi" || q.type === "pick") {
+    const parts = (val.v || []).slice();
+    if (val.etc) parts.push(val.etc);
+    if (val.detail) parts.push("→ " + val.detail);
+    return parts.join(", ");
+  }
+  if (q.type === "yesno") {
+    if (val.v === "있음") return "있음 — " + (val.detail || "(내용 없음)");
+    return val.v || "";
+  }
+  if (q.type === "rank") {
+    return (val.v || [])
+      .map(function (t, i) {
+        return t ? i + 1 + "위 " + t : "";
+      })
+      .filter(Boolean)
+      .join("  /  ");
+  }
+  return val.v || "";
+}
+
+
+/* ══════════════════════════════════════════════════════════════════
+   ★ [설문-1] 아동정보 탭 안 '학부모 설문' 카드 — 설문 시스템(survey 앱)과 연결
+   ──────────────────────────────────────────────────────────────────
+   · 상담 신청서(inquiries)와 강화제 설문(rein_surveys)을 이 아동의 id로 읽어 보여준다.
+   · 읽기 전용이다. 통합본 저장(iep-data-backup)에는 아무것도 쓰지 않는다.
+   · 탭을 열 때만, 이 아동 것만 불러온다 — 전송량이 거의 없다.
+   · 권한은 서버(RLS)가 정한다. 관리자는 전부, 선생님은 본인에게 배정된 설문만.
+   · 문항 정의(SV_*)는 설문 앱의 것을 그대로 옮겨 왔다. 설문 앱에서 문항을 바꾸면
+     여기도 같이 바꿔야 보기 좋게 표시된다 (안 바꿔도 답변은 사라지지 않는다).
+   ══════════════════════════════════════════════════════════════════ */
+function SvDetail({ questions, answers }) {
+  const a = answers || {};
+  const rows = [];
+  questions
+    .filter(q => svIsVisible(q, a))
+    .forEach((q, i) => {
+      if (q.sec) {
+        rows.push(
+          <div key={"s" + i} style={{ fontSize: 13, fontWeight: 700, color: PKD, margin: "16px 0 4px" }}>{q.sec}</div>
+        );
+        return;
+      }
+      const txt = svAnswerText(q, a[q.id]);
+      rows.push(
+        <div key={q.id} style={{ padding: "8px 0", borderBottom: "1px solid #f5e8ec" }}>
+          <div style={{ fontSize: 12, color: "#999", marginBottom: 3 }}>{q.n}. {q.label}</div>
+          <div style={{ fontSize: 14, color: "#333", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{txt || "—"}</div>
+        </div>
+      );
+    });
+  return <div>{rows}</div>;
+}
+
+function ChildSurveyPanel({ childId, childName, isAdmin }) {
+  const [state, setState] = useState({ loading: true, error: "", inquiries: [], surveys: [] });
+  const [open, setOpen] = useState(false);       // 카드 펼침 — 기본은 접힘(요약만)
+  const [openOld, setOpenOld] = useState({});    // 지난 강화제 응답 펼침
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const headers = await _authHeaders();
+        const id = encodeURIComponent(childId);
+        const [r1, r2] = await Promise.all([
+          fetch(`${SUPABASE_URL}/rest/v1/inquiries?child_id=eq.${id}&select=id,answers,memo,status,created_at&order=created_at.desc`, { headers }),
+          fetch(`${SUPABASE_URL}/rest/v1/rein_surveys?child_id=eq.${id}&select=id,answers,submitted_at&order=submitted_at.desc`, { headers }),
+        ]);
+        if (!r1.ok || !r2.ok) {
+          throw new Error(`설문을 불러오지 못했습니다 (HTTP ${!r1.ok ? r1.status : r2.status})`);
+        }
+        const [inquiries, surveys] = await Promise.all([r1.json(), r2.json()]);
+        if (alive) setState({ loading: false, error: "", inquiries: inquiries || [], surveys: surveys || [] });
+      } catch (e) {
+        if (alive) setState({ loading: false, error: e?.message || "설문을 불러오지 못했습니다.", inquiries: [], surveys: [] });
+      }
+    })();
+    return () => { alive = false; };
+  }, [childId]);
+
+  const fmt = (iso) => { try { return new Date(iso).toLocaleString("ko-KR"); } catch (e) { return ""; } };
+  const hint = isAdmin
+    ? "설문 시스템에서 이 아동을 등록하거나 링크를 보내면 여기에 표시됩니다."
+    : "담당으로 배정된 설문만 보입니다. 보이지 않으면 원장님께 배정을 요청하세요.";
+
+  const inq = state.inquiries[0];
+  const [latest, ...older] = state.surveys;
+
+  // 안전 — 알레르기·삼킴 위험·쓰지 말 것은 접혀 있어도 항상 보이게
+  const warn = [];
+  if (latest) {
+    const a = latest.answers || {};
+    if (a.allergy && a.allergy.v === "있음") warn.push("알레르기·금지 음식: " + (a.allergy.detail || "(내용 없음)"));
+    if (a.choking && a.choking.v === "있음") warn.push("삼킴 위험·피할 것: " + (a.choking.detail || "(내용 없음)"));
+    if (a.avoid && a.avoid.v === "있음") warn.push("수업에서 쓰지 말 것: " + (a.avoid.detail || "(내용 없음)"));
+  }
+
+  const summary = state.loading
+    ? "불러오는 중…"
+    : state.error
+    ? ""
+    : [
+        latest ? `강화제 ${state.surveys.length}건` : "강화제 없음",
+        inq ? "상담 신청서 있음" : "상담 신청서 없음",
+      ].join(" · ");
+
+  const canOpen = !state.loading && !state.error && (latest || inq);
+
+  return (
+    <div style={CS}>
+      {/* 머리 — 접혀 있어도 요약과 안전 경고는 보인다 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: PKD }}>📋 학부모 설문</h3>
+        <span style={{ fontSize: 12, color: "#999" }}>{summary}</span>
+        {canOpen ? (
+          <button
+            style={{ ...BS, marginLeft: "auto", padding: "5px 12px", fontSize: 12 }}
+            onClick={() => setOpen(v => !v)}
+          >
+            {open ? "접기 ▴" : "펼치기 ▾"}
+          </button>
+        ) : null}
+      </div>
+
+      {state.error ? (
+        <div style={{ fontSize: 13, color: "#B04A4A", marginTop: 8 }}>{state.error}</div>
+      ) : null}
+
+      {warn.length > 0 ? (
+        <div style={{ background: "#FDECEC", border: "1px solid #F2B8B8", borderRadius: 10, padding: "10px 12px", marginTop: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#A83232", marginBottom: 4 }}>⚠ 꼭 확인하세요</div>
+          {warn.map((w, i) => (
+            <div key={i} style={{ fontSize: 13, color: "#7A2424", lineHeight: 1.6 }}>{w}</div>
+          ))}
+        </div>
+      ) : null}
+
+      {!state.loading && !state.error && !latest && !inq ? (
+        <div style={{ fontSize: 12, color: "#999", marginTop: 8 }}>{hint}</div>
+      ) : null}
+
+      {open && canOpen ? (
+        <div style={{ marginTop: 10 }}>
+          {/* 강화제 설문 — 수업에 바로 쓰는 것이라 위에 */}
+          <div style={{ fontSize: 14, fontWeight: 700, color: PKD, marginTop: 6 }}>🍬 강화제 설문</div>
+          {!latest ? (
+            <div style={{ fontSize: 13, color: "#999", marginTop: 6 }}>아직 받은 강화제 설문이 없습니다.</div>
+          ) : (
+            <div>
+              <div style={{ fontSize: 12, color: "#999", margin: "4px 0 6px" }}>
+                {fmt(latest.submitted_at)} 제출{older.length > 0 ? ` · 이전 응답 ${older.length}건` : ""}
+              </div>
+              <SvDetail questions={SV_REIN_Q} answers={latest.answers} />
+              {older.map(s => (
+                <div key={s.id} style={{ marginTop: 14, borderTop: `1px dashed ${PKL}`, paddingTop: 10 }}>
+                  <button
+                    style={{ ...BS, padding: "5px 12px", fontSize: 12 }}
+                    onClick={() => setOpenOld(p => ({ ...p, [s.id]: !p[s.id] }))}
+                  >
+                    {openOld[s.id] ? "▾" : "▸"} {fmt(s.submitted_at)} 이전 응답
+                  </button>
+                  {openOld[s.id] ? <SvDetail questions={SV_REIN_Q} answers={s.answers} /> : null}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 상담 신청서 — 등록 전 배경 정보 */}
+          <div style={{ fontSize: 14, fontWeight: 700, color: PKD, marginTop: 22 }}>📝 상담 신청서</div>
+          {!inq ? (
+            <div style={{ fontSize: 13, color: "#999", marginTop: 6 }}>
+              연결된 상담 신청서가 없습니다. 설문 시스템 도입 전에 등록된 아동이면 없는 것이 정상입니다.
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontSize: 12, color: "#999", margin: "4px 0 6px" }}>{fmt(inq.created_at)} 접수</div>
+              {inq.memo ? (
+                <div style={{ background: "#FFF9FA", border: `1px solid ${PKL}`, borderRadius: 10, padding: "10px 12px", margin: "6px 0 4px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 4 }}>상담 메모</div>
+                  <div style={{ fontSize: 14, color: "#333", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{inq.memo}</div>
+                </div>
+              ) : null}
+              <SvDetail questions={SV_INQ_Q} answers={inq.answers} />
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);  // {role: "admin"|"teacher", name: string} | null
   // ★ [78-2] 최초 로드 이펙트는 deps가 []라 그 안에서 currentUser를 직접 읽으면
@@ -10377,6 +10761,16 @@ export default function App() {
                   </button>
                 </div>
               </div>
+            )}
+
+            {/* ★ [설문-1] 학부모 설문 (상담 신청서 · 강화제) — 읽기 전용, 이 아동 것만 */}
+            {activeChild && (
+              <ChildSurveyPanel
+                key={activeChild.id}
+                childId={activeChild.id}
+                childName={info.name || ""}
+                isAdmin={currentUser?.role === "admin"}
+              />
             )}
 
             <div style={{ ...CS, background: "#fdf8f9", border: `1px solid ${PK}` }}>
