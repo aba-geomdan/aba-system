@@ -5880,32 +5880,34 @@ function svIsVisible(q, answers) {
 }
 
 function svAnswerText(q, val) {
-  if (!val) return "";
-  if (q.type === "single") {
-    const parts = [];
-    if (val.v) parts.push(val.v);
-    if (val.etc) parts.push(val.etc);
-    return parts.join(" · ");
+  // 값의 모양이 예상과 달라도 절대 멈추지 않게 — 통합본 화면 전체를 지키기 위해
+  try {
+    if (!val || typeof val !== "object") return val == null ? "" : String(val);
+    const str = (x) => (x == null ? "" : String(x));
+    const list = (x) => (Array.isArray(x) ? x.map(str).filter(Boolean) : (x ? [str(x)] : []));
+    if (q.type === "single") {
+      return [str(val.v), str(val.etc)].filter(Boolean).join(" · ");
+    }
+    if (q.type === "multi" || q.type === "pick") {
+      const parts = list(val.v);
+      if (val.etc) parts.push(str(val.etc));
+      if (val.detail) parts.push("→ " + str(val.detail));
+      return parts.join(", ");
+    }
+    if (q.type === "yesno") {
+      if (val.v === "있음") return "있음 — " + (str(val.detail) || "(내용 없음)");
+      return str(val.v);
+    }
+    if (q.type === "rank") {
+      return list(val.v).length === 0 ? "" : (Array.isArray(val.v) ? val.v : [val.v])
+        .map((t, i) => (t ? i + 1 + "위 " + str(t) : ""))
+        .filter(Boolean)
+        .join("  /  ");
+    }
+    return str(val.v);
+  } catch (e) {
+    return "";
   }
-  if (q.type === "multi" || q.type === "pick") {
-    const parts = (val.v || []).slice();
-    if (val.etc) parts.push(val.etc);
-    if (val.detail) parts.push("→ " + val.detail);
-    return parts.join(", ");
-  }
-  if (q.type === "yesno") {
-    if (val.v === "있음") return "있음 — " + (val.detail || "(내용 없음)");
-    return val.v || "";
-  }
-  if (q.type === "rank") {
-    return (val.v || [])
-      .map(function (t, i) {
-        return t ? i + 1 + "위 " + t : "";
-      })
-      .filter(Boolean)
-      .join("  /  ");
-  }
-  return val.v || "";
 }
 
 
@@ -5944,8 +5946,8 @@ function SvDetail({ questions, answers }) {
 
 function ChildSurveyPanel({ childId, childName, isAdmin }) {
   const [state, setState] = useState({ loading: true, error: "", inquiries: [], surveys: [] });
-  const [open, setOpen] = useState(false);       // 카드 펼침 — 기본은 접힘(요약만)
   const [openOld, setOpenOld] = useState({});    // 지난 강화제 응답 펼침
+  const [sub, setSub] = useState(null);          // 열린 하위 탭: null(닫힘) | rein | inq — 처음엔 닫혀 있음
 
   useEffect(() => {
     let alive = true;
@@ -6003,14 +6005,6 @@ function ChildSurveyPanel({ childId, childName, isAdmin }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: PKD }}>📋 학부모 설문</h3>
         <span style={{ fontSize: 12, color: "#999" }}>{summary}</span>
-        {canOpen ? (
-          <button
-            style={{ ...BS, marginLeft: "auto", padding: "5px 12px", fontSize: 12 }}
-            onClick={() => setOpen(v => !v)}
-          >
-            {open ? "접기 ▴" : "펼치기 ▾"}
-          </button>
-        ) : null}
       </div>
 
       {state.error ? (
@@ -6030,35 +6024,55 @@ function ChildSurveyPanel({ childId, childName, isAdmin }) {
         <div style={{ fontSize: 12, color: "#999", marginTop: 8 }}>{hint}</div>
       ) : null}
 
-      {open && canOpen ? (
-        <div style={{ marginTop: 10 }}>
-          {/* 강화제 설문 — 수업에 바로 쓰는 것이라 위에 */}
-          <div style={{ fontSize: 14, fontWeight: 700, color: PKD, marginTop: 6 }}>🍬 강화제 설문</div>
-          {!latest ? (
-            <div style={{ fontSize: 13, color: "#999", marginTop: 6 }}>아직 받은 강화제 설문이 없습니다.</div>
-          ) : (
-            <div>
-              <div style={{ fontSize: 12, color: "#999", margin: "4px 0 6px" }}>
-                {fmt(latest.submitted_at)} 제출{older.length > 0 ? ` · 이전 응답 ${older.length}건` : ""}
-              </div>
-              <SvDetail questions={SV_REIN_Q} answers={latest.answers} />
-              {older.map(s => (
-                <div key={s.id} style={{ marginTop: 14, borderTop: `1px dashed ${PKL}`, paddingTop: 10 }}>
-                  <button
-                    style={{ ...BS, padding: "5px 12px", fontSize: 12 }}
-                    onClick={() => setOpenOld(p => ({ ...p, [s.id]: !p[s.id] }))}
-                  >
-                    {openOld[s.id] ? "▾" : "▸"} {fmt(s.submitted_at)} 이전 응답
-                  </button>
-                  {openOld[s.id] ? <SvDetail questions={SV_REIN_Q} answers={s.answers} /> : null}
-                </div>
-              ))}
-            </div>
-          )}
+      {canOpen ? (
+        <div style={{ marginTop: 12 }}>
+          {/* 하위 탭 — 강화제 설문 | 상담 신청서 */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            {[
+              ["rein", "🍬 강화제 설문", latest ? String(state.surveys.length) : ""],
+              ["inq", "📝 상담 신청서", ""],
+            ].map(([k, label, badge]) => {
+              const on = sub === k;
+              return (
+                <button
+                  key={k}
+                  onClick={() => setSub(v => (v === k ? null : k))}
+                  style={{
+                    flex: 1, padding: "9px 8px", borderRadius: 8, cursor: "pointer",
+                    fontFamily: "inherit", fontSize: 13, fontWeight: on ? 700 : 500,
+                    background: on ? PK : "#fff", color: on ? "#fff" : "#666",
+                    border: `1px solid ${on ? PK : PKL}`,
+                  }}
+                >
+                  {label}{badge ? ` ${badge}` : ""} {on ? "▴" : "▾"}
+                </button>
+              );
+            })}
+          </div>
 
-          {/* 상담 신청서 — 등록 전 배경 정보 */}
-          <div style={{ fontSize: 14, fontWeight: 700, color: PKD, marginTop: 22 }}>📝 상담 신청서</div>
-          {!inq ? (
+          {sub === null ? null : sub === "rein" ? (
+            !latest ? (
+              <div style={{ fontSize: 13, color: "#999", marginTop: 6 }}>아직 받은 강화제 설문이 없습니다.</div>
+            ) : (
+              <div>
+                <div style={{ fontSize: 12, color: "#999", margin: "4px 0 6px" }}>
+                  {fmt(latest.submitted_at)} 제출{older.length > 0 ? ` · 이전 응답 ${older.length}건` : ""}
+                </div>
+                <SvDetail questions={SV_REIN_Q} answers={latest.answers} />
+                {older.map(s => (
+                  <div key={s.id} style={{ marginTop: 14, borderTop: `1px dashed ${PKL}`, paddingTop: 10 }}>
+                    <button
+                      style={{ ...BS, padding: "5px 12px", fontSize: 12 }}
+                      onClick={() => setOpenOld(p => ({ ...p, [s.id]: !p[s.id] }))}
+                    >
+                      {openOld[s.id] ? "▾" : "▸"} {fmt(s.submitted_at)} 이전 응답
+                    </button>
+                    {openOld[s.id] ? <SvDetail questions={SV_REIN_Q} answers={s.answers} /> : null}
+                  </div>
+                ))}
+              </div>
+            )
+          ) : !inq ? (
             <div style={{ fontSize: 13, color: "#999", marginTop: 6 }}>
               연결된 상담 신청서가 없습니다. 설문 시스템 도입 전에 등록된 아동이면 없는 것이 정상입니다.
             </div>
@@ -6077,6 +6091,33 @@ function ChildSurveyPanel({ childId, childName, isAdmin }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/* 오류 울타리 — 설문 카드 안에서 무슨 일이 생겨도 통합본 화면 전체는 멈추지 않게 */
+class SvErrorFence extends React.Component {
+  constructor(props) { super(props); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(err) { try { console.warn("[학부모 설문 카드 오류]", err); } catch (e) {} }
+  render() {
+    if (this.state.failed) {
+      return (
+        <div style={CS}>
+          <div style={{ fontSize: 13, color: "#B04A4A" }}>
+            📋 학부모 설문을 표시하지 못했습니다. 설문 앱에서 확인해 주세요.
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function ChildSurveyCard(props) {
+  return (
+    <SvErrorFence key={props.childId}>
+      <ChildSurveyPanel {...props} />
+    </SvErrorFence>
   );
 }
 
@@ -9934,11 +9975,12 @@ export default function App() {
                         let displayName = baseName;
                         let subInfo = "";
                         if (hasDuplicate) {
-                          if (c.info?.therapist) {
-                            subInfo = `${c.info.therapist} 선생님`;
-                          }
-                          else if (c.info?.birth) {
+                          // ★ [설문-2] 동명이인 구분: 생년월일을 먼저 (같은 선생님이 동명이인 둘을 맡아도 구분되게)
+                          if (c.info?.birth) {
                             subInfo = c.info.birth;
+                          }
+                          else if (c.info?.therapist) {
+                            subInfo = `${c.info.therapist} 선생님`;
                           }
                           else if (c.info?.classType) {
                             subInfo = c.info.classType;
@@ -10763,9 +10805,10 @@ export default function App() {
               </div>
             )}
 
-            {/* ★ [설문-1] 학부모 설문 (상담 신청서 · 강화제) — 읽기 전용, 이 아동 것만 */}
+            {/* ★ [설문-1] 학부모 설문 (상담 신청서 · 강화제) — 읽기 전용, 이 아동 것만.
+                 오류 울타리로 감싸 두어, 카드에 문제가 생겨도 통합본 화면은 멈추지 않는다. */}
             {activeChild && (
-              <ChildSurveyPanel
+              <ChildSurveyCard
                 key={activeChild.id}
                 childId={activeChild.id}
                 childName={info.name || ""}
