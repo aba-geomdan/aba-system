@@ -3446,6 +3446,19 @@ function localToday() {
   return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
 }
 // 이전 담당 구간 문구: "이OO (~2026.07.14)" / 여러 번이면 "이OO (~06.30), 박OO (07.01~07.14)"
+// ★ [102-2] 목표 단위 담당 변경 — 기록 합치기로 넘겨받은 목표에만 표시한다.
+//    info.goalHandovers = [{ id, date, goalIds: [...] }]
+//    아동 전체의 담당 변경(therapistChanges)과 달리, 원래 선생님이 계속 맡던 목표에는 표시하지 않는다.
+//    보고서에는 이름 없이 '담당 변경'만 적는다.
+function goalHandoversInRange(info, start, end) {
+  const list = Array.isArray(info?.goalHandovers) ? info.goalHandovers : [];
+  const [s, e] = orderDateRange(start, end);
+  return list
+    .filter(h => h && /^\d{4}-\d{2}-\d{2}$/.test(h.date || "") && Array.isArray(h.goalIds) && h.goalIds.length > 0)
+    .filter(h => (!s || h.date > s) && (!e || h.date <= e))
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
 function previousTherapistText(changes) {
   if (!changes || changes.length === 0) return "";
   return changes.map((c, i) => {
@@ -6339,6 +6352,7 @@ export default function App() {
   // ★ [신규] 보관함 토글 — true면 아카이브된 아동도 함께 표시
   const [showArchived, setShowArchived] = useState(false);
   const [teacherArchiveOpen, setTeacherArchiveOpen] = useState(false);   // ★ [84-2] 치료사용 보관함 펼침
+  const [mergeFromId, setMergeFromId] = useState("");                  // ★ [102-1] 합칠 기록 선택 (관리자)
   const [deleteRequests, setDeleteRequests] = useState([]);             // ★ [85-1] 삭제 요청함
   const [deleteRequestTarget, setDeleteRequestTarget] = useState(null); // 치료사 선택 모달 대상
   const [deleteRequestReason, setDeleteRequestReason] = useState("");
@@ -6808,6 +6822,161 @@ export default function App() {
         }
       }
     }
+  };
+
+  // ★ [102-1] 같은 아동의 기록 두 개를 하나로 합친다 (관리자 전용).
+  //    선생님 두 분이 한 아동을 영역을 나눠 맡다가 한 분이 모두 맡게 된 경우용.
+  //    (신준우: 민다혜 주 1회 + 최성현 주 1회, 각각 다른 영역)
+  //    · keep(지금 보고 있는 기록)에 from의 목표·회기 기록·데일리 메모를 복사한다.
+  //    · from은 지우지 않고 '보관' 처리 — 원본이 그대로 남아 되돌릴 수 있다.
+  //    · 합치기 전 두 기록을 통째로 백업(이 기기 + 클라우드)한다.
+  //    · 합친 뒤 회기 기록 수가 (keep + from)과 정확히 같지 않으면 아무것도 바꾸지 않는다.
+  const MERGE_BACKUP_PREFIX = "gd-aba-merge-backup:";
+  const mergeChildRecords = (keepId, fromId) => {
+    if (!loaded) { alert("아직 데이터를 다 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."); return; }
+    if (currentUser?.role !== "admin") { alert("기록 합치기는 관리자만 할 수 있습니다."); return; }
+    const keep = children.find(c => c.id === keepId && !c.deletedAt);
+    const from = children.find(c => c.id === fromId && !c.deletedAt);
+    if (!keep || !from || keep.id === from.id) { alert("합칠 기록을 찾지 못했습니다."); return; }
+
+    const nowIso = new Date().toISOString();
+    const clone = (v) => JSON.parse(JSON.stringify(v));
+
+    // ── 1. 백업 ─────────────────────────────────────────────
+    const backupKey = MERGE_BACKUP_PREFIX + nowIso.replace(/[:.]/g, "-");
+    const backupBody = JSON.stringify({ at: nowIso, by: currentUser?.name || "", keep, from });
+    try { if (typeof localStorage !== "undefined") localStorage.setItem(backupKey, backupBody); } catch (e) {}
+    try { if (typeof window !== "undefined" && window.storage) window.storage.set(backupKey, backupBody, true).catch(() => {}); } catch (e) {}
+
+    // ── 2. 목표 옮기기 (지운 목표 제외, id가 겹치면 새 id) ─────────
+    const fromDelGoals = from.deletedGoals || {};
+    const usedIds = new Set([...(keep.goals || []).map(g => g.id), ...Object.keys(keep.deletedGoals || {})]);
+    const movedGoals = (from.goals || [])
+      .filter(g => g && !fromDelGoals[g.id])
+      .map(g => {
+        const ng = clone(g);
+        if (!ng.id || usedIds.has(ng.id)) {
+          ng.id = "g_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+        }
+        usedIds.add(ng.id);
+        return ng;
+      });
+
+    // ── 3. 데일리 메모 (같은 날 둘 다 있으면 이어 붙임) ────────────
+    const memos = { ...(keep.dailyMemos || {}) };
+    const delMemos = { ...(keep.deletedMemos || {}) };
+    Object.entries(from.dailyMemos || {}).forEach(([d, m]) => {
+      const b2 = (m || "").trim();
+      if (!b2) return;
+      const a2 = (memos[d] || "").trim();
+      memos[d] = a2 && a2 !== b2 ? `${a2}\n${b2}` : b2;
+      delete delMemos[d];   // keep 쪽에서 지운 표식이 있으면 합친 메모가 병합 때 사라지므로 해제
+    });
+
+    // ── 4. 보고서 서술 칸: keep 뒤에 from 내용을 이어 붙임 ─────────
+    const kf = Array.isArray(keep.reportFields) ? keep.reportFields : ["", "", "", "", ""];
+    const ff = Array.isArray(from.reportFields) ? from.reportFields : ["", "", "", "", ""];
+    const reportFields = kf.map((a2, i) => {
+      const x = (a2 || "").trim(), y = (ff[i] || "").trim();
+      if (!y || x === y) return a2 || "";
+      return x ? `${x}\n\n${y}` : y;
+    });
+    const uni = (x, y) => [...new Set([...(Array.isArray(x) ? x : []), ...(Array.isArray(y) ? y : [])])];
+
+    // ── 5. 아동 정보: 수업 횟수 더하기, 날짜는 keep 우선 ──────────
+    const ki = keep.info || {}, fi = from.info || {};
+    const warnings = [];
+    const kw = parseInt(ki.sWeek, 10), fw = parseInt(fi.sWeek, 10);
+    const sWeek = !isNaN(kw) && !isNaN(fw) ? String(kw + fw) : (ki.sWeek || fi.sWeek || "");
+    if (isNaN(kw) || isNaN(fw)) warnings.push(`주 횟수: 한쪽 기록이 비어 있어 더하지 못했습니다 → 주 ${sWeek || "—"}회로 들어갔으니 확인해 주세요`);
+    const minsOf = (inf) => {
+      const l = Array.isArray(inf.sMinList) ? inf.sMinList.filter(x => x !== "" && x != null) : [];
+      if (l.length) return l;
+      const n = Math.max(1, parseInt(inf.sWeek, 10) || 1);
+      return inf.sMin ? Array.from({ length: n }, () => inf.sMin) : [];
+    };
+    const allMins = [...minsOf(ki), ...minsOf(fi)];
+    let minPatch = {};
+    if (allMins.length > 0 && allMins.every(x => x === allMins[0])) {
+      minPatch = { sMin: allMins[0], sMinList: [], sMinPerSession: false };
+    } else if (allMins.length > 0) {
+      minPatch = { sMin: allMins[0], sMinList: allMins, sMinPerSession: true };
+    }
+    const dateKeys = [["evalStart", "평가 시작일"], ["evalEnd", "평가 종료일"], ["startDate", "수업 시작일"]];
+    const datePatch = {};
+    dateKeys.forEach(([k, label]) => {
+      if (!ki[k] && fi[k]) datePatch[k] = fi[k];
+      else if (ki[k] && fi[k] && ki[k] !== fi[k]) warnings.push(`${label}: 남긴 기록 ${ki[k]} / 합친 기록 ${fi[k]} → ${ki[k]} 유지`);
+    });
+
+    const mergeRec = {
+      id: "h_" + Date.now() + "_" + Math.random().toString(36).slice(2, 5),
+      childId: keep.id,
+      childName: ki.name || "(이름없음)",
+      userName: currentUser.name,
+      action: "child_merge",
+      targetName: "merge",
+      before: fi.ownerName || "",
+      after: ki.ownerName || "",
+      timestamp: nowIso,
+      description: `기록 합치기: "${fi.ownerName || "(미할당)"}" 담당 기록의 목표 ${movedGoals.length}개를 가져옴 (백업: ${backupKey})`
+    };
+
+    const newKeep = {
+      ...keep,
+      info: {
+        ...ki, sWeek, ...minPatch, ...datePatch,
+        // ★ [102-2] 넘겨받은 목표 표시 — 날짜는 오늘로 넣고, 실제 인수일은 관리자 화면에서 고친다.
+        goalHandovers: [
+          ...(Array.isArray(ki.goalHandovers) ? ki.goalHandovers : []),
+          ...(movedGoals.length ? [{ id: "gh_" + Date.now() + "_" + Math.random().toString(36).slice(2, 5), date: localToday(), goalIds: movedGoals.map(g => g.id) }] : [])
+        ]
+      },
+      goals: [...(keep.goals || []), ...movedGoals],
+      dailyMemos: memos,
+      deletedMemos: delMemos,
+      reportFields,
+      reportSelStrats: uni(keep.reportSelStrats, from.reportSelStrats),
+      reportSelPrein: uni(keep.reportSelPrein, from.reportSelPrein),
+      reportSelSrein: uni(keep.reportSelSrein, from.reportSelSrein),
+      reportNextPlans: uni(keep.reportNextPlans, from.reportNextPlans),
+      reportSelStratsCustom: [keep.reportSelStratsCustom, from.reportSelStratsCustom].map(x => (x || "").trim()).filter(Boolean).filter((x, i, arr) => arr.indexOf(x) === i).join(", "),
+      reportBehaviors: [...(keep.reportBehaviors || []), ...clone(from.reportBehaviors || [])],
+      domainLevelOverrides: { ...(from.domainLevelOverrides || {}), ...(keep.domainLevelOverrides || {}) },
+      mediaList: [...(keep.mediaList || []), ...clone(from.mediaList || [])],
+      history: [...(keep.history || []), mergeRec],
+      updatedAt: nowIso
+    };
+
+    // ── 6. 검증: 회기 기록 수가 정확히 더해졌는지 ─────────────────
+    const expected = _childDataPoints(keep) + _childDataPoints({ goals: movedGoals });
+    const actual = _childDataPoints(newKeep);
+    if (actual !== expected) {
+      alert(`❌ 합치기를 취소했습니다.\n회기 기록 수가 맞지 않습니다 (예상 ${expected} / 결과 ${actual}).\n아무것도 바뀌지 않았습니다.`);
+      return;
+    }
+
+    // ── 7. from은 보관 처리 (원본 그대로 남김) ──────────────────
+    const d = new Date();
+    const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    const newFrom = { ...from, info: { ...fi, archivedAt: stamp, mergedInto: keep.id, mergedAt: nowIso }, updatedAt: nowIso };
+
+    const next = children.map(c => (c.id === keep.id ? newKeep : c.id === from.id ? newFrom : c));
+    if (!validateChildrenBeforeSave(next)) return;
+    setChildren(next);
+    setActiveChildId(keep.id);
+    setMergeFromId("");
+
+    alert(
+      `✅ 합치기 완료\n\n` +
+      `· 가져온 목표: ${movedGoals.length}개\n` +
+      `· 회기 기록: ${_childDataPoints(keep)} + ${_childDataPoints({ goals: movedGoals })} = ${actual}개\n` +
+      `· 주 횟수: 주 ${sWeek || "—"}회 / 회기 시간: ${sessionMinText(newKeep.info) || "—"}\n` +
+      `· 합친 기록("${fi.ownerName || "미할당"}" 담당)은 보관함으로 옮겼습니다.\n` +
+      (warnings.length ? `\n⚠️ 확인해 주세요\n${warnings.map(w => "· " + w).join("\n")}\n` : "") +
+      `\n보고서 서술 칸(언어·사회성 등)은 두 선생님 내용을 이어 붙였으니 읽어 보고 다듬어 주세요.` +
+      `\n\n가져온 목표 그래프에 '담당 변경'이 오늘 날짜(${dotDate(localToday())})로 표시됩니다. 실제로 담당이 바뀐 날이 다르면 아동 정보의 '넘겨받은 목표 담당 변경'에서 날짜를 고쳐 주세요.`
+    );
   };
 
   // ★ [신규] 보관함에서 복구
@@ -10773,6 +10942,98 @@ export default function App() {
                   </div>
                 </div>
               )}
+              {/* ★ [102-2] 넘겨받은 목표 담당 변경 (관리자만) — 날짜 수정·삭제 */}
+              {currentUser?.role === "admin" && Array.isArray(info.goalHandovers) && info.goalHandovers.length > 0 && (
+                <div style={{ marginTop: 12, padding: "10px 12px", background: PKL, borderRadius: 8, border: `1px solid ${PK}` }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 6 }}>넘겨받은 목표 담당 변경</div>
+                  {info.goalHandovers.map(h => {
+                    const names = (h.goalIds || []).map(id => {
+                      const g = goals.find(x => x.id === id);
+                      return g ? (g.item || g.name || g.subDomain || "목표") : null;
+                    }).filter(Boolean);
+                    return (
+                      <div key={h.id || h.date} style={{ marginBottom: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <input
+                            type="date"
+                            style={{ ...IS, width: 150, padding: "4px 8px" }}
+                            value={h.date || ""}
+                            onChange={e => {
+                              const newDate = e.target.value;
+                              if (!newDate) return;
+                              const oldDate = h.date || "";
+                              setInfo(p => ({ ...p, goalHandovers: (p.goalHandovers || []).map(x => (x.id === h.id ? { ...x, date: newDate } : x)) }));
+                              if (newDate !== oldDate) addHistory("info_update", `넘겨받은 목표 담당 변경일 수정: ${oldDate} → ${newDate}`, oldDate, newDate, "goalHandovers");
+                            }}
+                          />
+                          <span style={{ fontSize: 12, color: "#444" }}>목표 {names.length}개</span>
+                          <button
+                            style={{ fontSize: 11, padding: "2px 8px", border: "1px solid #ddd", borderRadius: 6, background: "#fff", color: "#999", cursor: "pointer" }}
+                            onClick={() => {
+                              if (!window.confirm(`${dotDate(h.date)} 담당 변경 표시를 지울까요?\n(보고서 그래프에서도 표시되지 않습니다. 목표와 기록은 그대로 남습니다)`)) return;
+                              setInfo(p => ({ ...p, goalHandovers: (p.goalHandovers || []).filter(x => x.id !== h.id) }));
+                              addHistory("info_update", `넘겨받은 목표 담당 변경 표시 삭제: ${h.date}`, h.date, "", "goalHandovers");
+                            }}>
+                            삭제
+                          </button>
+                        </div>
+                        {names.length > 0 && (
+                          <div style={{ fontSize: 10.5, color: "#888", marginTop: 3, lineHeight: 1.5 }}>{names.join(" · ")}</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <div style={{ fontSize: 10.5, color: "#999", marginTop: 4 }}>
+                    이 목표들의 그래프에만 '담당 변경'이 표시됩니다(이름 없음). 날짜는 새 선생님이 이 목표를 시작한 날로 맞춰 주세요.
+                  </div>
+                </div>
+              )}
+              {/* ★ [102-1] 같은 이름 아동 기록 합치기 (관리자만) */}
+              {currentUser?.role === "admin" && (() => {
+                const myName = (info.name || "").trim();
+                if (!myName) return null;
+                const cands = liveChildren(children).filter(c =>
+                  c.id !== activeChildId && !c.info?.archivedAt && (c.info?.name || "").trim() === myName);
+                if (cands.length === 0) return null;
+                const pick = cands.find(c => c.id === mergeFromId) || null;
+                return (
+                  <div style={{ marginTop: 12, padding: "10px 12px", background: "#fff", borderRadius: 8, border: `1.5px dashed ${PK}` }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 4 }}>🔗 같은 이름 아동 기록 합치기</div>
+                    <div style={{ fontSize: 10.5, color: "#888", lineHeight: 1.6, marginBottom: 8 }}>
+                      '{myName}' 기록이 {cands.length + 1}개 있습니다. 고른 기록의 목표·회기 기록·메모를 <b>지금 보고 있는 기록</b>으로 가져옵니다.<br/>
+                      가져온 쪽 기록은 지우지 않고 보관함으로 옮기며, 합치기 전에 자동 백업합니다.
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <select style={{ ...IS, width: "auto", minWidth: 220 }} value={mergeFromId} onChange={e => setMergeFromId(e.target.value)}>
+                        <option value="">— 가져올 기록 선택 —</option>
+                        {cands.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {(c.info?.ownerName || "미할당")} 선생님 담당 · 목표 {(c.goals || []).length}개 · 기록 {_childDataPoints(c)}개
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        disabled={!pick}
+                        onClick={() => {
+                          if (!pick) return;
+                          askConfirm(
+                            `'${myName}' 기록을 합칠까요?\n\n` +
+                            `남길 기록: ${info.ownerName || "미할당"} 선생님 담당 (목표 ${goals.length}개)\n` +
+                            `가져올 기록: ${pick.info?.ownerName || "미할당"} 선생님 담당 (목표 ${(pick.goals || []).length}개)\n\n` +
+                            `· 가져올 기록은 보관함으로 옮겨집니다 (삭제 아님)\n` +
+                            `· 주 횟수는 두 기록을 더합니다\n` +
+                            `· 합친 뒤 담당 선생님은 위 '담당 선생님'에서 바꿔 주세요`,
+                            () => mergeChildRecords(activeChildId, pick.id)
+                          );
+                        }}
+                        style={{ padding: "6px 14px", fontSize: 12, fontWeight: 700, fontFamily: "inherit", borderRadius: 6, cursor: pick ? "pointer" : "default",
+                          background: pick ? PK : "#eee", color: pick ? "#fff" : "#aaa", border: "none" }}>
+                        합치기
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* ★ [신규] 종결 상태 경고 카드 — 현재 아동이 종결 상태일 때만 표시 */}
@@ -14295,7 +14556,14 @@ cleanedHTML + '\n' +
                     // ★ [101-1] 보고 기간 중간에 담당이 바뀌었으면 시작일과 이전 담당을 함께 적는다.
                     //    바뀐 적이 없으면 지금처럼 이름만.
                     const chg = therapistChangesInRange(info, reportPeriodStart, reportPeriodEnd);
-                    if (chg.length === 0) return info.therapist || "—";
+                    if (chg.length === 0) {
+                      // ★ [102-2] 목표 일부만 넘겨받은 경우 — 이전 선생님 이름 없이 시작일만.
+                      const gh = goalHandoversInRange(info, reportPeriodStart, reportPeriodEnd);
+                      if (gh.length === 0) return info.therapist || "—";
+                      return (
+                        <span>{info.therapist || "—"} <span style={{ fontSize: 10.5, color: "#888" }}>({dotDate(gh[gh.length - 1].date)}~)</span></span>
+                      );
+                    }
                     const last = chg[chg.length - 1];
                     return (
                       <span style={{ lineHeight: 1.6 }}>
@@ -14970,7 +15238,7 @@ cleanedHTML + '\n' +
                   <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                     ※ 영역별로 묶은 목표마다 진행 상태와 시작부터 지금까지의 추이선 · 회기당 1회 시도 목표는 O(성공)·X(실패)로 표시
                   </div>
-                  <GoalDashboard stos={goalsForReport} therapistChanges={info?.therapistChanges} />
+                  <GoalDashboard stos={goalsForReport} therapistChanges={info?.therapistChanges} goalHandovers={info?.goalHandovers} />
                 </PrintSection>
               )
             )}
@@ -19330,7 +19598,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, balanceBarRows = [],
                 💡 <b>그래프 컷오프 적용 중</b> — 직전 보관 보고서의 마지막 데이터({cutoffOf(effectiveArchiveList[0])}) 이후 데이터만 표시되고 있습니다. 이전 데이터를 다시 보려면 아래 보관함에서 해당 보고서를 삭제하세요.
               </div>
             )}
-            <GoalDashboard stos={goalsForReport} therapistChanges={info?.therapistChanges} />
+            <GoalDashboard stos={goalsForReport} therapistChanges={info?.therapistChanges} goalHandovers={info?.goalHandovers} />
           </div>
         )
       )}
@@ -20963,7 +21231,7 @@ function ReportGeneratorSection({
   <div class="meta">
     <strong>아동:</strong> ${info.name || "—"} &nbsp;&nbsp;
     <strong>생년월일:</strong> ${info.birth || "—"} &nbsp;&nbsp;
-    <strong>치료사:</strong> ${info.therapist || "—"}${(() => { const _tc = therapistChangesInRange(info, reportPeriodStart, reportPeriodEnd); return _tc.length ? ` (${dotDate(_tc[_tc.length - 1].date)}~ · 이전: ${previousTherapistText(_tc)})` : ""; })()}<br/>
+    <strong>치료사:</strong> ${info.therapist || "—"}${(() => { const _tc = therapistChangesInRange(info, reportPeriodStart, reportPeriodEnd); if (_tc.length) return ` (${dotDate(_tc[_tc.length - 1].date)}~ · 이전: ${previousTherapistText(_tc)})`; const _gh = goalHandoversInRange(info, reportPeriodStart, reportPeriodEnd); return _gh.length ? ` (${dotDate(_gh[_gh.length - 1].date)}~)` : ""; })()}<br/>
     <strong>보고 기간:</strong> ${reportPeriodStart || info.pStart || "—"} ~ ${reportPeriodEnd || info.pEnd || "—"} &nbsp;&nbsp;
     <strong>치료 강도:</strong> 주 ${info.sWeek || "—"}회 / ${sessionMinText(info) || "—"}<br/>
     <strong>발행일:</strong> ${today} &nbsp;&nbsp;
@@ -22303,14 +22571,18 @@ function GrowthLineChart({ goals, dates, getTimeline }) {
   );
 }
 
-function GoalDashboard({ stos, therapistChanges }) {
+function GoalDashboard({ stos, therapistChanges, goalHandovers }) {
   if (!stos || stos.length === 0) return null;
   // ★ [101-1] 이 목표의 데이터 기간 안에서 담당 치료사가 바뀐 기록.
   //    첫 기록일 이전·마지막 기록일 이후의 변경은 그래프 안에 들어오지 않으므로 표시하지 않는다.
-  const changesForPoints = (pts) => {
-    if (!pts || pts.length < 2 || !Array.isArray(therapistChanges)) return [];
+  // ★ [102-2] goalId가 넘겨받은 목표에 들어 있으면 그 목표에만 '담당 변경'(이름 없음)을 더한다.
+  const changesForPoints = (pts, goalId) => {
+    if (!pts || pts.length < 2) return [];
     const f = pts[0].date, l = pts[pts.length - 1].date;
-    return therapistChanges
+    const own = (Array.isArray(goalHandovers) ? goalHandovers : [])
+      .filter(h => h && h.date && goalId && Array.isArray(h.goalIds) && h.goalIds.includes(goalId))
+      .map(h => ({ date: h.date, handover: true }));
+    return [...(Array.isArray(therapistChanges) ? therapistChanges : []), ...own]
       .filter(c => c && c.date && c.date > f && c.date <= l)
       .slice()
       .sort((a, b) => a.date.localeCompare(b.date));
@@ -22730,11 +23002,11 @@ function GoalDashboard({ stos, therapistChanges }) {
                         <div style={{ background: "#FAFAFA", borderRadius: 10, padding: "10px 8px 6px", marginBottom: 10 }}>
                           {s.isOX
                             ? <OXStrip points={points} />
-                            : <BigChart points={points} color={meta.chartLine} listBoundaries={s.listBoundaries} pdf={true} changes={changesForPoints(points)} />}
+                            : <BigChart points={points} color={meta.chartLine} listBoundaries={s.listBoundaries} pdf={true} changes={changesForPoints(points, s.id)} />}
                           {/* ★ [101-1] 담당 치료사 변경 주석 — 그래프 밖 한 줄. O·X 목표도 같은 문구를 붙인다. */}
-                          {changesForPoints(points).map((chg, ci) => (
+                          {changesForPoints(points, s.id).map((chg, ci) => (
                             <div key={"tcn" + ci} style={{ fontSize: 10, color: "#888", marginTop: 4, paddingLeft: 4 }}>
-                              <span style={{ color: "#D4537E" }}>{s.isOX ? "※" : "▲"}</span> {dotDate(chg.date)} 담당 치료사 변경 ({chg.from || "—"} → {chg.to || "—"})
+                              <span style={{ color: "#D4537E" }}>{s.isOX ? "※" : "▲"}</span> {chg.handover ? `${dotDate(chg.date)} 담당 변경` : `${dotDate(chg.date)} 담당 치료사 변경 (${chg.from || "—"} → ${chg.to || "—"})`}
                             </div>
                           ))}
                         </div>
