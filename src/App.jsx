@@ -6353,6 +6353,8 @@ export default function App() {
   const [showArchived, setShowArchived] = useState(false);
   const [teacherArchiveOpen, setTeacherArchiveOpen] = useState(false);   // ★ [84-2] 치료사용 보관함 펼침
   const [mergeFromId, setMergeFromId] = useState("");                  // ★ [102-1] 합칠 기록 선택 (관리자)
+  const [copyToOwner, setCopyToOwner] = useState("");                  // ★ [103-1] 복사받을 선생님 선택 (관리자)
+  const [linkedViewId, setLinkedViewId] = useState(null);              // ★ [103-3] 읽기 전용으로 보고 있는 다른 선생님 기록
   const [deleteRequests, setDeleteRequests] = useState([]);             // ★ [85-1] 삭제 요청함
   const [deleteRequestTarget, setDeleteRequestTarget] = useState(null); // 치료사 선택 모달 대상
   const [deleteRequestReason, setDeleteRequestReason] = useState("");
@@ -6976,6 +6978,117 @@ export default function App() {
       (warnings.length ? `\n⚠️ 확인해 주세요\n${warnings.map(w => "· " + w).join("\n")}\n` : "") +
       `\n보고서 서술 칸(언어·사회성 등)은 두 선생님 내용을 이어 붙였으니 읽어 보고 다듬어 주세요.` +
       `\n\n가져온 목표 그래프에 '담당 변경'이 오늘 날짜(${dotDate(localToday())})로 표시됩니다. 실제로 담당이 바뀐 날이 다르면 아동 정보의 '넘겨받은 목표 담당 변경'에서 날짜를 고쳐 주세요.`
+    );
+  };
+
+  // ★ [103-1] 아동 기록을 다른 선생님에게 복사 (관리자만)
+  //    · 한 아동을 두 선생님이 나눠 맡게 됐을 때 쓴다.
+  //    · 원본은 하나도 바꾸지 않는다. 새 기록이 따로 생기고, 보고서도 따로 나간다.
+  //    · 아동 정보·IEP·목표·회기 기록·메모·보고서 칸을 그대로 복사한다 (사진·영상은 제외).
+  //    · 목표마다 originGoalId(원본 목표 id)를 남겨, 두 기록에 같은 목표가 있는지 알아볼 수 있게 한다.
+  //    · 복사 전 원본을 백업하고, 복사 뒤 회기 기록 수가 원본과 정확히 같지 않으면 아무것도 바꾸지 않는다.
+  const COPY_BACKUP_PREFIX = "gd-aba-copy-backup:";
+  const copyChildToTeacher = (srcId, newOwner) => {
+    if (!loaded) { alert("아직 데이터를 다 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."); return; }
+    if (currentUser?.role !== "admin") { alert("아동 복사는 관리자만 할 수 있습니다."); return; }
+    const owner = (newOwner || "").trim();
+    if (!owner) { alert("복사받을 선생님을 골라 주세요."); return; }
+    const src = children.find(c => c.id === srcId && !c.deletedAt);
+    if (!src) { alert("복사할 기록을 찾지 못했습니다."); return; }
+    if ((src.info?.ownerName || "") === owner) { alert("지금 담당 선생님과 같은 선생님입니다. 다른 선생님을 골라 주세요."); return; }
+
+    const nowIso = new Date().toISOString();
+    const clone = (v) => JSON.parse(JSON.stringify(v));
+
+    // ── 1. 백업 (원본 통째로) ───────────────────────────────
+    const backupKey = COPY_BACKUP_PREFIX + nowIso.replace(/[:.]/g, "-");
+    const backupBody = JSON.stringify({ at: nowIso, by: currentUser?.name || "", to: owner, src });
+    try { if (typeof localStorage !== "undefined") localStorage.setItem(backupKey, backupBody); } catch (e) {}
+    try { if (typeof window !== "undefined" && window.storage) window.storage.set(backupKey, backupBody, true).catch(() => {}); } catch (e) {}
+
+    // ── 2. 목표 복사 (지운 목표 제외, 새 id + 원본 id 기억) ─────────
+    const srcDelGoals = src.deletedGoals || {};
+    const srcGoals = (src.goals || []).filter(g => g && !srcDelGoals[g.id]);
+    const idMap = {};
+    const copiedGoals = srcGoals.map((g, i) => {
+      const ng = clone(g);
+      ng.id = "g_" + Date.now() + "_" + i + "_" + Math.random().toString(36).slice(2, 6);
+      ng.originGoalId = g.originGoalId || g.id;
+      idMap[g.id] = ng.id;
+      return ng;
+    });
+
+    // ── 3. 아동 정보 ──────────────────────────────────────
+    const si = clone(src.info || {});
+    const oldOwner = si.ownerName || "";
+    const newInfo = {
+      ...si,
+      ownerName: owner,
+      therapist: owner,
+      isPinned: false,
+      archivedAt: "",
+      copiedFrom: src.id,
+      copiedFromOwner: oldOwner,
+      copiedAt: nowIso,
+      goalHandovers: (Array.isArray(si.goalHandovers) ? si.goalHandovers : [])
+        .map(h => ({ ...h, goalIds: (h.goalIds || []).map(id => idMap[id]).filter(Boolean) }))
+        .filter(h => h.goalIds.length > 0)
+    };
+    delete newInfo.mergedInto;
+    delete newInfo.mergedAt;
+
+    const copyRec = {
+      id: "h_" + Date.now() + "_" + Math.random().toString(36).slice(2, 5),
+      userName: currentUser.name,
+      action: "child_copy",
+      targetName: "copy",
+      before: oldOwner,
+      after: owner,
+      timestamp: nowIso,
+      description: `기록 복사: "${oldOwner || "(미할당)"}" 담당 기록에서 복사해 "${owner}" 선생님 기록으로 만듦 (목표 ${copiedGoals.length}개, 백업: ${backupKey})`
+    };
+
+    const newId = "c_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+    const base = clone(src);
+    delete base.deletedAt;
+    const copy = {
+      ...base,
+      id: newId,
+      info: newInfo,
+      goals: copiedGoals,
+      deletedGoals: {},
+      deletedMemos: {},
+      fieldTimes: {},
+      mediaList: [],
+      history: [{ ...copyRec, childId: newId, childName: newInfo.name || "(이름없음)" }],
+      updatedAt: nowIso
+    };
+
+    // ── 4. 검증: 회기 기록 수가 원본과 같은지 ────────────────────
+    const expected = _childDataPoints({ goals: srcGoals });
+    const actual = _childDataPoints(copy);
+    if (actual !== expected || copy.goals.length !== srcGoals.length) {
+      alert(`❌ 복사를 취소했습니다.\n기록 수가 맞지 않습니다 (원본 ${expected} / 복사본 ${actual}).\n아무것도 바뀌지 않았습니다.`);
+      return;
+    }
+
+    const next = [...children, copy];
+    if (!validateChildrenBeforeSave(next)) return;
+    setChildren(next);
+    setActiveChildId(newId);
+    setCopyToOwner("");
+
+    const mediaCount = Array.isArray(src.mediaList) ? src.mediaList.length : 0;
+    alert(
+      `✅ 복사 완료\n\n` +
+      `· "${newInfo.name || "이름없음"}" 기록을 ${owner} 선생님 담당으로 새로 만들었습니다.\n` +
+      `· 복사한 목표: ${copiedGoals.length}개\n` +
+      `· 회기 기록: ${actual}개 (원본과 같음)\n` +
+      `· 원본(${oldOwner || "미할당"} 선생님 담당)은 그대로입니다.\n` +
+      (mediaCount ? `· 사진·영상 ${mediaCount}개는 용량 때문에 복사하지 않았습니다.\n` : "") +
+      `\n지금 화면은 새로 만든 복사본입니다.\n` +
+      `${owner} 선생님이 안 쓸 목표는 지우고, 주 횟수·회기 시간은 맞게 고쳐 주세요.\n` +
+      `보관해 둔 이전 보고서는 복사되지 않습니다.`
     );
   };
 
@@ -8182,6 +8295,62 @@ export default function App() {
   );
   const activeIncludedGoals = useMemo(() => includedGoals.filter(g => g.status !== "mastered"), [includedGoals]);
   const masteredIncludedGoals = useMemo(() => includedGoals.filter(g => g.status === "mastered"), [includedGoals]);
+
+  // ★ [103-2] 복사로 이어진 기록(같은 아동을 나눠 맡은 다른 선생님 기록) 찾기
+  //    · info.copiedFrom을 끝까지 따라가 같은 뿌리를 가진 기록끼리 묶는다.
+  //    · 지운 기록·보관한 기록은 뺀다.
+  const linkedChildren = useMemo(() => {
+    if (!activeChild) return [];
+    const live = liveChildren(children);
+    const byId = new Map(live.map(c => [c.id, c]));
+    const rootOf = (c) => {
+      let cur = c, guard = 0;
+      while (cur && cur.info?.copiedFrom && byId.has(cur.info.copiedFrom) && guard < 20) {
+        cur = byId.get(cur.info.copiedFrom); guard++;
+      }
+      return cur?.info?.copiedFrom || cur?.id;
+    };
+    const myRoot = rootOf(activeChild);
+    return live.filter(c => c.id !== activeChild.id && !c.info?.archivedAt && rootOf(c) === myRoot);
+  }, [children, activeChild]);
+
+  // ★ [103-2] 겹치는 목표: 원본 목표 id(originGoalId, 없으면 자기 id)가 같은 목표를
+  //    이어진 기록에서도 진행 중이면 그 선생님 이름을 모은다. { 원본목표id: ["최성현", ...] }
+  const linkedGoalOwners = useMemo(() => {
+    const out = {};
+    linkedChildren.forEach(c => {
+      const del = c.deletedGoals || {};
+      const nm = c.info?.ownerName || c.info?.therapist || "미할당";
+      (c.goals || []).forEach(g => {
+        if (!g || del[g.id] || !g.includeInIep || g.status === "mastered") return;
+        const k = g.originGoalId || g.id;
+        if (!out[k]) out[k] = [];
+        if (!out[k].includes(nm)) out[k].push(nm);
+      });
+    });
+    return out;
+  }, [linkedChildren]);
+  const linkedOwnersOfGoal = (g) => (g ? (linkedGoalOwners[g.originGoalId || g.id] || []) : []);
+  const renderLinkedGoalBadge = (g) => {
+    const owners = linkedOwnersOfGoal(g);
+    if (owners.length === 0) return null;
+    return (
+      <div style={{ margin: "2px 0 3px" }}>
+        <span
+          title="같은 아동을 나눠 맡은 다른 선생님 기록에도 이 목표가 있습니다"
+          style={{ display: "inline-block", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#eef4ff", color: "#2b4c8c", border: "1px solid #b9cbee" }}>
+          🔗 {owners.map(n => `${n}샘`).join("·")}도 진행 중
+        </span>
+      </div>
+    );
+  };
+  // 보고서 출력 확인창에 한 번만 덧붙이는 안내 (겹치는 목표가 없으면 빈 문자열)
+  const linkedOverlapNote = (() => {
+    const hits = activeIncludedGoals.filter(g => linkedOwnersOfGoal(g).length > 0);
+    if (hits.length === 0) return "";
+    const names = [...new Set(hits.flatMap(g => linkedOwnersOfGoal(g)))].map(n => `${n} 선생님`).join(", ");
+    return `\n\n🔗 겹치는 목표 ${hits.length}개 — ${names}도 같은 목표를 진행 중입니다.\n두 보고서에 같은 목표가 따로 실리니, 내용이 서로 어긋나지 않는지 확인해 주세요.`;
+  })();
 
   const [archiveList, setArchiveList] = useState([]);  // 현재 아동의 보관 목록
   
@@ -10374,6 +10543,101 @@ export default function App() {
           })}
         </div>
 
+        {/* ★ [103-3] 같은 아동을 나눠 맡은 다른 선생님 기록 보기 (읽기 전용) */}
+        {activeChild && tab !== "dashboard" && linkedChildren.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "0 0 12px", padding: "8px 12px", background: "#eef4ff", border: "1px solid #b9cbee", borderRadius: 8 }}>
+            <span style={{ fontSize: 11.5, color: "#2b4c8c", fontWeight: 600 }}>이 아동은 다른 선생님도 맡고 있습니다</span>
+            {linkedChildren.map(c => (
+              <button key={c.id} onClick={() => setLinkedViewId(c.id)}
+                style={{ padding: "4px 10px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", borderRadius: 6, cursor: "pointer", background: "#fff", color: "#2b4c8c", border: "1px solid #8fa9db" }}>
+                🔗 {c.info?.ownerName || c.info?.therapist || "미할당"} 선생님 기록 보기
+              </button>
+            ))}
+          </div>
+        )}
+        {linkedViewId && (() => {
+          const lc = linkedChildren.find(c => c.id === linkedViewId);
+          if (!lc) return null;
+          const li = lc.info || {};
+          const owner = li.ownerName || li.therapist || "미할당";
+          const delG = lc.deletedGoals || {};
+          const myKeys = new Set((goals || []).map(g => g.originGoalId || g.id));
+          const lGoals = (lc.goals || []).filter(g => g && !delG[g.id] && g.includeInIep);
+          const byDomain = {};
+          lGoals.forEach(g => { const k = g.domain || "(영역 없음)"; (byDomain[k] = byDomain[k] || []).push(g); });
+          const memoDates = Object.keys(lc.dailyMemos || {}).filter(d => (lc.dailyMemos[d] || "").trim()).sort().reverse().slice(0, 5);
+          const close = () => setLinkedViewId(null);
+          return (
+            <div onClick={close} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+              <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, width: "100%", maxWidth: 680, maxHeight: "86vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
+                <div style={{ padding: "14px 18px", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: "#2b4c8c" }}>🔗 {owner} 선생님 기록 · {li.name || "이름없음"}</div>
+                    <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>읽기 전용입니다. 여기서는 아무것도 바꿀 수 없습니다.</div>
+                  </div>
+                  <button onClick={close} style={{ padding: "6px 12px", fontSize: 12, fontFamily: "inherit", borderRadius: 6, border: "1px solid #ddd", background: "#fff", cursor: "pointer" }}>닫기</button>
+                </div>
+                <div style={{ padding: "12px 18px", overflowY: "auto" }}>
+                  <div style={{ fontSize: 12, color: "#444", lineHeight: 1.7, marginBottom: 12 }}>
+                    주 {li.sWeek || "—"}회 · {sessionMinText(li) || "—"}
+                    {(li.pStart || li.pEnd) && <> · 보고 기간 {li.pStart ? dotDate(li.pStart) : "—"} ~ {li.pEnd ? dotDate(li.pEnd) : "—"}</>}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#333", marginBottom: 6 }}>목표 ({lGoals.length}개)</div>
+                  {lGoals.length === 0 && <div style={{ fontSize: 12, color: "#aaa", padding: "8px 0" }}>IEP에 넣은 목표가 없습니다.</div>}
+                  {Object.entries(byDomain).map(([domain, dGoals]) => (
+                    <div key={domain} style={{ marginBottom: 10, padding: "8px 10px", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+                      <div style={{ fontSize: 11.5, fontWeight: 700, color: "#2b4c8c", marginBottom: 4 }}>{shortDomain(domain) || domain}</div>
+                      {dGoals.map(g => {
+                        const delT = g.deletedTasks || {};
+                        const tasks = (g.tasks || []).filter(t => t && !delT[t.id]);
+                        const shared = myKeys.has(g.originGoalId || g.id);
+                        return (
+                          <div key={g.id} style={{ padding: "4px 0 6px", borderTop: "1px dashed #eee" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: "#333" }}>{itemLabel(g.item)}</span>
+                              {g.status === "mastered" && <span style={{ fontSize: 9.5, padding: "1px 6px", background: "#4a7316", color: "#fff", borderRadius: 8, fontWeight: 700 }}>습득</span>}
+                              {shared && <span style={{ fontSize: 9.5, padding: "1px 6px", background: "#eef4ff", color: "#2b4c8c", border: "1px solid #b9cbee", borderRadius: 8, fontWeight: 700 }}>나도 진행 중</span>}
+                            </div>
+                            {tasks.length > 0 && (
+                              <div style={{ marginTop: 3, paddingLeft: 6 }}>
+                                {tasks.map(t => {
+                                  const days = Object.keys(t.daily || {}).sort();
+                                  let last = null, lastRate = null;
+                                  for (let i = days.length - 1; i >= 0; i--) {
+                                    const r = calcDayRateGlobal(t.daily[days[i]], t.plannedTrials);
+                                    if (r !== null) { last = days[i]; lastRate = r; break; }
+                                  }
+                                  return (
+                                    <div key={t.id} style={{ fontSize: 11, color: "#666", lineHeight: 1.6 }}>
+                                      · {t.name || "과제"}
+                                      {(t.listGroup || "1") === "2" && <span style={{ color: "#4a7316" }}> (완료)</span>}
+                                      <span style={{ color: "#999" }}> — 기록 {days.length}회{last ? ` · 최근 ${dotDate(last)} ${lastRate}%` : ""}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                  {memoDates.length > 0 && (
+                    <>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#333", margin: "12px 0 6px" }}>최근 데일리 메모</div>
+                      {memoDates.map(d => (
+                        <div key={d} style={{ fontSize: 11.5, color: "#444", lineHeight: 1.6, marginBottom: 6, padding: "6px 10px", background: "#f9fafb", borderRadius: 6, whiteSpace: "pre-wrap" }}>
+                          <b style={{ color: "#2b4c8c" }}>{dotDate(d)}</b> {lc.dailyMemos[d]}
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* ═══════════════════════════════════════════════════ */}
         {/* ★ [v19 신규] 대시보드 탭 (관리자만)                 */}
         {/* ═══════════════════════════════════════════════════ */}
@@ -11029,6 +11293,50 @@ export default function App() {
                         style={{ padding: "6px 14px", fontSize: 12, fontWeight: 700, fontFamily: "inherit", borderRadius: 6, cursor: pick ? "pointer" : "default",
                           background: pick ? PK : "#eee", color: pick ? "#fff" : "#aaa", border: "none" }}>
                         합치기
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+              {/* ★ [103-1] 다른 선생님에게 아동 복사 (관리자만) — 원본은 그대로, 새 기록이 따로 생김 */}
+              {currentUser?.role === "admin" && (() => {
+                const curOwner = info.ownerName || "";
+                const opts = [
+                  ...(currentUser?.name ? [{ key: "__me", name: currentUser.name, label: `👑 ${currentUser.name} (본인 · 관리자)` }] : []),
+                  ...(teachers || []).filter(t => t.name !== currentUser?.name).map(t => ({ key: t.id, name: t.name, label: `👤 ${t.name} 선생님` }))
+                ].filter(o => o.name && o.name !== curOwner);
+                if (opts.length === 0) return null;
+                const pickOwner = opts.some(o => o.name === copyToOwner) ? copyToOwner : "";
+                return (
+                  <div style={{ marginTop: 12, padding: "10px 12px", background: "#fff", borderRadius: 8, border: `1.5px dashed ${PK}` }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 4 }}>📋 다른 선생님에게 아동 복사</div>
+                    <div style={{ fontSize: 10.5, color: "#888", lineHeight: 1.6, marginBottom: 8 }}>
+                      한 아동을 두 선생님이 나눠 맡을 때 씁니다. 아동 정보·IEP·목표·회기 기록·메모를 그대로 복사해 <b>새 기록</b>을 만듭니다.<br/>
+                      지금 기록은 하나도 바뀌지 않고, 보고서는 선생님마다 따로 나갑니다. 복사 전에 자동 백업합니다.
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <select style={{ ...IS, width: "auto", minWidth: 220 }} value={pickOwner} onChange={e => setCopyToOwner(e.target.value)}>
+                        <option value="">— 복사받을 선생님 선택 —</option>
+                        {opts.map(o => (
+                          <option key={o.key} value={o.name}>{o.label}</option>
+                        ))}
+                      </select>
+                      <button
+                        disabled={!pickOwner}
+                        onClick={() => {
+                          if (!pickOwner) return;
+                          askConfirm(
+                            `'${info.name || "이름없음"}' 기록을 ${pickOwner} 선생님에게 복사할까요?\n\n` +
+                            `· 지금 기록(${curOwner || "미할당"} 선생님 담당)은 그대로 남습니다\n` +
+                            `· ${pickOwner} 선생님 담당 기록이 새로 생깁니다 (목표 ${goals.length}개)\n` +
+                            `· 새 선생님은 안 쓸 목표를 지우면 됩니다\n` +
+                            `· 사진·영상과 보관된 이전 보고서는 복사하지 않습니다`,
+                            () => copyChildToTeacher(activeChildId, pickOwner)
+                          );
+                        }}
+                        style={{ padding: "6px 14px", fontSize: 12, fontWeight: 700, fontFamily: "inherit", borderRadius: 6, cursor: pickOwner ? "pointer" : "default",
+                          background: pickOwner ? PK : "#eee", color: pickOwner ? "#fff" : "#aaa", border: "none" }}>
+                        복사하기
                       </button>
                     </div>
                   </div>
@@ -11818,6 +12126,8 @@ export default function App() {
                                   <div key={domain} style={{ background: "#fff", border: `1px solid ${meta.accent}`, borderRadius: 6, padding: "8px 10px" }}>
                                     <div style={{ fontSize: 11, fontWeight: 600, color: meta.deep, marginBottom: 6 }}>{shortDomain(domain) || domain}</div>
                                     {domainGoals.map(goal => (
+                                      <React.Fragment key={goal.id}>
+                                      {renderLinkedGoalBadge(goal)}{/* ★ [103-2] 겹치는 목표 배지 */}
                                       <GoalCard key={goal.id} goal={goal} active={activeGoalId === goal.id}
                                         archiveList={effectiveArchiveList}
                                         onToggle={() => setActiveGoalId(activeGoalId === goal.id ? null : goal.id)}
@@ -11832,6 +12142,7 @@ export default function App() {
                                         onAddTask={addTask}
                                         onToggleTaskActive={toggleTaskActive}
                                         onToggleShowInDaily={toggleShowInDaily} />
+                                      </React.Fragment>
                                     ))}
                                   </div>
                                 ))}
@@ -12234,6 +12545,7 @@ export default function App() {
             mediaList={info?.mediaList || []}
             setInfo={setInfo}
             addHistory={addHistory}
+            renderLinkedGoalBadge={renderLinkedGoalBadge}
             onPrev={() => setTab("iep")} onNext={() => setTab("report")} />
         )}
 
@@ -12285,7 +12597,7 @@ export default function App() {
             }}
             onPrint={(action = "print") => {
               if (reportMode === "final") {
-                const confirmFinalMsg = `🎓 종결보고서 ${action === "pdf" ? "PDF로 저장" : "인쇄"}하기\n\n다음 작업이 자동으로 진행됩니다:\n  ✓ 종결보고서가 보관함에 저장됨\n  ✓ 그래프 컷오프는 적용되지 않음 (전체 기간 데이터 유지)\n  ✓ 다음 차수 시작일은 그대로 유지\n\n진행하시겠습니까?\n\n(보관 없이 양식만 보려면 [👁 미리보기]를 사용하세요)`;
+                const confirmFinalMsg = `🎓 종결보고서 ${action === "pdf" ? "PDF로 저장" : "인쇄"}하기\n\n다음 작업이 자동으로 진행됩니다:\n  ✓ 종결보고서가 보관함에 저장됨\n  ✓ 그래프 컷오프는 적용되지 않음 (전체 기간 데이터 유지)\n  ✓ 다음 차수 시작일은 그대로 유지\n\n진행하시겠습니까?\n\n(보관 없이 양식만 보려면 [👁 미리보기]를 사용하세요)` + linkedOverlapNote;  /* ★ [103-2] 겹치는 목표 안내 */
                 askConfirm(confirmFinalMsg, async () => {
                   try {
                     if (!activeChildId || !info?.name?.trim()) {
@@ -12305,7 +12617,7 @@ export default function App() {
                 });
                 return;
               }
-              const confirmMsg = `📄 중간보고서 ${action === "pdf" ? "PDF로 저장" : "인쇄"}하기\n\n다음 작업이 자동으로 진행됩니다:\n  ✓ 현재 보고서가 보관함에 저장됨\n  ✓ 그래프에 컷오프 적용 (이전 데이터는 보관함에서 확인)\n  ✓ 다음 차수 시작일이 자동 갱신됨 (오늘+1)\n\n진행하시겠습니까?\n\n(보관 없이 양식만 보려면 [👁 미리보기]를 사용하세요)`;
+              const confirmMsg = `📄 중간보고서 ${action === "pdf" ? "PDF로 저장" : "인쇄"}하기\n\n다음 작업이 자동으로 진행됩니다:\n  ✓ 현재 보고서가 보관함에 저장됨\n  ✓ 그래프에 컷오프 적용 (이전 데이터는 보관함에서 확인)\n  ✓ 다음 차수 시작일이 자동 갱신됨 (오늘+1)\n\n진행하시겠습니까?\n\n(보관 없이 양식만 보려면 [👁 미리보기]를 사용하세요)` + linkedOverlapNote;  /* ★ [103-2] 겹치는 목표 안내 */
               askConfirm(confirmMsg, async () => {
                 try {
                   if (!activeChildId || !info?.name?.trim()) {
@@ -16422,7 +16734,7 @@ function StrategyConsolidatedTable({ goals }) {
   );
 }
 
-function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, addTask, removeTask, renameTask, toggleTaskKeepRef, bumpTask, setTaskDayOX, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, clearPendingNext, updateGoal, dailyMemos, setDailyMemo, archiveList, mediaList, setInfo, addHistory, onPrev, onNext }) {
+function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, addTask, removeTask, renameTask, toggleTaskKeepRef, bumpTask, setTaskDayOX, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, clearPendingNext, updateGoal, dailyMemos, setDailyMemo, archiveList, mediaList, setInfo, addHistory, onPrev, onNext, renderLinkedGoalBadge }) {
   const [hideMastered, setHideMastered] = useState({ "ELCAR": true, "VB-MAPP": true, "ESDM": true, "기타": true });
   const [hidePaused, setHidePaused] = useState({ "ELCAR": true, "VB-MAPP": true, "ESDM": true, "기타": true });
   const currentMemo = (dailyMemos && dailyMemos[dailyDate]) || "";
@@ -17340,6 +17652,8 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
                   <div key={domain} style={{ background: "#fff", border: `1px solid ${meta.accent}`, borderRadius: 6, padding: "8px 10px" }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: meta.deep, marginBottom: 8, paddingBottom: 4, borderBottom: `1px dashed ${meta.accent}` }}>{shortDomain(domain) || domain}</div>
                     {domainGoals.map(g => (
+                      <React.Fragment key={g.id}>
+                      {renderLinkedGoalBadge ? renderLinkedGoalBadge(g) : null}{/* ★ [103-2] 겹치는 목표 배지 */}
                       <GoalTaskCard
                         key={g.id}
                         goal={g}
@@ -17362,6 +17676,7 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
                         clearPendingNext={clearPendingNext}
                         updateGoal={updateGoal}
                       />
+                      </React.Fragment>
                     ))}
                   </div>
                 ))}
