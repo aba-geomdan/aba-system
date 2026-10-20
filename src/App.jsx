@@ -7021,7 +7021,9 @@ export default function App() {
     // ★ [105-5] 원래 선생님이 끝냈거나 멈춘 목표는 넘기지 않는다.
     //    · 목표를 습득한 것, 과제가 모두 완료·중단된 것은 뺀다.
     //    · 과제가 하나도 없는 목표(아직 과제를 안 만든 목표)는 진행 중으로 보고 넘긴다.
+    //    · ★ [105-7] IEP에 넣지 않은 목표(커리큘럼에서 골라만 둔 것)는 넘기지 않는다.
     const _isLiveGoal = (g) => {
+      if (!g.includeInIep) return false;
       if (g.status === "mastered") return false;
       const dT = g.deletedTasks || {};
       const ts = (g.tasks || []).filter(t => t && !dT[t.id]);
@@ -10674,7 +10676,7 @@ export default function App() {
                       <span style={{ fontWeight: 600 }}>{itemLabel(g.item)}</span>
                       {n > 0
                         ? <span style={{ color: "#999", fontSize: 10.5 }}>· 진행 중 과제 {n}개</span>
-                        : <span style={{ color: "#b45309", fontSize: 10.5, fontWeight: 600 }}>· {srcStateText(g) || "진행 중 과제 없음"}</span>}
+                        : <span style={{ color: "#b45309", fontSize: 10.5, fontWeight: 600 }}>· {srcStateText(g) || "과제를 아직 안 만든 목표"}</span>}
                     </label>
                   );
                 })}
@@ -11530,7 +11532,7 @@ export default function App() {
                 const pickOwner = opts.some(o => o.name === copyToOwner) ? copyToOwner : "";
                 const _delG = (activeChild?.deletedGoals) || {};
                 const goalCount = (goals || []).filter(g => {
-                  if (!g || _delG[g.id] || g.status === "mastered") return false;
+                  if (!g || _delG[g.id] || !g.includeInIep || g.status === "mastered") return false;
                   const dT = g.deletedTasks || {};
                   const ts = (g.tasks || []).filter(t => t && !dT[t.id]);
                   return ts.length === 0 || ts.some(t => (t.listGroup || "1") === "1");
