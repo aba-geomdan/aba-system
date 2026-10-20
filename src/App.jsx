@@ -6404,6 +6404,28 @@ export default function App() {
     setActiveChildId(visibleChildren[0].id);
   }, [loaded, currentUser, visibleChildren, activeChildId]);
 
+  // ★ [106-1] 로그인 정보가 아동 로드보다 늦게 오면 위 [106-2]의 '내 기록'을 못 읽고
+  //    전체 첫 아동(남의 담당)이 잡힌다. 로그인 확인이 끝난 뒤 한 번만 바로잡는다.
+  //    ① 이 기기에 내가 마지막으로 열었던 아동이 있으면 그것 ② 없으면 내 담당 첫 아동.
+  //    그 뒤에 직접 고른 아동은 건드리지 않는다.
+  const loginPickRef = useRef("");
+  useEffect(() => {
+    if (!loaded || !currentUser || !currentUser.name) return;
+    if (loginPickRef.current === currentUser.name) return;
+    if (visibleChildren.length === 0) return;
+    loginPickRef.current = currentUser.name;
+    let saved = null;
+    try { saved = localStorage.getItem(activeKeyFor(currentUser.name)); } catch (e) {}
+    if (saved && visibleChildren.some(c => c.id === saved)) {
+      if (saved !== activeChildId) setActiveChildId(saved);
+      return;
+    }
+    const cur = visibleChildren.find(c => c.id === activeChildId);
+    if (cur && (cur.info?.ownerName || "") === currentUser.name) return;
+    const mine = visibleChildren.filter(c => (c.info?.ownerName || "") === currentUser.name);
+    if (mine.length > 0) setActiveChildId(mine[0].id);
+  }, [loaded, currentUser, visibleChildren, activeChildId]);
+
   // ★ [신규] 아카이브 후보 — 종결 후 3개월(=약 92일) 이상 지나고 아직 아카이브 안 된 아동
   const archiveCandidates = useMemo(() => {
     const now = new Date();
@@ -7296,7 +7318,11 @@ export default function App() {
                 const d = JSON.parse(res.value);
                 if (Array.isArray(d.children) && d.children.length > 0) {
                   childrenList = d.children.map(migrateChild);
-                  lastActive = d.activeChildId;
+                  // ★ [106-2] 클라우드 파일의 activeChildId는 '마지막으로 저장한 사람'이 보던 아동이다
+                  //    (공용 파일이라 김은혜 선생님이 저장하면 그 선생님 화면의 아동이 들어간다).
+                  //    관리자는 모든 아동이 '열어도 되는 범위'라 그 값이 그대로 열렸다 — 내가 마지막에 본 아동이 아니었다.
+                  //    공용 값은 버리고, 이 기기에 사람별로 남긴 값만 쓴다.
+                  try { lastActive = localStorage.getItem(activeKeyFor(currentUserRef.current?.name)); } catch (e) { lastActive = null; }
                 } else if (d.info) {
                   childrenList = [migrateChild({
                     info: d.info,
