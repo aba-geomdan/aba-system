@@ -10660,6 +10660,14 @@ export default function App() {
           const statsSource = showArchived ? _liveAll : visibleForStats;
 
           const teacherStats = {};
+          // ★ [80-1] 새로 등록한 선생님이 선생님별 현황에 안 보이던 문제.
+          //    현황은 아동의 담당자(ownerName)만 모아서 만들어, 아직 아동이 0명인 선생님은 아예 빠졌다.
+          //    등록된 선생님 계정을 먼저 0명으로 깔아 두고, 그 위에 아동을 센다.
+          (teachers || []).forEach(t => {
+            const nm = (t?.name || "").trim();
+            if (!nm || teacherStats[nm]) return;
+            teacherStats[nm] = { name: nm, childCount: 0, children: [], totalGoals: 0, totalDataPoints: 0, lastDataDate: null };
+          });
           statsSource.forEach(child => {
             const owner = child.info?.ownerName || "(미할당)";
             if (!teacherStats[owner]) {
@@ -10830,7 +10838,8 @@ export default function App() {
                     const terminatedCount = teacher.children.filter(c => c.info?.finalEndDate).length;
                     // ★ [3번] 필터에 맞는 아동이 없는 선생님은 숨김
                     const matchCount = dashFilter === "active" ? activeCount : dashFilter === "terminated" ? terminatedCount : teacher.childCount;
-                    if (matchCount === 0) return null;
+                    // ★ [80-1] 단, '전체' 보기에서는 아동 0명인 등록 선생님도 보여 준다.
+                    if (matchCount === 0 && !(dashFilter === "all" && teacher.childCount === 0 && teacher.name !== "(미할당)")) return null;
                     // ★ 선생님별 색 자동 배정 (순환)
                     const TEACHER_COLORS = [
                       { bar: "#D4728A", tint: "#fdf8f9", edge: "#f0dfe4" },
@@ -10884,6 +10893,9 @@ export default function App() {
                       {isExpanded && (
                       <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 14px 12px", borderTop: `1px solid ${tc.edge}` }}>
                         <div style={{ height: 2 }} />
+                        {teacher.childCount === 0 && (
+                          <div style={{ fontSize: 12, color: "#aaa", padding: "6px 2px" }}>아직 담당 아동이 없습니다.</div>
+                        )}
                         {(() => {
                           // ★ [신규] 종결 아동은 맨 아래로 내리고 기본 접음.
                           //    등록순은 그대로 유지하고 종결만 분리한다.
