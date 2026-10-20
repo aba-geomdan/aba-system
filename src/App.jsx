@@ -10562,10 +10562,52 @@ export default function App() {
           const owner = li.ownerName || li.therapist || "미할당";
           const delG = lc.deletedGoals || {};
           const myKeys = new Set((goals || []).map(g => g.originGoalId || g.id));
-          const lGoals = (lc.goals || []).filter(g => g && !delG[g.id] && g.includeInIep);
+          // ★ [104-1] 복사로 함께 넘어간 기록은 두 기록에 똑같이 들어 있어서,
+          //    이 창에 내 기록과 똑같은 내용이 그대로 떴다.
+          //    복사한 날까지의 기록 중 내 기록과 내용이 같은 날짜는 '복사 전 기록'으로 보고 빼고,
+          //    그 선생님이 복사 뒤에 쓴 기록만 센다. (기록 자체는 하나도 바꾸지 않는다 — 보기만 거른다)
+          const _toLocalDay = (iso) => {
+            if (!iso) return "";
+            const dt = new Date(iso);
+            if (isNaN(dt.getTime())) return "";
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+          };
+          // ★ [104-2] 거르는 것은 '내 기록을 복사해 간 쪽'을 볼 때만.
+          //    · 원래 담당(예: 김은혜)이 복사본을 열면 → 자기 지난 기록은 빼고, 새 선생님이 복사 뒤 쓴 것만.
+          //    · 복사받은 선생님(예: 전승원)이 원래 기록을 열면 → 지난 기록까지 전부 보여 준다 (참고해야 하므로).
+          //    보고 있는 기록(lc)이 내 기록보다 나중에 복사된 쪽일 때만 lc가 '복사해 간 쪽'이다.
+          const _lcCopied = li.copiedAt || "";
+          const _myCopied = activeChild?.info?.copiedAt || "";
+          const copyDay = (_lcCopied && (!_myCopied || _lcCopied > _myCopied)) ? _toLocalDay(_lcCopied) : "";
+          const myGoalByKey = {};
+          (goals || []).forEach(g => { if (g) myGoalByKey[g.originGoalId || g.id] = g; });
+          const _same = (a, b) => { try { return JSON.stringify(a) === JSON.stringify(b); } catch (e) { return false; } };
+          const ownDaysOf = (g, t) => {
+            const days = Object.keys(t.daily || {}).sort();
+            if (!copyDay) return days;
+            const mg = myGoalByKey[g.originGoalId || g.id];
+            const mt = mg ? (mg.tasks || []).find(x => x && x.id === t.id) : null;
+            if (!mt) return days;
+            return days.filter(d => !(d <= copyDay && mt.daily && mt.daily[d] !== undefined && _same(mt.daily[d], t.daily[d])));
+          };
+          let hiddenTaskCount = 0;
+          const lGoals = (lc.goals || []).filter(g => g && !delG[g.id] && g.includeInIep).map(g => {
+            const delT = g.deletedTasks || {};
+            const shown = [];
+            (g.tasks || []).filter(t => t && !delT[t.id]).forEach(t => {
+              const own = ownDaysOf(g, t);
+              // 완료된 과제 중 복사 뒤 새 기록이 없는 것은 내 기록에도 똑같이 있으므로 감춘다
+              if (own.length === 0 && (t.listGroup || "1") === "2") { hiddenTaskCount++; return; }
+              shown.push({ t, own });
+            });
+            return { g, shown };
+          }).filter(x => x.shown.length > 0 || !myKeys.has(x.g.originGoalId || x.g.id));
           const byDomain = {};
-          lGoals.forEach(g => { const k = g.domain || "(영역 없음)"; (byDomain[k] = byDomain[k] || []).push(g); });
-          const memoDates = Object.keys(lc.dailyMemos || {}).filter(d => (lc.dailyMemos[d] || "").trim()).sort().reverse().slice(0, 5);
+          lGoals.forEach(x => { const k = x.g.domain || "(영역 없음)"; (byDomain[k] = byDomain[k] || []).push(x); });
+          const memoDates = Object.keys(lc.dailyMemos || {})
+            .filter(d => (lc.dailyMemos[d] || "").trim())
+            .filter(d => !(copyDay && d <= copyDay && (activeChild?.dailyMemos || {})[d] === lc.dailyMemos[d]))
+            .sort().reverse().slice(0, 5);
           const close = () => setLinkedViewId(null);
           return (
             <div onClick={close} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
@@ -10582,14 +10624,18 @@ export default function App() {
                     주 {li.sWeek || "—"}회 · {sessionMinText(li) || "—"}
                     {(li.pStart || li.pEnd) && <> · 보고 기간 {li.pStart ? dotDate(li.pStart) : "—"} ~ {li.pEnd ? dotDate(li.pEnd) : "—"}</>}
                   </div>
+                  {copyDay && (
+                    <div style={{ fontSize: 11, color: "#2b4c8c", background: "#f5f8ff", border: "1px solid #dbe5f7", borderRadius: 6, padding: "6px 10px", marginBottom: 12, lineHeight: 1.6 }}>
+                      {dotDate(copyDay)}에 복사하면서 함께 넘어간 기록은 빼고, 복사 뒤에 쓴 기록만 보여 줍니다.
+                      {hiddenTaskCount > 0 && <> 복사 전에 이미 완료한 과제 {hiddenTaskCount}개는 내 기록과 같아서 감췄습니다.</>}
+                    </div>
+                  )}
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#333", marginBottom: 6 }}>목표 ({lGoals.length}개)</div>
-                  {lGoals.length === 0 && <div style={{ fontSize: 12, color: "#aaa", padding: "8px 0" }}>IEP에 넣은 목표가 없습니다.</div>}
+                  {lGoals.length === 0 && <div style={{ fontSize: 12, color: "#aaa", padding: "8px 0" }}>{copyDay ? "복사 뒤에 새로 쓴 기록이 아직 없습니다." : "IEP에 넣은 목표가 없습니다."}</div>}
                   {Object.entries(byDomain).map(([domain, dGoals]) => (
                     <div key={domain} style={{ marginBottom: 10, padding: "8px 10px", border: "1px solid #e5e7eb", borderRadius: 8 }}>
                       <div style={{ fontSize: 11.5, fontWeight: 700, color: "#2b4c8c", marginBottom: 4 }}>{shortDomain(domain) || domain}</div>
-                      {dGoals.map(g => {
-                        const delT = g.deletedTasks || {};
-                        const tasks = (g.tasks || []).filter(t => t && !delT[t.id]);
+                      {dGoals.map(({ g, shown: tasks }) => {
                         const shared = myKeys.has(g.originGoalId || g.id);
                         return (
                           <div key={g.id} style={{ padding: "4px 0 6px", borderTop: "1px dashed #eee" }}>
@@ -10600,8 +10646,7 @@ export default function App() {
                             </div>
                             {tasks.length > 0 && (
                               <div style={{ marginTop: 3, paddingLeft: 6 }}>
-                                {tasks.map(t => {
-                                  const days = Object.keys(t.daily || {}).sort();
+                                {tasks.map(({ t, own: days }) => {
                                   let last = null, lastRate = null;
                                   for (let i = days.length - 1; i >= 0; i--) {
                                     const r = calcDayRateGlobal(t.daily[days[i]], t.plannedTrials);
