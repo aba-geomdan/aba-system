@@ -6355,7 +6355,6 @@ export default function App() {
   const [mergeFromId, setMergeFromId] = useState("");                  // ★ [102-1] 합칠 기록 선택 (관리자)
   const [copyToOwner, setCopyToOwner] = useState("");                  // ★ [103-1] 복사받을 선생님 선택 (관리자)
   const [copyReviewKeep, setCopyReviewKeep] = useState({ childId: "", off: {} }); // ★ [105-3] 복사받은 목표 정리 — 뺄 목표
-  const [copySess, setCopySess] = useState({ sWeek: "", sMin: "" });           // ★ [105-2] 새 선생님 주 횟수·회기 시간
   const [linkedViewId, setLinkedViewId] = useState(null);              // ★ [103-3] 읽기 전용으로 보고 있는 다른 선생님 기록
   const [deleteRequests, setDeleteRequests] = useState([]);             // ★ [85-1] 삭제 요청함
   const [deleteRequestTarget, setDeleteRequestTarget] = useState(null); // 치료사 선택 모달 대상
@@ -6996,10 +6995,10 @@ export default function App() {
   //    · ★ [105-3] 어떤 목표를 할지는 관리자가 아니라 새 선생님이 정한다 →
   //      복사본에 copyReviewPending 표시를 달아 두면, 새 선생님 화면에 '복사받은 목표 정리'가 뜬다.
   //      거기서 뺀 목표는 중단이 아니라 기록에서 지운다.
-  //    · IEP 내용(관찰·의뢰 사유·보호자 협력·권고)은 넘기고, 중간·종결보고서 칸과 데일리 메모는 비운다.
-  //    ★ [105-2] 주 횟수·회기 시간은 선생님마다 다르므로 원래 선생님 값을 가져가지 않는다.
-  //      복사 창에서 넣은 값만 쓰고, 안 넣으면 비워 둔다.
-  const copyChildToTeacher = (srcId, newOwner, sess) => {
+  //    · ★ [105-6] 새 선생님은 IEP를 새로 내므로 IEP 칸(관찰·의뢰 사유·보호자 협력·권고)도 비운다.
+  //      중간·종결보고서 칸과 데일리 메모도 비운다. 목표 자체(내용)는 넘긴다.
+  //    ★ [105-2] 주 횟수·회기 시간은 선생님마다 다르므로 원래 선생님 값을 가져가지 않고 비워 둔다.
+  const copyChildToTeacher = (srcId, newOwner) => {
     if (!loaded) { alert("아직 데이터를 다 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."); return; }
     if (currentUser?.role !== "admin") { alert("아동 복사는 관리자만 할 수 있습니다."); return; }
     const owner = (newOwner || "").trim();
@@ -7019,7 +7018,18 @@ export default function App() {
 
     // ── 2. 목표 복사 (지운 목표 제외, 새 id + 원본 id 기억) ─────────
     const srcDelGoals = src.deletedGoals || {};
-    const srcGoals = (src.goals || []).filter(g => g && !srcDelGoals[g.id]);
+    // ★ [105-5] 원래 선생님이 끝냈거나 멈춘 목표는 넘기지 않는다.
+    //    · 목표를 습득한 것, 과제가 모두 완료·중단된 것은 뺀다.
+    //    · 과제가 하나도 없는 목표(아직 과제를 안 만든 목표)는 진행 중으로 보고 넘긴다.
+    const _isLiveGoal = (g) => {
+      if (g.status === "mastered") return false;
+      const dT = g.deletedTasks || {};
+      const ts = (g.tasks || []).filter(t => t && !dT[t.id]);
+      if (ts.length === 0) return true;
+      return ts.some(t => (t.listGroup || "1") === "1");
+    };
+    const srcGoals = (src.goals || []).filter(g => g && !srcDelGoals[g.id] && _isLiveGoal(g));
+    if (srcGoals.length === 0) { alert("진행 중인 목표가 없어 복사할 것이 없습니다."); return; }
     const copiedGoals = srcGoals.map((g, i) => {
       const ng = clone(g);
       ng.id = "g_" + Date.now() + "_" + i + "_" + Math.random().toString(36).slice(2, 6);
@@ -7067,15 +7077,17 @@ export default function App() {
     };
     // 보고서·평가 칸은 빈 값으로 (blankChild 기본값 그대로)
     const _blankInfo = blankChild().info;
-    // 중간·종결보고서 칸만 비운다 (IEP 칸은 그대로 넘긴다)
-    ["pStart", "pEnd",
+    // IEP·중간·종결보고서 칸을 모두 비운다
+    // ★ [105-4] 수업 시작일·평가 시작일·평가 종료일도 새 선생님 기준이라 비운다 (아동 정보에 채우라는 안내가 뜬다)
+    ["startDate", "evalStart", "evalEnd",
+     "iepObservations", "iepObservationLevels", "iepObservationSummaryOverride", "iepObservationTone",
+     "iepReferralReason", "iepHomeCollab", "iepRecommendations",
+     "pStart", "pEnd",
      "finalEndDate", "finalReferralReason", "finalEndReason", "finalSummary", "priorProgress", "finalGrowth",
      "finalSummaryStamp", "finalGrowthStamp", "finalHomeMaintenance", "finalRecommendations",
      "finalBehaviorChange", "finalHandover"
     ].forEach(k => { newInfo[k] = clone(_blankInfo[k]); });
     ["sWeek", "sMin", "sTotal", "sMinList", "sMinPerSession"].forEach(k => { newInfo[k] = clone(_blankInfo[k]); });
-    newInfo.sWeek = String(sess?.sWeek || "").trim();
-    newInfo.sMin = String(sess?.sMin || "").trim();
     delete newInfo.sessionMin;      // 옛 칸 — 남아 있으면 원래 선생님 시간이 표시된다
     delete newInfo.totalSessions;
     newInfo.copyReviewPending = true;   // 새 선생님이 목표 정리를 마치면 false
@@ -7136,16 +7148,15 @@ export default function App() {
     setActiveChildId(newId);
     setCopyToOwner("");
 
-    setCopySess({ sWeek: "", sMin: "" });
     alert(
       `✅ 복사 완료\n\n` +
       `· "${newInfo.name || "이름없음"}" 기록을 ${owner} 선생님 담당으로 새로 만들었습니다.\n` +
-      `· 넘긴 목표: ${copiedGoals.length}개 전부 (진행 중 과제만, 기록은 0회부터)\n` +
-      `· IEP 내용은 넘겼고, 중간·종결보고서 칸과 데일리 메모는 비어 있습니다.\n` +
+      `· 넘긴 목표: 진행 중인 목표 ${copiedGoals.length}개 (진행 중 과제만, 기록은 0회부터)\n` +
+      `· IEP·중간·종결보고서 칸과 데일리 메모는 비어 있습니다. (IEP는 새로 작성)\n` +
+      `· 수업 시작일·평가 시작일·평가 종료일은 비워 두었습니다. 아동 정보에서 채워 주세요.\n` +
       `· ${owner} 선생님이 열면 '복사받은 목표 정리'가 떠서, 안 할 목표를 직접 빼면 됩니다.\n` +
       `· 원본(${oldOwner || "미할당"} 선생님 담당)은 그대로입니다.\n` +
-      `· 주 횟수·회기 시간: ${newInfo.sWeek ? `주 ${newInfo.sWeek}회` : "미입력"} · ${newInfo.sMin ? `${newInfo.sMin}분` : "미입력"}\n` +
-      `\n지금 화면은 새로 만든 기록입니다.${(!newInfo.sWeek || !newInfo.sMin) ? " 비어 있는 주 횟수·회기 시간을 넣고 저장해 주세요." : " 저장을 눌러 주세요."}\n` +
+      `\n지금 화면은 새로 만든 기록입니다. 저장을 눌러 주세요.\n` +
       `${oldOwner || "원래"} 선생님의 지난 기록은 위쪽 '🔗 선생님 기록 보기'로 볼 수 있습니다.`
     );
   };
@@ -10614,6 +10625,22 @@ export default function App() {
           const removeList = list.filter(g => off[g.id]);
           const keepCount = list.length - removeList.length;
           const fromName = activeChild.info?.copiedFromOwner || "원래";
+          // ★ [105-4] 진행 중 과제가 없는 목표는 원래 기록에서 어떤 상태였는지 보여 준다 (중단·완료)
+          const srcChild = (children || []).find(c => c.id === activeChild.info?.copiedFrom);
+          const srcGoalOf = (g) => srcChild ? (srcChild.goals || []).find(sg => sg && (sg.originGoalId || sg.id) === (g.originGoalId || g.id)) : null;
+          const srcStateText = (g) => {
+            const sg = srcGoalOf(g);
+            if (!sg) return "";
+            const dT = sg.deletedTasks || {};
+            const ts = (sg.tasks || []).filter(t => t && !dT[t.id]);
+            const paused = ts.filter(t => t.listGroup === "paused").length;
+            const done = ts.filter(t => (t.listGroup || "1") === "2").length;
+            if (sg.status === "mastered") return "원래 기록: 목표 습득";
+            if (paused > 0 && done > 0) return `원래 기록: 중단 ${paused}개 · 완료 ${done}개`;
+            if (paused > 0) return `원래 기록: 중단 ${paused}개`;
+            if (done > 0) return `원래 기록: 과제 모두 완료 (${done}개)`;
+            return "";
+          };
           const finish = () => {
             const removeIds = new Set(removeList.map(g => g.id));
             const stamp = new Date().toISOString();
@@ -10645,7 +10672,9 @@ export default function App() {
                       <input type="checkbox" checked={!off[g.id]} onChange={() => toggle(g.id)} />
                       <span style={{ color: "#999" }}>{shortDomain(g.domain) || g.domain || ""}</span>
                       <span style={{ fontWeight: 600 }}>{itemLabel(g.item)}</span>
-                      <span style={{ color: "#999", fontSize: 10.5 }}>· 진행 중 과제 {n}개</span>
+                      {n > 0
+                        ? <span style={{ color: "#999", fontSize: 10.5 }}>· 진행 중 과제 {n}개</span>
+                        : <span style={{ color: "#b45309", fontSize: 10.5, fontWeight: 600 }}>· {srcStateText(g) || "진행 중 과제 없음"}</span>}
                     </label>
                   );
                 })}
@@ -10746,7 +10775,7 @@ export default function App() {
                 </div>
                 <div style={{ padding: "12px 18px", overflowY: "auto" }}>
                   <div style={{ fontSize: 12, color: "#444", lineHeight: 1.7, marginBottom: 12 }}>
-                    {li.sWeek ? `주 ${li.sWeek}회` : <span style={{ color: "#c0392b" }}>주 횟수 미입력</span>} · {sessionMinText(li) || <span style={{ color: "#c0392b" }}>회기 시간 미입력</span>}
+                    {[li.sWeek ? `주 ${li.sWeek}회` : "", sessionMinText(li)].filter(Boolean).join(" · ")}
                     {(li.pStart || li.pEnd) && <> · 보고 기간 {li.pStart ? dotDate(li.pStart) : "—"} ~ {li.pEnd ? dotDate(li.pEnd) : "—"}</>}
                   </div>
                   {copyDay && (filteredDayCount > 0 || hiddenTaskCount > 0) && (
@@ -11220,6 +11249,16 @@ export default function App() {
           <div>
             <div style={CS}>
               <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 14, color: PKD }}>아동 기본 정보</h3>
+              {/* ★ [105-4] 복사로 만든 기록은 날짜가 비어 있다 — 채우라고 안내 */}
+              {info.copiedFrom && (() => {
+                const miss = [[info.startDate, "수업 시작일"], [info.evalStart, "평가 시작일"], [info.evalEnd, "평가 종료일"]].filter(([v]) => !v).map(([, n]) => n);
+                if (miss.length === 0) return null;
+                return (
+                  <div style={{ margin: "0 0 12px", padding: "8px 12px", background: "#fef3c7", border: "1.5px solid #f59e0b", borderRadius: 8, fontSize: 12, color: "#92400e", lineHeight: 1.6 }}>
+                    ⚠️ 복사로 만든 기록이라 <b>{miss.join(" · ")}</b>이 비어 있습니다. 이 선생님 기준 날짜로 채워 주세요. (IEP 표지·보고서에 들어갑니다)
+                  </div>
+                );
+              })()}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14 }}>
                 <div><label style={LS}>아동 이름</label><input style={IS} value={info.name} onChange={e => {
                   const newName = e.target.value;
@@ -11490,13 +11529,18 @@ export default function App() {
                 if (opts.length === 0) return null;
                 const pickOwner = opts.some(o => o.name === copyToOwner) ? copyToOwner : "";
                 const _delG = (activeChild?.deletedGoals) || {};
-                const goalCount = (goals || []).filter(g => g && !_delG[g.id]).length;
+                const goalCount = (goals || []).filter(g => {
+                  if (!g || _delG[g.id] || g.status === "mastered") return false;
+                  const dT = g.deletedTasks || {};
+                  const ts = (g.tasks || []).filter(t => t && !dT[t.id]);
+                  return ts.length === 0 || ts.some(t => (t.listGroup || "1") === "1");
+                }).length;
                 return (
                   <div style={{ marginTop: 12, padding: "10px 12px", background: "#fff", borderRadius: 8, border: `1.5px dashed ${PK}` }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 4 }}>📋 다른 선생님에게 아동 복사</div>
                     <div style={{ fontSize: 10.5, color: "#888", lineHeight: 1.6, marginBottom: 8 }}>
-                      한 아동을 두 선생님이 나눠 맡을 때 씁니다. 아동 정보·IEP 내용·목표를 넘겨 새 기록을 만듭니다.<br/>
-                      목표는 진행 중 과제만 가져가고 회기 기록은 0회부터 시작합니다. 중간·종결보고서 칸과 메모는 비어 있습니다.<br/>
+                      한 아동을 두 선생님이 나눠 맡을 때 씁니다. 아동 정보와 진행 중인 목표를 넘겨 새 기록을 만듭니다.<br/>
+                      목표는 진행 중 과제만 가져가고 회기 기록은 0회부터 시작합니다. IEP·중간·종결보고서 칸과 메모는 비어 있습니다.<br/>
                       어떤 목표를 할지는 새 선생님이 자기 화면의 '복사받은 목표 정리'에서 고릅니다. 지금 기록은 하나도 바뀌지 않습니다.
                     </div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -11512,12 +11556,11 @@ export default function App() {
                           if (!pickOwner) return;
                           askConfirm(
                             `'${info.name || "이름없음"}' 기록을 ${pickOwner} 선생님에게 복사할까요?\n\n` +
-                            `· 목표 ${goalCount}개를 모두 넘깁니다 (안 할 목표는 ${pickOwner} 선생님이 정리)\n` +
-                            `· ${pickOwner} 선생님 수업: ${copySess.sWeek ? `주 ${copySess.sWeek}회` : "주 횟수 미입력"} · ${copySess.sMin ? `${copySess.sMin}분` : "회기 시간 미입력"}\n` +
+                            `· 진행 중인 목표 ${goalCount}개를 넘깁니다 (완료·중단·습득 목표는 빼고, 안 할 목표는 ${pickOwner} 선생님이 정리)\n` +
                             `· 회기 기록은 0회부터 시작합니다\n` +
-                            `· IEP 내용은 넘어가고, 중간·종결보고서 칸·메모·사진은 넘어가지 않습니다\n` +
+                            `· IEP·중간·종결보고서 칸, 메모, 사진은 넘어가지 않습니다 (IEP는 새로 작성)\n` +
                             `· 지금 기록(${curOwner || "미할당"} 선생님 담당)은 그대로 남습니다`,
-                            () => copyChildToTeacher(activeChildId, pickOwner, copySess)
+                            () => copyChildToTeacher(activeChildId, pickOwner)
                           );
                         }}
                         style={{ padding: "6px 14px", fontSize: 12, fontWeight: 700, fontFamily: "inherit", borderRadius: 6, cursor: pickOwner ? "pointer" : "default",
@@ -11525,19 +11568,6 @@ export default function App() {
                         복사하기
                       </button>
                     </div>
-                    {pickOwner && (
-                      <div style={{ marginTop: 10, padding: "8px 10px", background: "#fdf8f9", borderRadius: 6, border: `1px solid ${PKL}` }}>
-                        <div style={{ fontSize: 11.5, fontWeight: 700, color: "#555", marginBottom: 6 }}>
-                          {pickOwner} 선생님 수업 횟수
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#555", flexWrap: "wrap" }}>
-                          주 <input type="number" min="0" value={copySess.sWeek} onChange={e => setCopySess(p => ({ ...p, sWeek: e.target.value }))} style={{ ...IS, width: 60, padding: "4px 6px" }} /> 회
-                          <span style={{ width: 8 }} />
-                          <input type="number" min="0" value={copySess.sMin} onChange={e => setCopySess(p => ({ ...p, sMin: e.target.value }))} style={{ ...IS, width: 70, padding: "4px 6px" }} /> 분
-                          <span style={{ fontSize: 10.5, color: "#999" }}>(원래 선생님 값은 가져가지 않습니다)</span>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 );
               })()}
