@@ -535,6 +535,153 @@ const CS = { background: "#fff", border: "1px solid #f0e0e5", borderRadius: 14, 
 const BS = { border: `1px solid ${PK}`, borderRadius: 8, padding: "8px 18px", fontSize: 13, background: "transparent", color: PKD, cursor: "pointer", fontFamily: "inherit" };
 const BP = { ...BS, background: PK, color: "#fff" };
 
+/* ═══════════════════════════════════════════════════════════════
+   ★ [시간표 연결] 선생님 화면 '내 일정' 칸 — 시간표 앱(geomdan-schedule) 데이터를 읽기만 함
+   - 같은 Supabase · 같은 로그인이라, 서버 권한(RLS)이 이 선생님 수업 · 문구만 내려줍니다.
+   - 시간표 앱 데이터에 쓰지 않습니다. 통합본 아동 데이터와도 무관합니다.
+   - 읽기가 실패하면 칸을 그리지 않고 조용히 넘어갑니다(통합본 다른 기능에 영향 없음).
+   ═══════════════════════════════════════════════════════════════ */
+const SCHED_APP_URL = "https://aba-geomdan.github.io/geomdan-schedule/";
+async function schedRead(path, headers) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers });
+  if (!r.ok) throw new Error("schedule read " + r.status);
+  const j = await r.json();
+  return Array.isArray(j) ? j : [];
+}
+const _sIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const _sClock = (t) => {
+  if (!t) return "";
+  const [H, M] = String(t).slice(0, 5).split(":");
+  return `${((Number(H) + 11) % 12) + 1}:${M}`;
+};
+const _sMd = (d) => `${Number(String(d).slice(5, 7))}/${Number(String(d).slice(8, 10))}(${"일월화수목금토"[new Date(String(d).slice(0, 10) + "T00:00:00").getDay()]})`;
+
+function TeacherScheduleStrip() {
+  const [data, setData] = useState(null); // null = 아직 / 실패 → 칸 안 그림
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem("aba-sched-strip-open") !== "0"; } catch (e) { return true; }
+  });
+  useEffect(() => {
+    let on = true;
+    let seq = 0;        // 늦게 끝난 예전 요청이 최신 값을 덮지 않게
+    let lastAt = 0;     // 마지막으로 읽은 시각 (창을 자주 오가도 1분 안에는 다시 읽지 않음)
+    const pull = async () => {
+      const my = ++seq;
+      lastAt = Date.now();
+      try {
+        const headers = await _authHeaders(); // 로그인 토큰은 한 번만 받아 세 요청에 같이 씀
+        const now = new Date();
+        const mon = new Date(now); mon.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+        const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+        // 셋 중 하나가 실패해도 나머지는 보여 줌
+        const [ss, um, nt] = await Promise.allSettled([
+          schedRead(`v_sessions?select=id,d,start_time,end_time,status,student_name,makeup_for&d=gte.${_sIso(mon)}&d=lte.${_sIso(sun)}&status=neq.${encodeURIComponent("취소")}&order=d.asc,start_time.asc`, headers),
+          schedRead(`v_unmade_up?select=id`, headers),
+          schedRead(`notices?select=id,kind,message,created_at,to_staff,payload&confirmed_at=is.null&to_staff=not.is.null&order=created_at.desc&limit=30`, headers),
+        ]);
+        if (!on || my !== seq) return;
+        // 처음부터 수업 목록을 못 읽으면 칸을 그리지 않음 (시간표 앱과 연결 안 된 상태)
+        if (ss.status !== "fulfilled") return;
+        setData({
+          ss: ss.value,
+          unmade: um.status === "fulfilled" ? um.value.length : 0,
+          nt: nt.status === "fulfilled" ? nt.value : [],
+          today: _sIso(now),
+        });
+      } catch (e) {
+        // 잠깐 네트워크가 끊겨도 마지막으로 읽은 내용은 그대로 둡니다
+      }
+    };
+    pull();
+    const iv = setInterval(() => { if (document.visibilityState === "visible") pull(); }, 5 * 60 * 1000); // 5분마다, 창을 보고 있을 때만
+    const vis = () => { if (document.visibilityState === "visible" && Date.now() - lastAt > 60 * 1000) pull(); };
+    document.addEventListener("visibilitychange", vis);
+    return () => { on = false; clearInterval(iv); document.removeEventListener("visibilitychange", vis); };
+  }, []);
+  if (!data) return null;
+  const toggle = () => {
+    const v = !open; setOpen(v);
+    try { localStorage.setItem("aba-sched-strip-open", v ? "1" : "0"); } catch (e) {}
+  };
+  const closeReq = data.nt.filter((n) => n.kind === "close_req");
+  const changes = data.nt.filter((n) => n.kind !== "close_req");
+  const todays = data.ss.filter((s) => String(s.d).slice(0, 10) === data.today);
+  const weekMakeups = data.ss.filter((s) => s.status === "보강" && String(s.d).slice(0, 10) >= data.today);
+  const chip = (bg, fg, text) => (
+    <span style={{ fontSize: 10.5, fontWeight: 700, color: fg, background: bg, borderRadius: 99, padding: "1px 8px", whiteSpace: "nowrap", flexShrink: 0 }}>{text}</span>
+  );
+  const goBtn = (label) => (
+    <a href={SCHED_APP_URL} target="_blank" rel="noopener noreferrer"
+      style={{ ...BS, padding: "3px 10px", fontSize: 11, textDecoration: "none", whiteSpace: "nowrap", display: "inline-block" }}>
+      {label}
+    </a>
+  );
+  return (
+    <div style={{ marginBottom: 10, border: `1.5px solid ${PK}`, borderRadius: 10, background: "#fff", overflow: "hidden" }}>
+      <div onClick={toggle} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 13px", background: PKL, cursor: "pointer", flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12.5, fontWeight: 800, color: PKD }}>📅 내 일정</span>
+        {closeReq.length > 0 && chip("#1d4d80", "#fff", "마감 확인 요청")}
+        {changes.length > 0 && chip("#E07B00", "#fff", `일정 변경 ${changes.length}`)}
+        {data.unmade > 0 && chip("#FDECEF", "#AE2340", `보강 안 된 결강 ${data.unmade}`)}
+        <span style={{ flex: 1 }} />
+        <span onClick={(e) => e.stopPropagation()}>{goBtn("시간표 앱 열기 ↗")}</span>
+        <span style={{ fontSize: 11, color: "#b98a96" }}>{open ? "▾ 접기" : "▸ 펼치기"}</span>
+      </div>
+      {open && (
+        <div style={{ padding: "9px 13px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {closeReq.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "7px 10px", borderRadius: 8, background: "#f0f6fb", border: "1px solid #b9d4ee", fontSize: 12, color: "#1d4d80" }}>
+              <span style={{ flex: 1, minWidth: 200 }}>
+                🧾 <b>원장님이 {closeReq[0].payload?.ym ? `${Number(String(closeReq[0].payload.ym).slice(5))}월 ` : ""}마감 확인을 요청했습니다.</b> 시간표 앱 '마감'에서 맞는지 확인해 주세요.
+              </span>
+              {goBtn("확인하러 가기 ↗")}
+            </div>
+          )}
+          {changes.length > 0 && (
+            <div style={{ padding: "7px 10px", borderRadius: 8, background: "#fffaf0", border: "1px solid #e8d5a8", fontSize: 12, color: "#7a5a10" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                <b style={{ flex: 1 }}>원장님이 일정을 바꿨습니다 ({changes.length}건)</b>
+                {goBtn("시간표 앱에서 확인 ↗")}
+              </div>
+              {changes.slice(0, 3).map((n) => (
+                <div key={n.id} style={{ lineHeight: 1.6 }}>· {n.message}</div>
+              ))}
+              {changes.length > 3 && <div style={{ color: "#a8946a" }}>외 {changes.length - 3}건</div>}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#999", marginBottom: 4 }}>오늘 수업</div>
+              {todays.length === 0 && <div style={{ fontSize: 12, color: "#aaa" }}>오늘은 수업이 없습니다</div>}
+              {todays.map((s) => (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0" }}>
+                  <span style={{ width: 82, color: "#888", flexShrink: 0 }}>{_sClock(s.start_time)}~{_sClock(s.end_time)}</span>
+                  <span style={{ fontWeight: 700, color: s.status === "결강" ? "#aaa" : "#333", textDecoration: s.status === "결강" ? "line-through" : "none" }}>{s.student_name}</span>
+                  {s.status === "보강" && chip("#E07B00", "#fff", "보강")}
+                  {s.status === "결강" && chip("#FDECEF", "#AE2340", "결강")}
+                </div>
+              ))}
+            </div>
+            <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#999", marginBottom: 4 }}>이번 주 보강</div>
+              {weekMakeups.length === 0 && <div style={{ fontSize: 12, color: "#aaa" }}>남은 보강이 없습니다</div>}
+              {weekMakeups.map((s) => (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0" }}>
+                  <span style={{ width: 54, color: "#888", flexShrink: 0 }}>{_sMd(s.d)}</span>
+                  <span style={{ width: 82, color: "#888", flexShrink: 0 }}>{_sClock(s.start_time)}~{_sClock(s.end_time)}</span>
+                  <span style={{ fontWeight: 700, color: "#333" }}>{s.student_name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ★ [63-1] ELCAR 커리큘럼 항목 교체 — 옛 328항목 → 새 722라벨.
 //    옛 목록은 영역/세부영역 분류가 실제 ELCAR과 어긋나 있었다(예: 준거기준이
 //    항목처럼 섞임, 소영역 코드가 책과 불일치). 원장님이 책 기준으로 다시 정리한
@@ -9954,6 +10101,9 @@ export default function App() {
             </div>
           );
         })()}
+
+        {/* ★ [시간표 연결] 치료사 — 시간표 앱의 내 일정 · 원장님 문구 (읽기만) */}
+        {currentUser?.role === "teacher" && <TeacherScheduleStrip />}
 
         {/* ★ [87-2] 치료사 — 내가 올린 삭제 요청의 처리 결과.
             관리자가 승인·거절해도 선생님은 알 방법이 없어, 아동이 사라진 걸 나중에
