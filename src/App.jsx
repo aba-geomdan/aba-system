@@ -595,9 +595,9 @@ function TeacherScheduleStrip({ isAdmin = false }) {
           // 오늘 수업 + 앞으로 4주 안의 보강
           schedRead(`v_sessions?select=id,d,start_time,end_time,status,student_name,makeup_for&d=gte.${_sIso(now)}&d=lte.${_sIso(until)}&status=neq.${encodeURIComponent("취소")}${mine}&or=(d.eq.${_sIso(now)},status.eq.${encodeURIComponent("보강")})&order=d.asc,start_time.asc&limit=60`, headers),
           schedRead(`v_unmade_up?select=id${mine}`, headers),
-          // 선생님: 원장님이 보낸 문구 / 원장님: 선생님이 보낸 보강 체크 · 마감 답 (확인 안 한 것)
+          // 선생님: 원장님이 보낸 문구 / 원장님: 선생님이 보낸 보강 체크 · 마감 답 + 원장님 본인 수업 일정 변경 (확인 안 한 것)
           isAdmin
-            ? schedRead(`notices?select=id,kind,message,created_at,from_staff,payload&confirmed_at=is.null&to_staff=is.null&kind=in.(report,close_ans)&order=created_at.desc&limit=30`, headers)
+            ? schedRead(`notices?select=id,kind,message,created_at,from_staff,to_staff,payload&confirmed_at=is.null&or=(and(to_staff.is.null,kind.in.(report,close_ans)),to_staff.eq.${staffId})&order=created_at.desc&limit=30`, headers)
             : schedRead(`notices?select=id,kind,message,created_at,to_staff,payload&confirmed_at=is.null&to_staff=not.is.null&order=created_at.desc&limit=30`, headers),
         ]);
         if (!on || my !== seq) return;
@@ -636,8 +636,9 @@ function TeacherScheduleStrip({ isAdmin = false }) {
     try { localStorage.setItem("aba-sched-strip-open", v ? "1" : "0"); } catch (e) {}
   };
   const closeReq = isAdmin ? [] : data.nt.filter((n) => n.kind === "close_req");
-  const changes = isAdmin ? [] : data.nt.filter((n) => n.kind !== "close_req");
-  const fromTeachers = isAdmin ? data.nt : []; // 원장님: 선생님이 보낸 보강 체크 · 마감 답
+  // 일정 변경: 선생님은 원장님이 보낸 것, 원장님은 본인 수업에 남은 것
+  const changes = data.nt.filter((n) => n.to_staff != null && n.kind !== "close_req");
+  const fromTeachers = isAdmin ? data.nt.filter((n) => n.to_staff == null) : []; // 원장님: 선생님이 보낸 보강 체크 · 마감 답
   const todays = data.ss.filter((s) => String(s.d).slice(0, 10) === data.today);
   const weekMakeups = data.ss.filter((s) => s.status === "보강" && String(s.d).slice(0, 10) >= data.today);
   const chip = (bg, fg, text) => (
@@ -687,7 +688,7 @@ function TeacherScheduleStrip({ isAdmin = false }) {
           {changes.length > 0 && (
             <div style={{ padding: "7px 10px", borderRadius: 8, background: "#fffaf0", border: "1px solid #e8d5a8", fontSize: 12, color: "#7a5a10" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-                <b style={{ flex: 1 }}>원장님이 일정을 바꿨습니다 ({changes.length}건)</b>
+                <b style={{ flex: 1 }}>{isAdmin ? "내 수업 일정이 바뀌었습니다" : "원장님이 일정을 바꿨습니다"} ({changes.length}건)</b>
                 {goBtn("시간표 앱에서 확인 ↗")}
               </div>
               {changes.slice(0, 3).map((n) => (
