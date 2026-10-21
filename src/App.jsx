@@ -556,7 +556,17 @@ const _sClock = (t) => {
 };
 const _sMd = (d) => `${Number(String(d).slice(5, 7))}/${Number(String(d).slice(8, 10))}(${"일월화수목금토"[new Date(String(d).slice(0, 10) + "T00:00:00").getDay()]})`;
 
-function TeacherScheduleStrip() {
+// 로그인한 사람의 시간표 앱 선생님 id (원장님도 본인 수업만 보이게 하려고) — 못 찾으면 null
+async function schedMyStaffId(headers) {
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers });
+  if (!r.ok) return null;
+  const u = await r.json();
+  if (!u?.id) return null;
+  const rows = await schedRead(`staff?select=id&auth_user_id=eq.${u.id}&limit=1`, headers);
+  return rows[0]?.id || null;
+}
+
+function TeacherScheduleStrip({ isAdmin = false }) {
   const [data, setData] = useState(null); // null = 아직 / 실패 → 칸 안 그림
   const [open, setOpen] = useState(() => {
     try { return localStorage.getItem("aba-sched-strip-open") !== "0"; } catch (e) { return true; }
@@ -565,19 +575,27 @@ function TeacherScheduleStrip() {
     let on = true;
     let seq = 0;        // 늦게 끝난 예전 요청이 최신 값을 덮지 않게
     let lastAt = 0;     // 마지막으로 읽은 시각 (창을 자주 오가도 1분 안에는 다시 읽지 않음)
+    let staffId;        // 시간표 앱의 내 선생님 id (처음 한 번만 찾음)
     const pull = async () => {
       const my = ++seq;
       lastAt = Date.now();
       try {
-        const headers = await _authHeaders(); // 로그인 토큰은 한 번만 받아 세 요청에 같이 씀
+        const headers = await _authHeaders(); // 로그인 토큰은 한 번만 받아 여러 요청에 같이 씀
+        if (!staffId) staffId = await schedMyStaffId(headers).catch(() => null); // 못 찾았으면 다음에 다시 시도
+        // 원장님 계정은 서버가 모든 선생님 수업을 내려주므로, 본인 id를 못 찾으면 칸을 그리지 않음
+        if (isAdmin && !staffId) return;
+        const mine = staffId ? `&staff_id=eq.${staffId}` : "";
         const now = new Date();
         const mon = new Date(now); mon.setDate(now.getDate() - ((now.getDay() + 6) % 7));
         const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
         // 셋 중 하나가 실패해도 나머지는 보여 줌
         const [ss, um, nt] = await Promise.allSettled([
-          schedRead(`v_sessions?select=id,d,start_time,end_time,status,student_name,makeup_for&d=gte.${_sIso(mon)}&d=lte.${_sIso(sun)}&status=neq.${encodeURIComponent("취소")}&order=d.asc,start_time.asc`, headers),
-          schedRead(`v_unmade_up?select=id`, headers),
-          schedRead(`notices?select=id,kind,message,created_at,to_staff,payload&confirmed_at=is.null&to_staff=not.is.null&order=created_at.desc&limit=30`, headers),
+          schedRead(`v_sessions?select=id,d,start_time,end_time,status,student_name,makeup_for&d=gte.${_sIso(mon)}&d=lte.${_sIso(sun)}&status=neq.${encodeURIComponent("취소")}${mine}&order=d.asc,start_time.asc`, headers),
+          schedRead(`v_unmade_up?select=id${mine}`, headers),
+          // 선생님: 원장님이 보낸 문구 / 원장님: 선생님이 보낸 보강 체크 · 마감 답 (확인 안 한 것)
+          isAdmin
+            ? schedRead(`notices?select=id,kind,message,created_at,from_staff,payload&confirmed_at=is.null&to_staff=is.null&kind=in.(report,close_ans)&order=created_at.desc&limit=30`, headers)
+            : schedRead(`notices?select=id,kind,message,created_at,to_staff,payload&confirmed_at=is.null&to_staff=not.is.null&order=created_at.desc&limit=30`, headers),
         ]);
         if (!on || my !== seq) return;
         // 처음부터 수업 목록을 못 읽으면 칸을 그리지 않음 (시간표 앱과 연결 안 된 상태)
@@ -597,14 +615,15 @@ function TeacherScheduleStrip() {
     const vis = () => { if (document.visibilityState === "visible" && Date.now() - lastAt > 60 * 1000) pull(); };
     document.addEventListener("visibilitychange", vis);
     return () => { on = false; clearInterval(iv); document.removeEventListener("visibilitychange", vis); };
-  }, []);
+  }, [isAdmin]);
   if (!data) return null;
   const toggle = () => {
     const v = !open; setOpen(v);
     try { localStorage.setItem("aba-sched-strip-open", v ? "1" : "0"); } catch (e) {}
   };
-  const closeReq = data.nt.filter((n) => n.kind === "close_req");
-  const changes = data.nt.filter((n) => n.kind !== "close_req");
+  const closeReq = isAdmin ? [] : data.nt.filter((n) => n.kind === "close_req");
+  const changes = isAdmin ? [] : data.nt.filter((n) => n.kind !== "close_req");
+  const fromTeachers = isAdmin ? data.nt : []; // 원장님: 선생님이 보낸 보강 체크 · 마감 답
   const todays = data.ss.filter((s) => String(s.d).slice(0, 10) === data.today);
   const weekMakeups = data.ss.filter((s) => s.status === "보강" && String(s.d).slice(0, 10) >= data.today);
   const chip = (bg, fg, text) => (
@@ -623,6 +642,7 @@ function TeacherScheduleStrip() {
         <span style={{ fontSize: 12.5, fontWeight: 800, color: PKD }}>📅 내 일정</span>
         {closeReq.length > 0 && chip("#1d4d80", "#fff", "마감 확인 요청")}
         {changes.length > 0 && chip("#E07B00", "#fff", `일정 변경 ${changes.length}`)}
+        {fromTeachers.length > 0 && chip("#1d4d80", "#fff", `선생님 확인 ${fromTeachers.length}`)}
         {data.unmade > 0 && chip("#FDECEF", "#AE2340", `보강 안 된 결강 ${data.unmade}`)}
         <span style={{ flex: 1 }} />
         <span onClick={(e) => e.stopPropagation()}>{goBtn("시간표 앱 열기 ↗")}</span>
@@ -636,6 +656,18 @@ function TeacherScheduleStrip() {
                 🧾 <b>원장님이 {closeReq[0].payload?.ym ? `${Number(String(closeReq[0].payload.ym).slice(5))}월 ` : ""}마감 확인을 요청했습니다.</b> 시간표 앱 '마감'에서 맞는지 확인해 주세요.
               </span>
               {goBtn("확인하러 가기 ↗")}
+            </div>
+          )}
+          {fromTeachers.length > 0 && (
+            <div style={{ padding: "7px 10px", borderRadius: 8, background: "#f0f6fb", border: "1px solid #b9d4ee", fontSize: 12, color: "#1d4d80" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                <b style={{ flex: 1 }}>선생님이 보낸 확인할 것 ({fromTeachers.length}건)</b>
+                {goBtn("시간표 앱에서 처리 ↗")}
+              </div>
+              {fromTeachers.slice(0, 3).map((n) => (
+                <div key={n.id} style={{ lineHeight: 1.6 }}>· {n.kind === "report" ? "[보강 체크] " : n.payload?.agree ? "[마감 같음] " : "[마감 다름] "}{n.message}</div>
+              ))}
+              {fromTeachers.length > 3 && <div style={{ color: "#6a8cb0" }}>외 {fromTeachers.length - 3}건</div>}
             </div>
           )}
           {changes.length > 0 && (
@@ -10102,8 +10134,8 @@ export default function App() {
           );
         })()}
 
-        {/* ★ [시간표 연결] 치료사 — 시간표 앱의 내 일정 · 원장님 문구 (읽기만) */}
-        {currentUser?.role === "teacher" && <TeacherScheduleStrip />}
+        {/* ★ [시간표 연결] 선생님 · 원장님 — 시간표 앱의 내 일정 (읽기만). 원장님은 본인 수업 + 선생님이 보낸 확인할 것 */}
+        {currentUser && <TeacherScheduleStrip key={(currentUser.role || "") + ":" + (currentUser.name || "")} isAdmin={currentUser.role === "admin"} />}
 
         {/* ★ [87-2] 치료사 — 내가 올린 삭제 요청의 처리 결과.
             관리자가 승인·거절해도 선생님은 알 방법이 없어, 아동이 사라진 걸 나중에
