@@ -9826,6 +9826,45 @@ export default function App() {
               📜 기록
             </button>
             )}
+            {/* ★ [84-2 → 헤더로] 치료사용 보관함 — 본문 배너가 '내 일정'과 붙어 보여서 로그아웃 옆 작은 버튼으로 옮김.
+                보관하면 본인이 다시 꺼낼 자리는 그대로 남긴다(84-1: 치료사의 삭제 = 보관). */}
+            {currentUser?.role === "teacher" && (() => {
+              const archived = liveChildren(children).filter(c => (c.info?.ownerName || "") === currentUser.name && c.info?.archivedAt);
+              if (archived.length === 0) return null;
+              return (
+                <div style={{ position: "relative" }}>
+                  <button
+                    style={{ ...BS, borderColor: "#d9c9a3", color: "#7a5a10", background: teacherArchiveOpen ? "#fffaf0" : "#fff", fontSize: 11 }}
+                    onClick={() => setTeacherArchiveOpen(v => !v)}
+                    title="목록에서 숨긴 아동 — 데이터는 그대로이고 여기서 다시 꺼낼 수 있습니다">
+                    🗄️ 보관 {archived.length}명 {teacherArchiveOpen ? "▴" : "▾"}
+                  </button>
+                  {teacherArchiveOpen && (
+                    <div style={{
+                      // 폰에서는 버튼이 왼쪽에 놓여서, 오른쪽 기준으로 펼치면 화면 밖으로 나갑니다
+                      position: "absolute", top: "calc(100% + 6px)", zIndex: 50,
+                      ...((typeof window !== "undefined" && window.innerWidth < 600) ? { left: 0 } : { right: 0 }),
+                      maxWidth: "calc(100vw - 32px)",
+                      background: "#fff", border: "1px solid #eadcc0", borderRadius: 10,
+                      boxShadow: "0 6px 20px rgba(0,0,0,0.12)", padding: 10,
+                      display: "flex", flexDirection: "column", gap: 6, minWidth: 240
+                    }}>
+                      <div style={{ fontSize: 10.5, color: "#a8946a", padding: "2px 4px 4px", borderBottom: "1px solid #f3ead6", marginBottom: 2 }}>
+                        목록에서 숨겨진 아동 · 데이터는 그대로입니다
+                      </div>
+                      {archived.map(c => (
+                        <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 4px", fontSize: 12 }}>
+                          <span style={{ flex: 1, color: "#5a4a30", fontWeight: 600 }}>{c.info?.name || "이름없음"}</span>
+                          <span style={{ fontSize: 10, color: "#a8946a" }}>보관 {String(c.info.archivedAt).slice(0, 10)}</span>
+                          <button onClick={() => askConfirm(`'${c.info?.name || "이름없음"}' 아동을 목록으로 되돌립니다.`, () => unarchiveChild(c.id))}
+                            style={{ ...BS, padding: "3px 9px", fontSize: 10.5, whiteSpace: "nowrap" }}>↩ 꺼내기</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {/* ★ [v19] 로그아웃 — 샌드박스 confirm 차단 대응으로 자체 모달 사용 */}
             <button
               style={{ ...BS, borderColor: "#aaa", color: "#888" }}
@@ -10192,38 +10231,7 @@ export default function App() {
           );
         })()}
 
-        {/* ★ [84-2] 치료사용 보관함 — 관리자 패널의 '보관 아동 보기' 토글은 치료사 화면에
-            나오지 않아, 보관하면 본인이 다시 꺼낼 방법이 없었다(사실상 삭제와 같았다).
-            84-1로 치료사의 삭제를 보관으로 돌렸으므로, 되돌릴 자리를 반드시 함께 준다. */}
-        {currentUser?.role === "teacher" && (() => {
-          const mine = liveChildren(children).filter(c => (c.info?.ownerName || "") === currentUser.name);
-          const archived = mine.filter(c => c.info?.archivedAt);
-          if (archived.length === 0) return null;
-          return (
-            <div style={{ marginBottom: 10, padding: "9px 13px", background: "#fffaf0", border: "1.5px solid #e8d5a8", borderRadius: 10, fontSize: 12, color: "#7a5a10" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <span style={{ flex: 1, minWidth: 200 }}>
-                  🗄️ <b>보관 아동 {archived.length}명</b> — 목록에서 숨겨져 있고 데이터는 그대로입니다.
-                </span>
-                <button onClick={() => setTeacherArchiveOpen(v => !v)} style={{ ...BS, padding: "5px 11px", fontSize: 11, whiteSpace: "nowrap" }}>
-                  {teacherArchiveOpen ? "접기" : "펼쳐서 꺼내기"}
-                </button>
-              </div>
-              {teacherArchiveOpen && (
-                <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                  {archived.map(c => (
-                    <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1px solid #eadcc0", borderRadius: 7, padding: "6px 10px" }}>
-                      <span style={{ flex: 1, color: "#5a4a30" }}>{c.info?.name || "이름없음"}</span>
-                      <span style={{ fontSize: 10, color: "#a8946a" }}>보관 {String(c.info.archivedAt).slice(0, 10)}</span>
-                      <button onClick={() => askConfirm(`'${c.info?.name || "이름없음"}' 아동을 목록으로 되돌립니다.`, () => unarchiveChild(c.id))}
-                        style={{ ...BS, padding: "3px 9px", fontSize: 10.5, whiteSpace: "nowrap" }}>↩ 꺼내기</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })()}
+        {/* ★ [84-2] 치료사용 보관함은 헤더(로그아웃 옆)로 옮겼습니다 */}
 
         {/* ★ [83-3] 남의 담당 아동 잠금 배너 — 관리자에게만, 남의 아동일 때만 */}
         {isOthersChild && (
