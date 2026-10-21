@@ -66,7 +66,32 @@ function _getStoredSession() {
 function _saveSession(session) {
   try {
     if (session) sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
-    else sessionStorage.removeItem(AUTH_SESSION_KEY);
+    else { sessionStorage.removeItem(AUTH_SESSION_KEY); sessionStorage.removeItem(SCHED_HANDOFF_KEY); }
+  } catch (e) {}
+}
+
+// ★ [시간표 바로 열기] 통합본에서 [시간표 앱 열기]를 누르면 다시 로그인하지 않고 열리게
+//    - 로그인할 때 같은 계정으로 '시간표 앱 전용' 로그인을 하나 더 받아 이 창(탭)에만 둡니다.
+//      통합본 로그인과 따로 갱신되는 별개의 로그인이라 서로 끊기게 하지 않습니다.
+//    - 창을 닫으면 사라지고(sessionStorage), 로그아웃하면 같이 지워집니다.
+//    - 비밀번호는 저장하지 않습니다 (로그인하는 그 순간에만 씀).
+const SCHED_HANDOFF_KEY = "sched-handoff";
+async function _prepareSchedHandoff(email, password) {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!d.access_token || !d.refresh_token) return;
+    // 그사이 다른 사람으로 바뀌었으면 두지 않음
+    const cur = _getStoredSession();
+    if (!cur || !d.user?.id || cur.user?.id !== d.user.id) return;
+    sessionStorage.setItem(SCHED_HANDOFF_KEY, JSON.stringify({
+      access_token: d.access_token, refresh_token: d.refresh_token, user_id: d.user?.id || null,
+    }));
   } catch (e) {}
 }
 async function _refreshSession(refreshToken) {
@@ -542,6 +567,85 @@ const BP = { ...BS, background: PK, color: "#fff" };
    - 읽기가 실패하면 칸을 그리지 않고 조용히 넘어갑니다(통합본 다른 기능에 영향 없음).
    ═══════════════════════════════════════════════════════════════ */
 const SCHED_APP_URL = "https://aba-geomdan.github.io/geomdan-schedule/";
+// ★ [시간표 바로 열기] 시간표 앱을 늘 같은 창(탭) 하나로 엽니다.
+//    이미 열려 있으면 그 창으로 옮겨 가기만 하고(쓰던 화면 그대로), 처음 열 때만
+//    로그인 때 받아 둔 '시간표 앱 전용' 로그인을 새 창에 넘깁니다.
+//    넘길 게 없거나(이 기능 전에 로그인한 경우) 잘 안 되면 false → 예전처럼 링크로 열리고 로그인 화면이 나옵니다.
+let _schedWin = null;   // 이 통합본 창이 연 시간표 창 (로그아웃할 때 같이 닫기 위해)
+const SCHED_SB_KEY = "sb-vdubgrxwijydwfabwpnk-auth-token"; // 시간표 앱이 그 창에 두는 로그인 칸
+// 시간표 창에 지금 로그인된 사람 (없으면 null, 읽을 수 없으면 undefined)
+function _schedUserIn(w) {
+  try {
+    const v = JSON.parse(w.sessionStorage.getItem(SCHED_SB_KEY) || "null");
+    return (v && v.user && v.user.id) || null;
+  } catch (e) { return undefined; }
+}
+function openSchedApp() {
+  let h = null;
+  try { h = JSON.parse(sessionStorage.getItem(SCHED_HANDOFF_KEY) || "null"); } catch (e) { h = null; }
+  // 넘겨줄 것이 없거나, 지금 통합본에 로그인된 사람 것이 아니면 → 예전처럼 링크로 열기(로그인 화면)
+  const cur = _getStoredSession();
+  if (!h || !h.user_id || !cur || cur.user?.id !== h.user_id) return false;
+  let w = null;
+  try { w = window.open("", "geomdan-schedule"); } catch (e) { w = null; }
+  if (!w) return false;
+  // 여기부터는 창이 열렸으므로 무슨 일이 있어도 true (링크가 창을 하나 더 열지 않게)
+  try {
+    _schedWin = w;
+    let fresh = true;   // 새로 열어(넘겨줘)야 하는지
+    let readable = true;
+    let isSched = false;
+    try {
+      fresh = !w.location.href || w.location.href === "about:blank";
+      isSched = String(w.location.pathname || "").startsWith("/geomdan-schedule/");
+    } catch (e) { fresh = false; readable = false; }
+    if (readable && !fresh && !isSched) {
+      // 그 창이 시간표 앱이 아닌 다른 화면이면(통합본 등) 건드리지 않고 새 창으로 엽니다
+      const w2 = window.open("", "_blank");
+      if (w2) {
+        try { w2.sessionStorage.removeItem(AUTH_SESSION_KEY); w2.sessionStorage.setItem(SCHED_HANDOFF_KEY, JSON.stringify(h)); } catch (e) {}
+        w2.location.href = SCHED_APP_URL;
+        _schedWin = w2;
+        try { w2.focus(); } catch (e) {}
+      }
+      return true;
+    }
+    if (!readable) {
+      // 그 창이 다른 사이트로 가 있으면 시간표 앱으로 다시 보냄
+      w.location.href = SCHED_APP_URL;
+    } else {
+      if (!fresh) {
+        // 이미 열린 시간표 창: 같은 사람이면 그대로 보여 주고,
+        //   다른 사람(이 컴퓨터에서 먼저 쓰던 사람)이거나 로그아웃 상태면 지금 사람으로 다시 엽니다
+        const who = _schedUserIn(w);
+        if (who !== h.user_id) fresh = true;
+      }
+      if (fresh) {
+        // 브라우저가 새 창에 통합본 로그인 칸까지 복사해 오는 수가 있어 지움
+        try { w.sessionStorage.removeItem(AUTH_SESSION_KEY); } catch (e) {}
+        try { w.sessionStorage.setItem(SCHED_HANDOFF_KEY, JSON.stringify(h)); } catch (e) {}
+        w.location.href = SCHED_APP_URL;
+      }
+    }
+    w.focus();
+  } catch (e) {}
+  return true;
+}
+// 통합본에서 로그아웃하면, 이 창에서 연 시간표 창의 로그인도 지웁니다 (공용 컴퓨터에 남지 않게)
+function closeSchedSession(uid) {
+  try {
+    const w = _schedWin;
+    if (w && !w.closed) {
+      w.sessionStorage.removeItem(SCHED_SB_KEY);
+      w.sessionStorage.removeItem(SCHED_HANDOFF_KEY);
+      w.sessionStorage.removeItem(AUTH_SESSION_KEY);
+      w.location.href = SCHED_APP_URL;
+    }
+  } catch (e) {}
+  _schedWin = null;
+  // 이 창이 연 것이 아닌 시간표 창(통합본을 새로고침했거나 다른 탭에서 연 것)에도 알림
+  try { if (uid) new BroadcastChannel("aba-logout").postMessage({ uid }); } catch (e) {}
+}
 async function schedRead(path, headers) {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers });
   if (!r.ok) throw new Error("schedule read " + r.status);
@@ -646,6 +750,7 @@ function TeacherScheduleStrip({ isAdmin = false }) {
   );
   const goBtn = (label) => (
     <a href={SCHED_APP_URL} target="_blank" rel="noopener noreferrer"
+      onClick={(e) => { if (openSchedApp()) e.preventDefault(); }}
       style={{ ...BS, padding: "3px 10px", fontSize: 11, textDecoration: "none", whiteSpace: "nowrap", display: "inline-block" }}>
       {label}
     </a>
@@ -9473,7 +9578,9 @@ export default function App() {
 
           try {
             // Supabase Auth 로그인
+            try { sessionStorage.removeItem(SCHED_HANDOFF_KEY); } catch (e) {} // 앞사람 것이 남지 않게
             const res = await abaSignIn(email.trim(), pw);
+            if (!res.error) _prepareSchedHandoff(email.trim(), pw); // ★ [시간표 바로 열기] 기다리지 않음
             if (res.error) {
               // ★ [98-2] 예전엔 어떤 이유든 "이메일 또는 비밀번호를 확인하세요" 하나로 뭉갰다.
               //    abaSignIn은 Supabase가 준 진짜 이유를 res.error에 담아 오는데 그걸 버렸다.
@@ -9874,7 +9981,10 @@ export default function App() {
                   message: "로그아웃 하시겠습니까?",
                   onConfirm: async () => {
                     // A방식: Supabase Auth 세션 종료
-                    try { await abaSignOut(); } catch (e) {}
+                    const _uid = _getStoredSession()?.user?.id || null;
+                    // 서버 응답이 늦어도 5초 넘게 기다리지 않음 (시간표 창 정리가 늦어지지 않게)
+                    try { await Promise.race([abaSignOut(), new Promise((r) => setTimeout(r, 5000))]); } catch (e) {}
+                    closeSchedSession(_uid); // ★ [시간표 바로 열기] 시간표 창 로그인도 같이 지움 (서버에서 끊은 뒤에)
                     // 과거 방식 잔재 정리
                     try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(AUTH_CURRENT_USER_KEY); } catch (e) {}
                     try { if (typeof localStorage !== "undefined") localStorage.removeItem(AUTH_CURRENT_USER_KEY); } catch (e) {}
