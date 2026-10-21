@@ -556,12 +556,14 @@ const _sClock = (t) => {
 };
 const _sMd = (d) => `${Number(String(d).slice(5, 7))}/${Number(String(d).slice(8, 10))}(${"일월화수목금토"[new Date(String(d).slice(0, 10) + "T00:00:00").getDay()]})`;
 
-// 로그인한 사람의 시간표 앱 선생님 id (원장님도 본인 수업만 보이게 하려고) — 못 찾으면 null
+// 로그인한 사람의 시간표 앱 선생님 id
+//   - 찾으면 id, 시간표 앱 '선생님 관리'에 이 계정이 연결 안 돼 있으면 null
+//   - 네트워크 등으로 확인 자체를 못 하면 오류를 던짐 (연결 안 됨과 구분하려고)
 async function schedMyStaffId(headers) {
   const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers });
-  if (!r.ok) return null;
+  if (!r.ok) throw new Error("auth user " + r.status);
   const u = await r.json();
-  if (!u?.id) return null;
+  if (!u?.id) throw new Error("no auth user");
   const rows = await schedRead(`staff?select=id&auth_user_id=eq.${u.id}&limit=1`, headers);
   return rows[0]?.id || null;
 }
@@ -581,16 +583,17 @@ function TeacherScheduleStrip({ isAdmin = false }) {
       lastAt = Date.now();
       try {
         const headers = await _authHeaders(); // 로그인 토큰은 한 번만 받아 여러 요청에 같이 씀
-        if (!staffId) staffId = await schedMyStaffId(headers).catch(() => null); // 못 찾았으면 다음에 다시 시도
-        // 원장님 계정은 서버가 모든 선생님 수업을 내려주므로, 본인 id를 못 찾으면 칸을 그리지 않음
-        if (isAdmin && !staffId) return;
-        const mine = staffId ? `&staff_id=eq.${staffId}` : "";
+        if (!staffId) staffId = await schedMyStaffId(headers); // 못 찾았으면(null) 다음에 다시 확인
+        if (!on || my !== seq) return;
+        // 시간표 앱에 이 계정이 연결 안 돼 있으면 서버가 아무것도 내주지 않음 → 빈 칸 대신 안내를 띄움
+        if (!staffId) { setData({ notLinked: true }); return; }
+        const mine = `&staff_id=eq.${staffId}`;
         const now = new Date();
-        const mon = new Date(now); mon.setDate(now.getDate() - ((now.getDay() + 6) % 7));
-        const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+        const until = new Date(now); until.setDate(now.getDate() + 28); // 다가오는 보강: 오늘부터 4주
         // 셋 중 하나가 실패해도 나머지는 보여 줌
         const [ss, um, nt] = await Promise.allSettled([
-          schedRead(`v_sessions?select=id,d,start_time,end_time,status,student_name,makeup_for&d=gte.${_sIso(mon)}&d=lte.${_sIso(sun)}&status=neq.${encodeURIComponent("취소")}${mine}&order=d.asc,start_time.asc`, headers),
+          // 오늘 수업 + 앞으로 4주 안의 보강
+          schedRead(`v_sessions?select=id,d,start_time,end_time,status,student_name,makeup_for&d=gte.${_sIso(now)}&d=lte.${_sIso(until)}&status=neq.${encodeURIComponent("취소")}${mine}&or=(d.eq.${_sIso(now)},status.eq.${encodeURIComponent("보강")})&order=d.asc,start_time.asc&limit=60`, headers),
           schedRead(`v_unmade_up?select=id${mine}`, headers),
           // 선생님: 원장님이 보낸 문구 / 원장님: 선생님이 보낸 보강 체크 · 마감 답 (확인 안 한 것)
           isAdmin
@@ -617,6 +620,17 @@ function TeacherScheduleStrip({ isAdmin = false }) {
     return () => { on = false; clearInterval(iv); document.removeEventListener("visibilitychange", vis); };
   }, [isAdmin]);
   if (!data) return null;
+  if (data.notLinked)
+    return (
+      <div style={{ marginBottom: 10, border: `1.5px solid ${PK}`, borderRadius: 10, background: "#fff", padding: "9px 13px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5 }}>
+        <span style={{ fontWeight: 800, color: PKD }}>📅 내 일정</span>
+        <span style={{ flex: 1, minWidth: 220, color: "#7a5a10" }}>
+          {isAdmin
+            ? "시간표 앱 '선생님 관리'에 원장님 로그인 계정이 연결되지 않아 일정을 불러올 수 없습니다."
+            : "시간표 앱과 계정이 연결되지 않아 일정을 불러올 수 없습니다. 원장님께 말씀해 주세요."}
+        </span>
+      </div>
+    );
   const toggle = () => {
     const v = !open; setOpen(v);
     try { localStorage.setItem("aba-sched-strip-open", v ? "1" : "0"); } catch (e) {}
@@ -696,8 +710,8 @@ function TeacherScheduleStrip({ isAdmin = false }) {
               ))}
             </div>
             <div style={{ flex: "1 1 220px", minWidth: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#999", marginBottom: 4 }}>이번 주 보강</div>
-              {weekMakeups.length === 0 && <div style={{ fontSize: 12, color: "#aaa" }}>남은 보강이 없습니다</div>}
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#999", marginBottom: 4 }}>다가오는 보강 (4주)</div>
+              {weekMakeups.length === 0 && <div style={{ fontSize: 12, color: "#aaa" }}>잡힌 보강이 없습니다</div>}
               {weekMakeups.map((s) => (
                 <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0" }}>
                   <span style={{ width: 54, color: "#888", flexShrink: 0 }}>{_sMd(s.d)}</span>
