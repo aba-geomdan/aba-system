@@ -56,27 +56,16 @@ const ABA_OWNER_ID = "aecb8a9c-000e-4ad5-9805-83450e9bc585";
 // ── Auth 세션 관리 ──────────────────────────────────────────────
 const AUTH_SESSION_KEY = "sb-aba-auth-session";
 
-// ★ [로그인 유지] 로그인 화면에서 '이 기기에서 로그인 유지'를 체크한 기기만
-//    로그인을 기기에도(localStorage) 남겨, 패드가 탭을 정리하거나 앱을 껐다 켜도 로그인이 이어진다.
-//    체크하지 않으면 지금처럼 그 탭 안에만(sessionStorage) 두고, 탭을 닫으면 사라진다.
-//    로그아웃하면 기기에 남긴 로그인과 체크 표시를 모두 지운다.
-const REMEMBER_KEY = "aba-remember-device";
-function _rememberOn() {
-  try { return localStorage.getItem(REMEMBER_KEY) === "1"; } catch (e) { return false; }
-}
-function _setRemember(on) {
-  try {
-    if (on) localStorage.setItem(REMEMBER_KEY, "1");
-    else { localStorage.removeItem(REMEMBER_KEY); localStorage.removeItem(AUTH_SESSION_KEY); localStorage.removeItem(SCHED_HANDOFF_KEY); }
-  } catch (e) {}
-}
+// ★ [로그인 유지 기능 제거] 잠깐 있었던 '이 기기에서 로그인 유지'로 기기에 남은 로그인을 지운다.
+//    로그인은 지금처럼 그 탭 안에만(sessionStorage) 두고, 탭을 닫으면 사라진다.
+try {
+  localStorage.removeItem("aba-remember-device");
+  localStorage.removeItem(AUTH_SESSION_KEY);
+  localStorage.removeItem("sched-handoff");
+} catch (e) {}
+
 function _getStoredSession() {
   try {
-    // 기기에 남긴 로그인이 있으면 그것이 가장 최신이다 (다른 탭이 갱신했어도 같이 씀)
-    if (_rememberOn()) {
-      const kept = localStorage.getItem(AUTH_SESSION_KEY);
-      if (kept) return JSON.parse(kept);
-    }
     const raw = sessionStorage.getItem(AUTH_SESSION_KEY);
     if (!raw) return null;
     return JSON.parse(raw);
@@ -84,26 +73,8 @@ function _getStoredSession() {
 }
 function _saveSession(session) {
   try {
-    if (session) {
-      sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
-      if (_rememberOn()) localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
-    } else {
-      sessionStorage.removeItem(AUTH_SESSION_KEY); sessionStorage.removeItem(SCHED_HANDOFF_KEY);
-      _setRemember(false);
-    }
-  } catch (e) {}
-}
-// 시간표 앱 바로 열기용 로그인도 같은 규칙으로 둔다
-function _getHandoff() {
-  try {
-    const raw = sessionStorage.getItem(SCHED_HANDOFF_KEY) || (_rememberOn() ? localStorage.getItem(SCHED_HANDOFF_KEY) : null);
-    return raw ? JSON.parse(raw) : null;
-  } catch (e) { return null; }
-}
-function _setHandoff(h) {
-  try {
-    sessionStorage.setItem(SCHED_HANDOFF_KEY, JSON.stringify(h));
-    if (_rememberOn()) localStorage.setItem(SCHED_HANDOFF_KEY, JSON.stringify(h));
+    if (session) sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+    else { sessionStorage.removeItem(AUTH_SESSION_KEY); sessionStorage.removeItem(SCHED_HANDOFF_KEY); }
   } catch (e) {}
 }
 
@@ -126,9 +97,9 @@ async function _prepareSchedHandoff(email, password) {
     // 그사이 다른 사람으로 바뀌었으면 두지 않음
     const cur = _getStoredSession();
     if (!cur || !d.user?.id || cur.user?.id !== d.user.id) return;
-    _setHandoff({
+    sessionStorage.setItem(SCHED_HANDOFF_KEY, JSON.stringify({
       access_token: d.access_token, refresh_token: d.refresh_token, user_id: d.user?.id || null,
-    });
+    }));
   } catch (e) {}
 }
 // ★ [로그인 유지] 로그인 갱신은 한 번에 하나만 — 패드가 깨어날 때 여러 곳이 동시에 갱신하면
@@ -626,7 +597,7 @@ function _schedUserIn(w) {
 }
 function openSchedApp() {
   let h = null;
-  h = _getHandoff();
+  try { h = JSON.parse(sessionStorage.getItem(SCHED_HANDOFF_KEY) || "null"); } catch (e) { h = null; }
   // 넘겨줄 것이 없거나, 지금 통합본에 로그인된 사람 것이 아니면 → 예전처럼 링크로 열기(로그인 화면)
   const cur = _getStoredSession();
   if (!h || !h.user_id || !cur || cur.user?.id !== h.user_id) return false;
@@ -5569,7 +5540,6 @@ function ManualModal({ onClose }) {
 }
 
 function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
-  const [remember, setRemember] = useState(false);   // ★ [로그인 유지] 매번 꺼진 채로 시작 (공용 컴퓨터 안전)
   const [pw, setPw] = useState("");
   const [pwConfirm, setPwConfirm] = useState("");
   const [name, setName] = useState("");
@@ -5583,7 +5553,7 @@ function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
       }
       onSetupAdmin(pw);
     } else {
-      onLogin(name, pw, remember);
+      onLogin(name, pw);
     }
   };
 
@@ -5677,14 +5647,6 @@ function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
             }}
           />
         </div>
-
-        {view !== "setup" && (
-          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: "-6px 0 16px", fontSize: 12.5, color: "#555", cursor: "pointer", lineHeight: 1.5 }}>
-            <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)}
-              style={{ width: 17, height: 17, marginTop: 1, accentColor: PKD, flexShrink: 0 }} />
-            <span>이 기기에서 로그인 유지<br /><span style={{ fontSize: 11, color: "#999" }}>개인 기기에서만 체크하세요. 로그아웃하면 풀립니다.</span></span>
-          </label>
-        )}
 
         {view === "setup" && (
           <div style={{ marginBottom: 16 }}>
@@ -9816,7 +9778,7 @@ export default function App() {
             setAuthMessage("비밀번호 저장 실패: " + (e?.message || ""));
           }
         }}
-        onLogin={async (email, pw, remember) => {
+        onLogin={async (email, pw) => {
           if (!email || !pw) {
             setAuthMessage("⚠️ 이메일과 비밀번호를 모두 입력하세요.");
             return;
@@ -9825,7 +9787,6 @@ export default function App() {
           try {
             // Supabase Auth 로그인
             try { sessionStorage.removeItem(SCHED_HANDOFF_KEY); } catch (e) {} // 앞사람 것이 남지 않게
-            _setRemember(!!remember); // ★ [로그인 유지] 체크했을 때만 이 기기에 로그인을 남김 (안 했으면 앞사람 것도 지움)
             const res = await abaSignIn(email.trim(), pw);
             if (!res.error) _prepareSchedHandoff(email.trim(), pw); // ★ [시간표 바로 열기] 기다리지 않음
             if (res.error) {
@@ -10231,7 +10192,6 @@ export default function App() {
                     const _uid = _getStoredSession()?.user?.id || null;
                     // 서버 응답이 늦어도 5초 넘게 기다리지 않음 (시간표 창 정리가 늦어지지 않게)
                     try { await Promise.race([abaSignOut(), new Promise((r) => setTimeout(r, 5000))]); } catch (e) {}
-                    _saveSession(null); // ★ [로그인 유지] 서버 응답이 늦어도 이 기기에 남긴 로그인은 바로 지움
                     closeSchedSession(_uid); // ★ [시간표 바로 열기] 시간표 창 로그인도 같이 지움 (서버에서 끊은 뒤에)
                     // 과거 방식 잔재 정리
                     try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(AUTH_CURRENT_USER_KEY); } catch (e) {}
