@@ -56,8 +56,27 @@ const ABA_OWNER_ID = "aecb8a9c-000e-4ad5-9805-83450e9bc585";
 // ── Auth 세션 관리 ──────────────────────────────────────────────
 const AUTH_SESSION_KEY = "sb-aba-auth-session";
 
+// ★ [로그인 유지] 로그인 화면에서 '이 기기에서 로그인 유지'를 체크한 기기만
+//    로그인을 기기에도(localStorage) 남겨, 패드가 탭을 정리하거나 앱을 껐다 켜도 로그인이 이어진다.
+//    체크하지 않으면 지금처럼 그 탭 안에만(sessionStorage) 두고, 탭을 닫으면 사라진다.
+//    로그아웃하면 기기에 남긴 로그인과 체크 표시를 모두 지운다.
+const REMEMBER_KEY = "aba-remember-device";
+function _rememberOn() {
+  try { return localStorage.getItem(REMEMBER_KEY) === "1"; } catch (e) { return false; }
+}
+function _setRemember(on) {
+  try {
+    if (on) localStorage.setItem(REMEMBER_KEY, "1");
+    else { localStorage.removeItem(REMEMBER_KEY); localStorage.removeItem(AUTH_SESSION_KEY); localStorage.removeItem(SCHED_HANDOFF_KEY); }
+  } catch (e) {}
+}
 function _getStoredSession() {
   try {
+    // 기기에 남긴 로그인이 있으면 그것이 가장 최신이다 (다른 탭이 갱신했어도 같이 씀)
+    if (_rememberOn()) {
+      const kept = localStorage.getItem(AUTH_SESSION_KEY);
+      if (kept) return JSON.parse(kept);
+    }
     const raw = sessionStorage.getItem(AUTH_SESSION_KEY);
     if (!raw) return null;
     return JSON.parse(raw);
@@ -65,8 +84,26 @@ function _getStoredSession() {
 }
 function _saveSession(session) {
   try {
-    if (session) sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
-    else { sessionStorage.removeItem(AUTH_SESSION_KEY); sessionStorage.removeItem(SCHED_HANDOFF_KEY); }
+    if (session) {
+      sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+      if (_rememberOn()) localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+    } else {
+      sessionStorage.removeItem(AUTH_SESSION_KEY); sessionStorage.removeItem(SCHED_HANDOFF_KEY);
+      _setRemember(false);
+    }
+  } catch (e) {}
+}
+// 시간표 앱 바로 열기용 로그인도 같은 규칙으로 둔다
+function _getHandoff() {
+  try {
+    const raw = sessionStorage.getItem(SCHED_HANDOFF_KEY) || (_rememberOn() ? localStorage.getItem(SCHED_HANDOFF_KEY) : null);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+function _setHandoff(h) {
+  try {
+    sessionStorage.setItem(SCHED_HANDOFF_KEY, JSON.stringify(h));
+    if (_rememberOn()) localStorage.setItem(SCHED_HANDOFF_KEY, JSON.stringify(h));
   } catch (e) {}
 }
 
@@ -89,23 +126,30 @@ async function _prepareSchedHandoff(email, password) {
     // 그사이 다른 사람으로 바뀌었으면 두지 않음
     const cur = _getStoredSession();
     if (!cur || !d.user?.id || cur.user?.id !== d.user.id) return;
-    sessionStorage.setItem(SCHED_HANDOFF_KEY, JSON.stringify({
+    _setHandoff({
       access_token: d.access_token, refresh_token: d.refresh_token, user_id: d.user?.id || null,
-    }));
+    });
   } catch (e) {}
 }
+// ★ [로그인 유지] 로그인 갱신은 한 번에 하나만 — 패드가 깨어날 때 여러 곳이 동시에 갱신하면
+//    같은 갱신 열쇠를 여러 번 쓰게 되어 서버가 로그인을 끊을 수 있다. 진행 중인 갱신이 있으면 그 결과를 같이 쓴다.
+let _refreshInFlight = null;
 async function _refreshSession(refreshToken) {
-  try {
-    const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-    if (!r.ok) return null;
-    const data = await r.json();
-    if (data.access_token) { _saveSession(data); return data; }
-    return null;
-  } catch (e) { return null; }
+  if (_refreshInFlight) return _refreshInFlight;
+  _refreshInFlight = (async () => {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (!r.ok) return null;
+      const data = await r.json();
+      if (data.access_token) { _saveSession(data); return data; }
+      return null;
+    } catch (e) { return null; }
+  })();
+  try { return await _refreshInFlight; } finally { _refreshInFlight = null; }
 }
 async function _getValidAccessToken() {
   const session = _getStoredSession();
@@ -582,7 +626,7 @@ function _schedUserIn(w) {
 }
 function openSchedApp() {
   let h = null;
-  try { h = JSON.parse(sessionStorage.getItem(SCHED_HANDOFF_KEY) || "null"); } catch (e) { h = null; }
+  h = _getHandoff();
   // 넘겨줄 것이 없거나, 지금 통합본에 로그인된 사람 것이 아니면 → 예전처럼 링크로 열기(로그인 화면)
   const cur = _getStoredSession();
   if (!h || !h.user_id || !cur || cur.user?.id !== h.user_id) return false;
@@ -5525,6 +5569,7 @@ function ManualModal({ onClose }) {
 }
 
 function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
+  const [remember, setRemember] = useState(false);   // ★ [로그인 유지] 매번 꺼진 채로 시작 (공용 컴퓨터 안전)
   const [pw, setPw] = useState("");
   const [pwConfirm, setPwConfirm] = useState("");
   const [name, setName] = useState("");
@@ -5538,7 +5583,7 @@ function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
       }
       onSetupAdmin(pw);
     } else {
-      onLogin(name, pw);
+      onLogin(name, pw, remember);
     }
   };
 
@@ -5632,6 +5677,14 @@ function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
             }}
           />
         </div>
+
+        {view !== "setup" && (
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: "-6px 0 16px", fontSize: 12.5, color: "#555", cursor: "pointer", lineHeight: 1.5 }}>
+            <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)}
+              style={{ width: 17, height: 17, marginTop: 1, accentColor: PKD, flexShrink: 0 }} />
+            <span>이 기기에서 로그인 유지<br /><span style={{ fontSize: 11, color: "#999" }}>개인 기기에서만 체크하세요. 로그아웃하면 풀립니다.</span></span>
+          </label>
+        )}
 
         {view === "setup" && (
           <div style={{ marginBottom: 16 }}>
@@ -6041,13 +6094,13 @@ const SV_REIN_Q = [
   { id: "social", n: 10, label: "사회적·신체적 접촉", type: "multi",
     options: ["간지럽히기", "머리 쓰다듬기", "안아주기", "하이파이브", "박수·칭찬", "비행기 태우기"],
     etc: true },
-  { id: "place", n: 11, label: "장소", type: "multi",
-    options: ["놀이터", "키즈카페", "마트", "공원", "차 안", "집 특정 공간"], etc: true },
-  { id: "person", n: 12, label: "좋아하는 사람", type: "multi",
-    options: ["엄마", "아빠", "형제자매", "조부모", "또래 친구"], etc: true },
+
+  { sec: "요즘 달라진 것", note: "없으면 비워 두셔도 됩니다." },
+  { id: "new_like", n: 11, label: "요즘 새로 좋아하게 된 것", type: "text" },
+  { id: "faded", n: 12, label: "예전에는 좋아했는데 요즘 시들해진 것", type: "text" },
 
   { sec: "순위", note: "앞에서 고르신 것들이 아래에 뜹니다. 눌러서 채우거나 직접 적어 주세요." },
-  { id: "rank", n: 13, label: "가장 좋아하는 것을 순서대로 적어 주세요", type: "rank", required: true },
+  { id: "rank", n: 13, label: "가장 좋아하는 것 5가지를 순서대로 적어 주세요 (3가지 이상)", type: "rank", required: true },
 
   { sec: "집에서는 어떤가요" },
   { id: "always", n: 14, label: "집에서 아이가 언제든 가질 수 있는 것", type: "pick" },
@@ -6057,11 +6110,31 @@ const SV_REIN_Q = [
   { id: "avoid", n: 16, label: "수업에서 사용하지 않았으면 하는 것이 있나요?",
     type: "yesno", detailLabel: "무엇을, 어떤 이유인지 적어 주세요", required: true },
   { id: "unlimited", n: 17, label: "수업에서 제한 없이 사용해도 되는 것", type: "pick" },
+  { id: "token", n: 18, label: "스티커판·토큰판처럼 모아서 받는 보상을 써 본 적이 있나요?", type: "single",
+    options: ["써 봤고 잘 맞았다", "써 봤지만 잘 안 맞았다", "써 본 적 없다"] },
+
+  { sec: "원하는 것이 있을 때" },
+  { id: "mand_how", n: 19, label: "아이가 원하는 것이 있을 때 주로 어떻게 알리나요?", type: "multi",
+    options: ["말로 한다", "가리킨다", "손을 끌고 간다", "그림·카드를 준다", "몸짓·수어", "직접 가져간다", "울거나 떼를 쓴다"],
+    etc: true },
+
+  { sec: "싫어하는 것" },
+  { id: "dislike_sense", n: 20, label: "싫어하는 소리·촉감·환경", type: "multi",
+    options: ["큰 소리", "특정 촉감", "밝은 빛", "사람 많은 곳", "낯선 사람"], etc: true },
+  { id: "dislike_task", n: 21, label: "싫어하는 활동·상황", type: "multi",
+    options: ["기다리기", "정리하기", "옷 갈아입기", "손 씻기·양치", "자리에 앉아 있기", "하던 것 멈추기"], etc: true },
 
   { sec: "그 밖에" },
-  { id: "dislike", n: 18, label: "아이가 정말 싫어하는 것", type: "multi",
+  { id: "extra", n: 22, label: "더 알려주고 싶은 것이 있으면 자유롭게 적어 주세요", type: "text" },
+
+  // ── 예전 설문에만 있던 문항 — 새 설문에는 나오지 않고, 예전 응답을 볼 때 답이 있을 때만 보인다 ──
+  { sec: "예전 설문 항목", legacy: true },
+  { id: "place", n: "참고", label: "장소", type: "multi", legacy: true,
+    options: ["놀이터", "키즈카페", "마트", "공원", "차 안", "집 특정 공간"], etc: true },
+  { id: "person", n: "참고", label: "좋아하는 사람", type: "multi", legacy: true,
+    options: ["엄마", "아빠", "형제자매", "조부모", "또래 친구"], etc: true },
+  { id: "dislike", n: "참고", label: "아이가 정말 싫어하는 것", type: "multi", legacy: true,
     options: ["큰 소리", "특정 촉감", "낯선 사람", "기다리기", "정리하기", "옷 갈아입기"], etc: true },
-  { id: "extra", n: 19, label: "더 알려주고 싶은 것이 있으면 자유롭게 적어 주세요", type: "text" },
 ];
 
 const SV_CONCERNS = [
@@ -6070,6 +6143,7 @@ const SV_CONCERNS = [
   "또래·사회성",
   "학습·학교 준비",
   "일상생활",
+  "감각(소리·촉감 등에 예민함)",
   "아직 잘 모르겠음",
 ];
 
@@ -6091,10 +6165,13 @@ const SV_INQ_Q = [
     options: ["미등원", "어린이집", "유치원", "초등학교", "중학교 이상"] },
   { id: "grade", n: "7-1", label: "학년·반", type: "line",
     showIf: { id: "school", anyOf: ["어린이집", "유치원", "초등학교", "중학교 이상"] } },
+  { id: "therapy", n: 8, label: "지금 다른 곳에서 받고 있는 치료가 있나요?", type: "multi",
+    options: ["언어치료", "감각통합치료", "놀이치료", "미술·음악치료", "ABA·행동치료", "없음"], etc: true,
+    exclusive: ["없음"] },
 
   { sec: "요즘 신경 쓰이는 부분",
     note: "아이를 판단하기 위한 것이 아니라, 상담 때 무엇부터 이야기 나눌지 정하기 위한 것입니다. 고르신 것에 맞는 질문만 아래에 나옵니다." },
-  { id: "concern", n: 8, label: "도움이 필요한 부분을 모두 골라 주세요", type: "multi",
+  { id: "concern", n: 9, label: "도움이 필요한 부분을 모두 골라 주세요", type: "multi",
     options: SV_CONCERNS, required: true },
 
   /* ── 행동 ────────────────────────────────────────────── */
@@ -6125,11 +6202,14 @@ const SV_INQ_Q = [
   { id: "lExpress", n: "L1", label: "지금 어떻게 표현하나요?", type: "single",
     options: ["아직 말이 나오지 않음", "단어 하나", "두세 단어 조합", "문장으로 말함"],
     showIf: { id: "concern", anyOf: ["말·의사소통"] } },
-  { id: "lUnderstand", n: "L2", label: "어른 말은 얼마나 이해하나요?", type: "single",
+  { id: "lEcho", n: "L2", label: "들은 말을 그대로 따라 하는 경우가 있나요?", type: "single",
+    options: ["거의 없음", "가끔 있음", "자주 있음"],
+    showIf: { id: "concern", anyOf: ["말·의사소통"] } },
+  { id: "lUnderstand", n: "L3", label: "어른 말은 얼마나 이해하나요?", type: "single",
     options: ["이름 부르면 반응", "간단한 지시를 따름", "두 단계 지시를 따름", "잘 모르겠음"],
     showIf: { id: "concern", anyOf: ["말·의사소통"] } },
-  { id: "lAac", n: "L3", label: "말 외에 쓰는 방법이 있나요?", type: "multi",
-    options: ["손짓·가리키기", "그림카드", "기기", "없음"], etc: true,
+  { id: "lAac", n: "L4", label: "말 외에 쓰는 방법이 있나요?", type: "multi",
+    options: ["손짓·가리키기", "그림카드", "기기", "없음"], etc: true, exclusive: ["없음"],
     showIf: { id: "concern", anyOf: ["말·의사소통"] } },
 
   /* ── 또래·사회성 ──────────────────────────────────────── */
@@ -6146,7 +6226,7 @@ const SV_INQ_Q = [
   /* ── 학습·학교 준비 ───────────────────────────────────── */
   { sec: "학습·학교 준비에 대해", showIf: { id: "concern", anyOf: ["학습·학교 준비"] } },
   { id: "aSit", n: "A1", label: "앉아서 하는 활동을 얼마나 유지하나요?", type: "single",
-    options: ["1~2분", "5분쯤", "10분 이상"],
+    options: ["1분도 어려움", "1~2분", "5분쯤", "10분 이상"],
     showIf: { id: "concern", anyOf: ["학습·학교 준비"] } },
   { id: "aHard", n: "A2", label: "어려워하는 부분", type: "multi",
     options: ["지시 따르기", "차례 기다리기", "집중 유지", "글자·숫자", "손 쓰는 활동"],
@@ -6162,21 +6242,27 @@ const SV_INQ_Q = [
   { id: "dMeal", n: "D2", label: "식사", type: "single",
     options: ["도움이 많이 필요", "조금 도와주면 됨", "스스로 함"],
     showIf: { id: "concern", anyOf: ["일상생활"] } },
-  { id: "dHard", n: "D3", label: "특별히 힘든 부분", type: "text",
+  { id: "dPicky", n: "D3", label: "편식", type: "single",
+    options: ["심하지 않음", "조금 있음", "심함"],
+    showIf: { id: "concern", anyOf: ["일상생활"] } },
+  { id: "dSleep", n: "D4", label: "수면", type: "single",
+    options: ["잘 잠", "잠들기 어려움", "자주 깸", "잘 모르겠음"],
+    showIf: { id: "concern", anyOf: ["일상생활"] } },
+  { id: "dHard", n: "D5", label: "특별히 힘든 부분", type: "text",
     showIf: { id: "concern", anyOf: ["일상생활"] } },
 
   { sec: "희망 사항" },
-  { id: "days", n: 9, label: "희망 요일", type: "multi",
+  { id: "days", n: 10, label: "희망 요일", type: "multi",
     options: ["월", "화", "수", "목", "금"] },
-  { id: "times", n: 10, label: "희망 시간대", type: "multi",
-    options: ["오전", "이른 오후", "늦은 오후", "저녁"] },
-  { id: "start", n: 11, label: "언제부터 시작하고 싶으신가요?", type: "single",
+  { id: "times", n: 11, label: "희망 시간대", type: "multi",
+    options: ["오전", "이른 오후 (12~3시)", "늦은 오후 (3~6시)"] },
+  { id: "start", n: 12, label: "언제부터 시작하고 싶으신가요?", type: "single",
     options: ["바로", "1개월 내", "2~3개월 내", "아직 미정"] },
-  { id: "report", n: 12, label: "검사 보고서를 가지고 계신가요?", type: "single",
+  { id: "report", n: 13, label: "검사 보고서를 가지고 계신가요?", type: "single",
     options: ["있음", "없음", "진행 중"], note: "있으시면 상담 때 가져와 주세요." },
-  { id: "source", n: 13, label: "저희를 어떻게 알게 되셨나요?", type: "single", required: true,
+  { id: "source", n: 14, label: "저희를 어떻게 알게 되셨나요?", type: "single", required: true,
     options: ["홈페이지", "인스타그램", "블로그", "지인 소개", "인쇄물·현수막", "검색"], etc: true },
-  { id: "question", n: 14, label: "궁금하신 점", type: "text" },
+  { id: "question", n: 15, label: "궁금하신 점", type: "text" },
 ];
 
 function svIsVisible(q, answers) {
@@ -6235,8 +6321,10 @@ function svAnswerText(q, val) {
 function SvDetail({ questions, answers }) {
   const a = answers || {};
   const rows = [];
+  // 예전 문항(legacy)은 답이 있을 때만 보인다
+  const legacyShown = questions.some(q => q.legacy && q.id && svAnswerText(q, a[q.id]));
   questions
-    .filter(q => svIsVisible(q, a))
+    .filter(q => (q.legacy ? (q.id ? !!svAnswerText(q, a[q.id]) : legacyShown) : svIsVisible(q, a)))
     .forEach((q, i) => {
       if (q.sec) {
         rows.push(
@@ -6432,6 +6520,158 @@ function ChildSurveyCard(props) {
   );
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   ★ [도구 연결] 원장님(관리자) 화면 전용 — 앱 바로가기 줄 + 가정 연계 카드
+   - 관리자 계정에서만 그린다. 선생님 화면에는 줄·카드 모두 없다.
+   - 통합본 아동 데이터는 읽지도 쓰지도 않는다. (아이 번호·이름만 5분 가이드에 넘김)
+   - 가정 연계 카드는 5분 가이드 보관함(gd_guides)을 읽기만 한다.
+   - 둘 다 오류 울타리로 감싸, 문제가 생겨도 통합본 화면은 멈추지 않는다.
+   ═══════════════════════════════════════════════════════════════ */
+const TOOL_APPS = [
+  { k: "aac", icon: "🗣️", label: "AAC 메이커", url: "https://aba-geomdan.github.io/aac-maker/" },
+  { k: "guide", icon: "🏠", label: "5분 가이드", url: "https://aba-geomdan.github.io/geomdan-guide/" },
+  { k: "esdm", icon: "🧩", label: "함께놀이", url: "https://aba-geomdan.github.io/esdm/" },
+  { k: "bip", icon: "📋", label: "BIP", url: "https://aba-geomdan.github.io/bip-maker/" },
+  { k: "scerts", icon: "🎯", label: "SCERTS", url: "https://aba-geomdan.github.io/abageomdan-scerts-v2/" },
+  { k: "prep", icon: "🏫", label: "학교준비반", url: "https://aba-geomdan.github.io/school-prep/" },
+  { k: "portal", icon: "🧰", label: "도구모음 전체", url: "https://aba-geomdan.github.io/portal/", all: true },
+];
+const TOOL_ROW_OPEN_KEY = "aba-admin-tools-open";
+const GUIDE_HANDOFF_KEY = "aba-guide-handoff";
+
+// 5분 가이드를 이 아이로 열기: 이름은 주소에 싣지 않고, 같은 사이트 저장칸에 잠깐 맡긴다.
+function openToolForChild(app, childId, childName) {
+  try {
+    if (app.k === "guide" && childId) {
+      try {
+        localStorage.setItem(GUIDE_HANDOFF_KEY, JSON.stringify({ cid: childId, name: childName || "", ts: Date.now() }));
+      } catch (e) {}
+      window.open(app.url + "?aba_child=" + encodeURIComponent(childId), "_blank");
+      return;
+    }
+    window.open(app.url, "_blank");
+  } catch (e) {}
+}
+
+class ToolFence extends React.Component {
+  constructor(props) { super(props); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(err) { try { console.warn("[도구 연결 오류]", err); } catch (e) {} }
+  render() { return this.state.failed ? null : this.props.children; }
+}
+
+function AdminToolRowInner({ childId, childName }) {
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(TOOL_ROW_OPEN_KEY) === "1"; } catch (e) { return false; }
+  });
+  const toggle = () => {
+    setOpen(o => {
+      const n = !o;
+      try { localStorage.setItem(TOOL_ROW_OPEN_KEY, n ? "1" : "0"); } catch (e) {}
+      return n;
+    });
+  };
+  const pill = (a) => ({
+    display: "inline-flex", alignItems: "center", gap: 5,
+    padding: open ? "6px 12px" : "5px 9px",
+    background: a.all ? PKD : "#fff", color: a.all ? "#fff" : PKD,
+    border: `1px solid ${a.all ? PKD : PK}`, borderRadius: 18,
+    fontSize: open ? 12.5 : 15, fontFamily: "inherit", cursor: "pointer", whiteSpace: "nowrap", lineHeight: 1.2,
+  });
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", margin: "-4px 0 14px", padding: "7px 10px", background: PKL, borderRadius: 10 }}>
+      <button onClick={toggle} title={open ? "접기" : "펼치기"}
+        style={{ border: "none", background: "transparent", color: PKD, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: "2px 4px", whiteSpace: "nowrap" }}>
+        {open ? "▾" : "▸"} 이 아이 자료
+      </button>
+      {TOOL_APPS.map(a => (
+        <button key={a.k} onClick={() => openToolForChild(a, childId, childName)} title={a.label + " 열기"} style={pill(a)}>
+          <span>{a.icon}</span>
+          {open && <span>{a.label}</span>}
+          {open && <span style={{ fontSize: 10, opacity: 0.6 }}>↗</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function AdminToolRow(props) {
+  return <ToolFence key={props.childId}><AdminToolRowInner {...props} /></ToolFence>;
+}
+
+function _hlDate(iso) {
+  try { const d = new Date(iso); return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`; } catch (e) { return ""; }
+}
+
+function HomeLinkPanel({ childId, childName }) {
+  const [state, setState] = useState({ loading: true, error: "", rows: [] });
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const headers = await _authHeaders();
+        const r = await fetch(`${SUPABASE_URL}/rest/v1/gd_guides?child_id=eq.${encodeURIComponent(childId)}&select=guide_id,topic,created_at&order=created_at.desc&limit=50`, { headers });
+        if (!r.ok) throw new Error("not ready");
+        const rows = await r.json();
+        if (alive) setState({ loading: false, error: "", rows: Array.isArray(rows) ? rows : [] });
+      } catch (e) {
+        // 다시 읽기에 실패하면 이미 받아 둔 목록은 그대로 둔다
+        if (alive) setState(prev => (prev.rows.length > 0 ? { ...prev, loading: false } : { loading: false, error: "5분 가이드 쪽 준비(SQL)가 끝나면 여기에 보입니다.", rows: [] }));
+      }
+    };
+    load();
+    // 5분 가이드 탭에서 만들고 돌아오면 새로 읽는다 (이 창으로 돌아올 때마다 한 번씩)
+    const onVis = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { alive = false; document.removeEventListener("visibilitychange", onVis); };
+  }, [childId]);
+
+  const rows = state.rows;
+  const last = rows[0];
+  const days = last ? Math.floor((Date.now() - new Date(last.created_at).getTime()) / 86400000) : null;
+  const summary = state.loading ? "불러오는 중…"
+    : state.error ? ""
+    : rows.length === 0 ? "아직 없음"
+    : `5분 가이드 ${rows.length}건 · 마지막 ${days === 0 ? "오늘" : days + "일 전"}`;
+  const stale = days !== null && days >= 30;
+
+  return (
+    <div style={CS}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: PKD }}>🏠 가정 연계</h3>
+        <span style={{ fontSize: 10, color: "#fff", background: PKD, borderRadius: 6, padding: "1px 6px" }}>관리자만</span>
+        <span style={{ fontSize: 12, color: stale ? "#B45309" : "#999", fontWeight: stale ? 700 : 400 }}>{summary}{stale ? " · 새 자료 챙길 때" : ""}</span>
+        {rows.length > 0 && (
+          <button onClick={() => setOpen(o => !o)} style={{ marginLeft: "auto", ...BS, padding: "4px 12px", fontSize: 12 }}>{open ? "접기" : "목록 보기"}</button>
+        )}
+      </div>
+      {state.error ? <div style={{ fontSize: 12, color: "#999", marginTop: 8 }}>{state.error}</div> : null}
+      {!state.loading && !state.error && rows.length === 0 ? (
+        <div style={{ fontSize: 12, color: "#999", marginTop: 8, lineHeight: 1.6 }}>
+          위 '이 아이 자료' 줄의 🏠 5분 가이드로 만든 가이드가 여기에 날짜순으로 모입니다.
+        </div>
+      ) : null}
+      {open && rows.length > 0 ? (
+        <div style={{ marginTop: 10, borderTop: "1px solid #f0e0e5" }}>
+          {rows.map(g => (
+            <div key={g.guide_id} style={{ display: "flex", gap: 12, padding: "8px 2px", borderBottom: "1px solid #f7eef1", fontSize: 13 }}>
+              <span style={{ color: "#999", minWidth: 78, whiteSpace: "nowrap" }}>{_hlDate(g.created_at)}</span>
+              <span style={{ color: "#333", flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{g.topic}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function HomeLinkCard(props) {
+  return <ToolFence key={props.childId}><HomeLinkPanel {...props} /></ToolFence>;
+}
+
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);  // {role: "admin"|"teacher", name: string} | null
   // ★ [78-2] 최초 로드 이펙트는 deps가 []라 그 안에서 currentUser를 직접 읽으면
@@ -6448,7 +6688,13 @@ export default function App() {
     (async () => {
       try {
         // A방식: Auth 세션이 있으면 자동 복원
-        const authUser = await abaGetCurrentUser();
+        // ★ [로그인 유지] 패드가 깨어난 직후처럼 인터넷이 잠깐 안 될 때 바로 로그인 화면으로 보내지 않고,
+        //    저장된 로그인이 있으면 몇 번 더 확인한다 (약 10초).
+        let authUser = await abaGetCurrentUser();
+        for (let i = 0; !authUser && i < 5 && _getStoredSession(); i++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          authUser = await abaGetCurrentUser();
+        }
         if (authUser) {
           const meta = authUser.user_metadata || {};
           const roleRaw = meta.role || "therapist";
@@ -9570,7 +9816,7 @@ export default function App() {
             setAuthMessage("비밀번호 저장 실패: " + (e?.message || ""));
           }
         }}
-        onLogin={async (email, pw) => {
+        onLogin={async (email, pw, remember) => {
           if (!email || !pw) {
             setAuthMessage("⚠️ 이메일과 비밀번호를 모두 입력하세요.");
             return;
@@ -9579,6 +9825,7 @@ export default function App() {
           try {
             // Supabase Auth 로그인
             try { sessionStorage.removeItem(SCHED_HANDOFF_KEY); } catch (e) {} // 앞사람 것이 남지 않게
+            _setRemember(!!remember); // ★ [로그인 유지] 체크했을 때만 이 기기에 로그인을 남김 (안 했으면 앞사람 것도 지움)
             const res = await abaSignIn(email.trim(), pw);
             if (!res.error) _prepareSchedHandoff(email.trim(), pw); // ★ [시간표 바로 열기] 기다리지 않음
             if (res.error) {
@@ -9984,6 +10231,7 @@ export default function App() {
                     const _uid = _getStoredSession()?.user?.id || null;
                     // 서버 응답이 늦어도 5초 넘게 기다리지 않음 (시간표 창 정리가 늦어지지 않게)
                     try { await Promise.race([abaSignOut(), new Promise((r) => setTimeout(r, 5000))]); } catch (e) {}
+                    _saveSession(null); // ★ [로그인 유지] 서버 응답이 늦어도 이 기기에 남긴 로그인은 바로 지움
                     closeSchedSession(_uid); // ★ [시간표 바로 열기] 시간표 창 로그인도 같이 지움 (서버에서 끊은 뒤에)
                     // 과거 방식 잔재 정리
                     try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(AUTH_CURRENT_USER_KEY); } catch (e) {}
@@ -10915,6 +11163,11 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        {/* ★ [도구 연결] 원장님 화면 전용 앱 바로가기 줄 — 선생님 화면에는 없음 */}
+        {currentUser?.role === "admin" && activeChild && (
+          <AdminToolRow childId={activeChild.id} childName={activeChild?.info?.name || ""} />
+        )}
 
         {/* ═══ 탭 네비게이션 ═══ */}
         <div className="responsive-tab-nav" style={{ display: "flex", gap: 0, marginBottom: 18, background: "#fff", borderRadius: 12, padding: 5, border: `1px solid ${PKL}`, boxShadow: "0 1px 4px rgba(212,114,138,0.06)" }}>
@@ -11954,6 +12207,11 @@ export default function App() {
                 childName={info.name || ""}
                 isAdmin={currentUser?.role === "admin"}
               />
+            )}
+
+            {/* ★ [도구 연결] 가정 연계 카드 — 원장님 화면 전용, 5분 가이드 보관함을 읽기만 함 */}
+            {activeChild && currentUser?.role === "admin" && (
+              <HomeLinkCard key={activeChild.id} childId={activeChild.id} childName={info.name || ""} />
             )}
 
             <div style={{ ...CS, background: "#fdf8f9", border: `1px solid ${PK}` }}>
