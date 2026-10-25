@@ -6337,7 +6337,7 @@ function ChildSurveyPanel({ childId, childName, isAdmin }) {
     ? ""
     : [
         latest ? `강화제 ${state.surveys.length}건` : "강화제 없음",
-        inq ? "상담 신청서 있음" : "상담 신청서 없음",
+        inq ? `상담 신청서 ${state.inquiries.length}건` : "상담 신청서 없음",
       ].join(" · ");
 
   const canOpen = !state.loading && !state.error && (latest || inq);
@@ -6372,8 +6372,8 @@ function ChildSurveyPanel({ childId, childName, isAdmin }) {
           {/* 하위 탭 — 강화제 설문 | 상담 신청서 */}
           <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
             {[
-              ["rein", "🍬 강화제 설문", latest ? String(state.surveys.length) : ""],
-              ["inq", "📝 상담 신청서", ""],
+              ["rein", "🍬 강화제 설문", latest ? `${state.surveys.length}건` : "없음"],
+              ["inq", "📝 상담 신청서", inq ? `${state.inquiries.length}건` : "없음"],
             ].map(([k, label, badge]) => {
               const on = sub === k;
               return (
@@ -6421,7 +6421,7 @@ function ChildSurveyPanel({ childId, childName, isAdmin }) {
             </div>
           ) : (
             <div>
-              <div style={{ fontSize: 12, color: "#999", margin: "4px 0 6px" }}>{fmt(inq.created_at)} 접수</div>
+              <div style={{ fontSize: 12, color: "#999", margin: "4px 0 6px" }}>{fmt(inq.created_at)} 접수{state.inquiries.length > 1 ? ` · 가장 최근 신청서 (전체 ${state.inquiries.length}건)` : ""}</div>
               {inq.memo ? (
                 <div style={{ background: "#FFF9FA", border: `1px solid ${PKL}`, borderRadius: 10, padding: "10px 12px", margin: "6px 0 4px" }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 4 }}>상담 메모</div>
