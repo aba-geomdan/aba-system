@@ -856,7 +856,7 @@ function TeacherScheduleStrip({ isAdmin = false }) {
                     <div key={u.id} style={{ background: "#fff", border: "1px solid #F4C0D1", borderRadius: 7, padding: "6px 9px" }}>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", fontSize: 12.5 }}>
                         <span style={{ fontWeight: 700, color: "#333" }}>{u.student_name}</span>
-                        <span style={{ color: "#888", fontSize: 11.5 }}>{_sMd(u.d)} 결강 {u.total}분</span>
+                        <span style={{ color: "#888", fontSize: 11.5 }}>{u.d ? `${_sMd(u.d)} ` : ""}결강 {u.total}분</span>
                         <span style={{ flex: 1 }} />
                         <span style={{ fontWeight: 800, color: "#AE2340" }}>{u.left}분 남음</span>
                       </div>
@@ -867,7 +867,10 @@ function TeacherScheduleStrip({ isAdmin = false }) {
                         {mk.length === 0
                           ? "아직 보강 없음"
                           : mk.map((s) => {
-                              const later = String(s.d).slice(0, 10) > data.today;
+                              // 오늘 보강은 끝나는 시각이 지났을 때만 '채운 보강'
+                              const sd = String(s.d).slice(0, 10);
+                              const nowHm = (() => { const n = new Date(); return `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`; })();
+                              const later = sd > data.today || (sd === data.today && String(s.end_time || "").slice(0, 5) > nowHm);
                               return `${later ? "잡힌 보강" : "채운 보강"}: ${_sMd(s.d)} ${_sClock(s.start_time)}~${_sClock(s.end_time)} · ${_durMin(s)}분`;
                             }).join("  /  ")}
                       </div>
