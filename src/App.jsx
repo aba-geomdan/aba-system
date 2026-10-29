@@ -713,7 +713,8 @@ function TeacherScheduleStrip({ isAdmin = false }) {
         const [ss, um, nt] = await Promise.allSettled([
           // 오늘 수업 + 앞으로 4주 안의 보강
           schedRead(`v_sessions?select=id,d,start_time,end_time,status,student_name,makeup_for&d=gte.${_sIso(now)}&d=lte.${_sIso(until)}&status=neq.${encodeURIComponent("취소")}${mine}&or=(d.eq.${_sIso(now)},status.eq.${encodeURIComponent("보강")})&order=d.asc,start_time.asc&limit=60`, headers),
-          schedRead(`v_unmade_up?select=id${mine}`, headers),
+          // ★ [남은 보강 시간] 결강마다 날짜·시간·이미 채운 분(made_min)까지 받아 남은 시간을 보여 줌
+          schedRead(`v_unmade_up?select=id,d,start_time,end_time,student_name,made_min${mine}`, headers),
           // 선생님: 원장님이 보낸 문구 / 원장님: 선생님이 보낸 보강 체크 · 마감 답 + 원장님 본인 수업 일정 변경 (확인 안 한 것)
           isAdmin
             ? schedRead(`notices?select=id,kind,message,created_at,from_staff,to_staff,payload&confirmed_at=is.null&or=(and(to_staff.is.null,kind.in.(report,close_ans)),to_staff.eq.${staffId})&order=created_at.desc&limit=30`, headers)
@@ -722,9 +723,27 @@ function TeacherScheduleStrip({ isAdmin = false }) {
         if (!on || my !== seq) return;
         // 처음부터 수업 목록을 못 읽으면 칸을 그리지 않음 (시간표 앱과 연결 안 된 상태)
         if (ss.status !== "fulfilled") return;
+        // ★ [남은 보강 시간] 결강별 남은 분 = 결강 시간 − 이미 채운 분 (시간표 앱과 같은 계산)
+        const _min = (t) => { const [H, M] = String(t || "0:0").slice(0, 5).split(":"); return Number(H) * 60 + Number(M); };
+        const unmadeList = (um.status === "fulfilled" ? um.value : [])
+          .map((u) => {
+            const total = Math.max(_min(u.end_time) - _min(u.start_time), 0);
+            return { ...u, total, left: Math.max(total - (Number(u.made_min) || 0), 0) };
+          })
+          .sort((a, b) => String(a.d).localeCompare(String(b.d)) || String(a.start_time).localeCompare(String(b.start_time)));
+        // 이 결강들에 이어진 보강(언제 몇 분 했는지) — 실패해도 남은 시간 표시는 그대로
+        let linked = [];
+        if (unmadeList.length > 0) {
+          try {
+            linked = await schedRead(`v_sessions?select=id,d,start_time,end_time,makeup_for&makeup_for=in.(${unmadeList.map((u) => u.id).join(",")})&status=neq.${encodeURIComponent("취소")}&order=d.asc,start_time.asc&limit=60`, headers);
+          } catch (e) { linked = []; }
+          if (!on || my !== seq) return;
+        }
         setData({
           ss: ss.value,
-          unmade: um.status === "fulfilled" ? um.value.length : 0,
+          unmade: unmadeList.length,
+          unmadeList,
+          linked,
           nt: nt.status === "fulfilled" ? nt.value : [],
           today: _sIso(now),
         });
@@ -759,7 +778,14 @@ function TeacherScheduleStrip({ isAdmin = false }) {
   const changes = data.nt.filter((n) => n.to_staff != null && n.kind !== "close_req");
   const fromTeachers = isAdmin ? data.nt.filter((n) => n.to_staff == null) : []; // 원장님: 선생님이 보낸 보강 체크 · 마감 답
   const todays = data.ss.filter((s) => String(s.d).slice(0, 10) === data.today);
-  const weekMakeups = data.ss.filter((s) => s.status === "보강" && String(s.d).slice(0, 10) >= data.today);
+  // ★ [남은 보강 시간] 오늘 보강은 '오늘 수업'에 이미 나오므로 '다가오는 보강'에는 내일부터만
+  const weekMakeups = data.ss.filter((s) => s.status === "보강" && String(s.d).slice(0, 10) > data.today);
+  const unmadeList = data.unmadeList || [];
+  const leftSum = unmadeList.reduce((a, u) => a + u.left, 0);
+  const _durMin = (s) => {
+    const m = (t) => { const [H, M] = String(t || "0:0").slice(0, 5).split(":"); return Number(H) * 60 + Number(M); };
+    return Math.max(m(s.end_time) - m(s.start_time), 0);
+  };
   const chip = (bg, fg, text) => (
     <span style={{ fontSize: 10.5, fontWeight: 700, color: fg, background: bg, borderRadius: 99, padding: "1px 8px", whiteSpace: "nowrap", flexShrink: 0 }}>{text}</span>
   );
@@ -778,7 +804,7 @@ function TeacherScheduleStrip({ isAdmin = false }) {
         {closeReq.length > 0 && chip("#1d4d80", "#fff", "마감 확인 요청")}
         {changes.length > 0 && chip("#E07B00", "#fff", `일정 변경 ${changes.length}`)}
         {fromTeachers.length > 0 && chip("#1d4d80", "#fff", `선생님 확인 ${fromTeachers.length}`)}
-        {data.unmade > 0 && chip("#FDECEF", "#AE2340", `보강 안 된 결강 ${data.unmade}`)}
+        {data.unmade > 0 && chip("#FDECEF", "#AE2340", `보강 안 된 결강 ${data.unmade}${leftSum > 0 ? ` · 남은 ${leftSum}분` : ""}`)}
         <span style={{ flex: 1 }} />
         <span onClick={(e) => e.stopPropagation()}>{goBtn("시간표 앱 열기 ↗")}</span>
         <span style={{ fontSize: 11, color: "#b98a96" }}>{open ? "▾ 접기" : "▸ 펼치기"}</span>
@@ -817,6 +843,40 @@ function TeacherScheduleStrip({ isAdmin = false }) {
               {changes.length > 3 && <div style={{ color: "#a8946a" }}>외 {changes.length - 3}건</div>}
             </div>
           )}
+          {/* ★ [남은 보강 시간] 결강마다 남은 분 · 채운 만큼 막대 · 이어진 보강 날짜 */}
+          {unmadeList.length > 0 && (
+            <div style={{ padding: "7px 10px", borderRadius: 8, background: "#FFF5F7", border: "1px solid #F4C0D1" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#AE2340", marginBottom: 6 }}>보강 남은 결강</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {unmadeList.map((u) => {
+                  const done = Math.max(u.total - u.left, 0);
+                  const pct = u.total > 0 ? Math.round((done / u.total) * 100) : 0;
+                  const mk = (data.linked || []).filter((s) => String(s.makeup_for) === String(u.id));
+                  return (
+                    <div key={u.id} style={{ background: "#fff", border: "1px solid #F4C0D1", borderRadius: 7, padding: "6px 9px" }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", fontSize: 12.5 }}>
+                        <span style={{ fontWeight: 700, color: "#333" }}>{u.student_name}</span>
+                        <span style={{ color: "#888", fontSize: 11.5 }}>{_sMd(u.d)} 결강 {u.total}분</span>
+                        <span style={{ flex: 1 }} />
+                        <span style={{ fontWeight: 800, color: "#AE2340" }}>{u.left}분 남음</span>
+                      </div>
+                      <div style={{ height: 5, background: "#FDECEF", borderRadius: 3, margin: "5px 0 4px", overflow: "hidden" }}>
+                        <div style={{ width: `${pct}%`, height: "100%", background: PKD }} />
+                      </div>
+                      <div style={{ fontSize: 11, color: "#888", lineHeight: 1.5 }}>
+                        {mk.length === 0
+                          ? "아직 보강 없음"
+                          : mk.map((s) => {
+                              const later = String(s.d).slice(0, 10) > data.today;
+                              return `${later ? "잡힌 보강" : "채운 보강"}: ${_sMd(s.d)} ${_sClock(s.start_time)}~${_sClock(s.end_time)} · ${_durMin(s)}분`;
+                            }).join("  /  ")}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 220px", minWidth: 0 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#999", marginBottom: 4 }}>오늘 수업</div>
@@ -825,7 +885,7 @@ function TeacherScheduleStrip({ isAdmin = false }) {
                 <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0" }}>
                   <span style={{ width: 82, color: "#888", flexShrink: 0 }}>{_sClock(s.start_time)}~{_sClock(s.end_time)}</span>
                   <span style={{ fontWeight: 700, color: s.status === "결강" ? "#aaa" : "#333", textDecoration: s.status === "결강" ? "line-through" : "none" }}>{s.student_name}</span>
-                  {s.status === "보강" && chip("#E07B00", "#fff", "보강")}
+                  {s.status === "보강" && chip("#E07B00", "#fff", s.makeup_for && _durMin(s) > 0 && _durMin(s) < 50 ? `보강 ${_durMin(s)}분` : "보강")}
                   {s.status === "결강" && chip("#FDECEF", "#AE2340", "결강")}
                 </div>
               ))}
