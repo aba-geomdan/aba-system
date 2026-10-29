@@ -692,6 +692,10 @@ function TeacherScheduleStrip({ isAdmin = false }) {
   const [open, setOpen] = useState(() => {
     try { return localStorage.getItem("aba-sched-strip-open") !== "0"; } catch (e) { return true; }
   });
+  // ★ [남은 보강 시간] '보강 남은 결강' 칸은 처음엔 접어 두고, 누르면 펼침 (펼친 상태는 이 기기에 기억)
+  const [unmadeOpen, setUnmadeOpen] = useState(() => {
+    try { return localStorage.getItem("aba-sched-unmade-open") === "1"; } catch (e) { return false; }
+  });
   useEffect(() => {
     let on = true;
     let seq = 0;        // 늦게 끝난 예전 요청이 최신 값을 덮지 않게
@@ -845,13 +849,28 @@ function TeacherScheduleStrip({ isAdmin = false }) {
           )}
           {/* ★ [남은 보강 시간] 결강마다 남은 분 · 채운 만큼 막대 · 이어진 보강 날짜 */}
           {unmadeList.length > 0 && (
-            <div style={{ padding: "7px 10px", borderRadius: 8, background: "#FFF5F7", border: "1px solid #F4C0D1" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#AE2340", marginBottom: 6 }}>보강 남은 결강</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ borderRadius: 8, background: "#FFF5F7", border: "1px solid #F4C0D1", overflow: "hidden" }}>
+              <div role="button" tabIndex={0}
+                onClick={() => { const v = !unmadeOpen; setUnmadeOpen(v); try { localStorage.setItem("aba-sched-unmade-open", v ? "1" : "0"); } catch (e) {} }}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); const v = !unmadeOpen; setUnmadeOpen(v); try { localStorage.setItem("aba-sched-unmade-open", v ? "1" : "0"); } catch (e2) {} } }}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", cursor: "pointer" }}>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: "#AE2340" }}>보강 남은 결강 {unmadeList.length}건 · 남은 {leftSum}분</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 11, color: "#b98a96" }}>{unmadeOpen ? "▾ 접기" : "▸ 펼치기"}</span>
+              </div>
+              {unmadeOpen && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 10px 8px" }}>
                 {unmadeList.map((u) => {
                   const done = Math.max(u.total - u.left, 0);
                   const pct = u.total > 0 ? Math.round((done / u.total) * 100) : 0;
                   const mk = (data.linked || []).filter((s) => String(s.makeup_for) === String(u.id));
+                  // 보강 줄은 날짜와 분만 짧게: "채움 10/20 20분 · 10/29 10분" / "잡힘 11/3 50분"
+                  const nowHm = (() => { const n = new Date(); return `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`; })();
+                  const isLater = (s) => { const sd = String(s.d).slice(0, 10); return sd > data.today || (sd === data.today && String(s.end_time || "").slice(0, 5) > nowHm); };
+                  const md = (d) => `${Number(String(d).slice(5, 7))}/${Number(String(d).slice(8, 10))}`;
+                  const short = (arr) => arr.map((s) => `${md(s.d)} ${_durMin(s)}분`).join(" · ");
+                  const doneMk = mk.filter((s) => !isLater(s));
+                  const laterMk = mk.filter(isLater);
                   return (
                     <div key={u.id} style={{ background: "#fff", border: "1px solid #F4C0D1", borderRadius: 7, padding: "6px 9px" }}>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", fontSize: 12.5 }}>
@@ -864,20 +883,16 @@ function TeacherScheduleStrip({ isAdmin = false }) {
                         <div style={{ width: `${pct}%`, height: "100%", background: PKD }} />
                       </div>
                       <div style={{ fontSize: 11, color: "#888", lineHeight: 1.5 }}>
-                        {mk.length === 0
-                          ? "아직 보강 없음"
-                          : mk.map((s) => {
-                              // 오늘 보강은 끝나는 시각이 지났을 때만 '채운 보강'
-                              const sd = String(s.d).slice(0, 10);
-                              const nowHm = (() => { const n = new Date(); return `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`; })();
-                              const later = sd > data.today || (sd === data.today && String(s.end_time || "").slice(0, 5) > nowHm);
-                              return `${later ? "잡힌 보강" : "채운 보강"}: ${_sMd(s.d)} ${_sClock(s.start_time)}~${_sClock(s.end_time)} · ${_durMin(s)}분`;
-                            }).join("  /  ")}
+                        {mk.length === 0 && "아직 보강 없음"}
+                        {doneMk.length > 0 && <span>채움 {short(doneMk)}</span>}
+                        {doneMk.length > 0 && laterMk.length > 0 && <span style={{ margin: "0 6px", color: "#ccc" }}>|</span>}
+                        {laterMk.length > 0 && <span>잡힘 {short(laterMk)}</span>}
                       </div>
                     </div>
                   );
                 })}
               </div>
+              )}
             </div>
           )}
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
