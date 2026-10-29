@@ -6976,6 +6976,10 @@ export default function App() {
   //    ① 이 기기에 내가 마지막으로 열었던 아동이 있으면 그것 ② 없으면 내 담당 첫 아동.
   //    그 뒤에 직접 고른 아동은 건드리지 않는다.
   const loginPickRef = useRef("");
+  const loginTargetRef = useRef(null);   // ★ [106-4] 로그인 때 바로잡기로 고른 아동 (아직 화면에 반영 전일 수 있음)
+  // ★ [106-3] 로그아웃하면 '로그인 때 한 번 바로잡기'를 다시 할 수 있게 비움
+  //    (안 비우면 같은 창에서 다시 로그인할 때 내 기록을 다시 읽지 않았음)
+  useEffect(() => { if (!currentUser) loginPickRef.current = ""; }, [currentUser]);
   useEffect(() => {
     if (!loaded || !currentUser || !currentUser.name) return;
     if (loginPickRef.current === currentUser.name) return;
@@ -6984,14 +6988,26 @@ export default function App() {
     let saved = null;
     try { saved = localStorage.getItem(activeKeyFor(currentUser.name)); } catch (e) {}
     if (saved && visibleChildren.some(c => c.id === saved)) {
-      if (saved !== activeChildId) setActiveChildId(saved);
+      if (saved !== activeChildId) { loginTargetRef.current = saved; setActiveChildId(saved); }
       return;
     }
     const cur = visibleChildren.find(c => c.id === activeChildId);
     if (cur && (cur.info?.ownerName || "") === currentUser.name) return;
     const mine = visibleChildren.filter(c => (c.info?.ownerName || "") === currentUser.name);
-    if (mine.length > 0) setActiveChildId(mine[0].id);
+    if (mine.length > 0) { loginTargetRef.current = mine[0].id; setActiveChildId(mine[0].id); }
   }, [loaded, currentUser, visibleChildren, activeChildId]);
+
+  // ★ [106-3] '마지막에 본 아동'을 고를 때마다 바로 이 기기에 남김.
+  //    전에는 아동 전체 기록을 이 기기에 복사하는 단계 '뒤'에서만 남겼는데,
+  //    기록이 커서 그 복사가 실패하면(기기 저장 칸이 꽉 참) 이 한 줄도 같이 건너뛰어,
+  //    다음에 들어올 때 내 기록이 없어 다른 아동이 열렸다. 이제 따로, 먼저 남긴다.
+  //    로그인 때 한 번 바로잡기(위)가 끝난 뒤에만 남겨서, 로드 중 임시로 잡힌 아동이 덮어쓰지 않게 함.
+  useEffect(() => {
+    if (!loaded || !currentUser?.name || !activeChildId) return;
+    if (loginTargetRef.current === activeChildId) loginTargetRef.current = null;   // 골라 둔 아동이 화면에 반영됨 → 표시 지움
+    if (loginPickRef.current !== currentUser.name) return;
+    try { localStorage.setItem(activeKeyFor(currentUser.name), activeChildId); } catch (e) {}
+  }, [loaded, currentUser, activeChildId]);
 
   // ★ [신규] 아카이브 후보 — 종결 후 3개월(=약 92일) 이상 지나고 아직 아카이브 안 된 아동
   const archiveCandidates = useMemo(() => {
@@ -7013,6 +7029,10 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser?.role !== "teacher") return;
+    // ★ [106-4] 방금 로그인 바로잡기가 '내가 마지막에 본 아동'을 골라 두었으면 그걸 덮지 않음
+    //    (안 그러면 같은 순간에 '담당 첫 아동'으로 다시 바뀌어, 선생님도 마지막 아동이 안 열렸음)
+    const pending = loginTargetRef.current;
+    if (pending && pending !== activeChildId && visibleChildren.some(c => c.id === pending)) return;
     
     if (visibleChildren.length === 0) {
       setActiveChildId(null);
