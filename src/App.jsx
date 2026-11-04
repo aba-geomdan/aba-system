@@ -4463,9 +4463,13 @@ function generatePLPText(domain, goalsInDomain) {
   if (!goalsInDomain || goalsInDomain.length === 0) return "";
   const list1 = goalsInDomain.filter(g => (g.listGroup || "1") === "1");
   const list2 = goalsInDomain.filter(g => (g.listGroup || "1") === "2");
-  const recommended = goalsInDomain.filter(g => g.isRecommended);
-  const vbmappList = goalsInDomain.filter(g => g.vbmapp);
-  const esdmList = goalsInDomain.filter(g => g.esdm);
+  // ★ [평가 문장 정정] '사전 평가 결과 VB-MAPP…', 'ESDM 발달 평가에서는…' 문장은
+  //    실제로 그 평가도구 목록에서 고른 목표가 있을 때만 쓴다.
+  //    예전엔 ELCAR 목표에 붙은 연결표(VB: Mand L1 같은 배지)만 보고도 이 문장을 써서,
+  //    VB-MAPP·ESDM 평가를 하지 않은 아이 IEP에도 "평가 결과 확인되었습니다"가 나갔다.
+  const vbmappList = goalsInDomain.filter(g => g.vbmapp && g.source === "VB-MAPP");
+  const esdmList = goalsInDomain.filter(g => g.esdm && g.source === "ESDM");
+  const recommended = goalsInDomain.filter(g => g.isRecommended && (g.source === "VB-MAPP" || g.source === "ESDM"));
   const vbmappDomains = [...new Set(vbmappList.map(g => `${g.vbmapp.v}(L${g.vbmapp.lv})`))];
   const esdmDomains = [...new Set(esdmList.map(g => g.esdm.v))];
   const vbLevels = vbmappList.map(g => g.vbmapp.lv);
@@ -6934,7 +6938,6 @@ export default function App() {
   const [dashFilter, setDashFilter] = useState("all"); // ★ 대시보드 카드 필터: all | active | terminated
   // ★ [신규] 선생님별 '종결 아동' 접힘 상태 (선생님 이름별로 따로 관리)
   const [endedOpenMap, setEndedOpenMap] = useState({});
-  const [archivedOpenMap, setArchivedOpenMap] = useState({});  // ★ 대시보드 선생님별 '보관 아동' 펼침
   const [expandedTeachers, setExpandedTeachers] = useState({}); // ★ 대시보드 선생님 펼침 상태 (기본 접힘)
   const [openIepInfoSection, setOpenIepInfoSection] = useState(null); // ★ IEP 추가정보 아코디언 (한 번에 하나, 기본 전체 접힘)
   const [collapsedSubs, setCollapsedSubs] = useState({}); // ★ IEP 커리큘럼 세부영역 접힘 (사용자가 직접 토글한 것만 기록)
@@ -11516,7 +11519,9 @@ export default function App() {
           //    (그 토글이 실제로 먹는 곳은 아동 선택 목록이라 여기서는 티가 안 났다.)
           //    선생님별 현황에만 반영한다 — 위 숫자 카드(활동 중·종료)는 그대로 둔다.
           //    보관 아동을 활동 중으로 세면 안 되고, 카드 자체가 보관을 따로 세고 있다.
-          const statsSource = showArchived ? _liveAll : visibleForStats;
+          // ★ [보관 탭] 보관 아동은 위 '🗄️ 보관 아동' 카드(탭)를 눌렀을 때만 따로 보여 준다.
+          //    전체·활동 중·종료 화면에서는 보관 아동이 선생님별 목록에 섞이지 않는다.
+          const statsSource = visibleForStats;
 
           const teacherStats = {};
           // ★ [80-1] 새로 등록한 선생님이 선생님별 현황에 안 보이던 문제.
@@ -11661,17 +11666,10 @@ export default function App() {
                   {/* ★ [신규] 보관 아동 카드 — 보관된 아동이 있을 때만 표시 */}
                   {archivedChildren > 0 && (
                     <div
-                      onClick={() => setShowArchived(v => !v)}
-                      style={{ background: "#fff8e1", padding: "12px 14px", borderRadius: 10, border: "1px solid #ffe0b2", cursor: "pointer", transition: "transform 0.1s" }}
-                      onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; }}
-                      onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; }}
-                      title="클릭하면 '보관 아동 보기' 토글이 켜져요">
-                      <div style={{ fontSize: 11.5, color: "#888", marginBottom: 3, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                        <span>🗄️ 보관 아동</span>
-                        <span style={{ fontSize: 9, color: showArchived ? "#92400e" : "#aaa", fontWeight: 600 }}>
-                          {showArchived ? "표시 중" : "숨김"}
-                        </span>
-                      </div>
+                      onClick={() => setDashFilter(f => f === "archived" ? "all" : "archived")}
+                      style={{ background: "#fff8e1", padding: "12px 14px", borderRadius: 10, border: "1px solid #ffe0b2", cursor: "pointer", outline: dashFilter === "archived" ? "2px solid #f59e0b" : "none", outlineOffset: -2, transition: "all 0.1s" }}
+                      title="보관 아동만 보기">
+                      <div style={{ fontSize: 11.5, color: "#888", marginBottom: 3 }}>🗄️ 보관 아동</div>
                       <div style={{ fontSize: 23, fontWeight: 700, color: "#92400e" }}>{archivedChildren}<span style={{ fontSize: 12, fontWeight: 600, color: "#c9a878", marginLeft: 1 }}>명</span></div>
                     </div>
                   )}
@@ -11700,7 +11698,7 @@ export default function App() {
                     const terminatedCount = teacher.children.filter(c => c.info?.finalEndDate && !c.info?.archivedAt).length;
                     const archivedCount = archivedKidsAll.length;
                     // ★ [3번] 필터에 맞는 아동이 없는 선생님은 숨김
-                    const matchCount = dashFilter === "active" ? activeCount : dashFilter === "terminated" ? terminatedCount : teacher.childCount;
+                    const matchCount = dashFilter === "active" ? activeCount : dashFilter === "terminated" ? terminatedCount : dashFilter === "archived" ? archivedCount : teacher.childCount;
                     // ★ [80-1] 단, '전체' 보기에서는 아동 0명인 등록 선생님도 보여 준다.
                     if (matchCount === 0 && !(dashFilter === "all" && teacher.childCount === 0 && teacher.name !== "(미할당)")) return null;
                     // ★ 선생님별 색 자동 배정 (순환)
@@ -11792,8 +11790,8 @@ export default function App() {
                           const activeKids = shown.filter(c => !c.info?.finalEndDate && !c.info?.archivedAt).sort(byStart);
                           const endedKids = shown.filter(c => !!c.info?.finalEndDate && !c.info?.archivedAt).sort(byStart);
                           // ★ [보관 탭] 보관 아동은 '전체' 보기에서만, 종결처럼 접힌 칸으로
-                          const archivedKids = dashFilter === "all" ? archivedKidsAll.slice().sort(byStart) : [];
-                          const archivedOpen = !!archivedOpenMap[teacher.name];
+                          // ★ [보관 탭] 보관 아동은 '보관 아동' 탭에서만 보인다
+                          const archivedKids = dashFilter === "archived" ? archivedKidsAll.slice().sort(byStart) : [];
                           // ★ 필터가 '종결'일 때는 접기 없이 바로 보여준다.
                           //    (그렇지 않으면 목록이 통째로 비고 버튼만 남는다)
                           const endedCollapsible = dashFilter !== "terminated";
@@ -11909,15 +11907,11 @@ export default function App() {
                             </div>
                           );
                         };
-                          const toggleBtnStyle = {
-                            marginTop: 4, padding: "7px 12px", borderRadius: 8, cursor: "pointer",
-                            background: "#FAFAFA", border: "1px solid #E5E3DF", fontFamily: "inherit",
-                            fontSize: 11.5, color: "#7A736A", fontWeight: 600, textAlign: "left"
-                          };
                           return (<>
-                        {activeKids.map(renderRow)}
+                        {dashFilter === "archived" && archivedKids.map(renderRow)}
+                        {dashFilter !== "archived" && activeKids.map(renderRow)}
                         {!endedCollapsible && endedKids.map(renderRow)}
-                        {endedCollapsible && endedKids.length > 0 && (
+                        {dashFilter !== "archived" && endedCollapsible && endedKids.length > 0 && (
                           <button
                             onClick={() => setEndedOpenMap(m => ({ ...m, [teacher.name]: !m[teacher.name] }))}
                             style={{
@@ -11928,15 +11922,7 @@ export default function App() {
                             {endedOpen ? "\u25be" : "\u25b8"} 종결 아동 {endedKids.length}명
                           </button>
                         )}
-                        {endedCollapsible && endedOpen && endedKids.map(renderRow)}
-                        {archivedKids.length > 0 && (
-                          <button
-                            onClick={() => setArchivedOpenMap(m => ({ ...m, [teacher.name]: !m[teacher.name] }))}
-                            style={{ ...toggleBtnStyle, background: "#fffbf0", border: "1px solid #ffe0b2", color: "#92400e" }}>
-                            {archivedOpen ? "\u25be" : "\u25b8"} 🗄️ 보관 아동 {archivedKids.length}명
-                          </button>
-                        )}
-                        {archivedOpen && archivedKids.map(renderRow)}
+                        {dashFilter !== "archived" && endedCollapsible && endedOpen && endedKids.map(renderRow)}
                           </>);
                         })()}
                       </div>
