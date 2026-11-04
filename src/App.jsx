@@ -6934,6 +6934,7 @@ export default function App() {
   const [dashFilter, setDashFilter] = useState("all"); // ★ 대시보드 카드 필터: all | active | terminated
   // ★ [신규] 선생님별 '종결 아동' 접힘 상태 (선생님 이름별로 따로 관리)
   const [endedOpenMap, setEndedOpenMap] = useState({});
+  const [archivedOpenMap, setArchivedOpenMap] = useState({});  // ★ 대시보드 선생님별 '보관 아동' 펼침
   const [expandedTeachers, setExpandedTeachers] = useState({}); // ★ 대시보드 선생님 펼침 상태 (기본 접힘)
   const [openIepInfoSection, setOpenIepInfoSection] = useState(null); // ★ IEP 추가정보 아코디언 (한 번에 하나, 기본 전체 접힘)
   const [collapsedSubs, setCollapsedSubs] = useState({}); // ★ IEP 커리큘럼 세부영역 접힘 (사용자가 직접 토글한 것만 기록)
@@ -11692,8 +11693,12 @@ export default function App() {
                     return (a.name || "").localeCompare(b.name || "");
                   }).map((teacher, tIdx) => {
                     // ★ [신규] 선생님별 활동/종료 아동 카운트
-                    const activeCount = teacher.children.filter(c => !c.info?.finalEndDate).length;
-                    const terminatedCount = teacher.children.filter(c => c.info?.finalEndDate).length;
+                    // ★ [보관 탭] 보관 아동은 활동·종료에서 빼고 따로 센다.
+                    //    '보관 아동 보기'를 꺼 둬도 선생님별로 보관 아동 칸이 항상 있도록 전체 목록에서 따로 모은다.
+                    const archivedKidsAll = _liveAll.filter(c => c.info?.archivedAt && (c.info?.ownerName || "(미할당)") === teacher.name);
+                    const activeCount = teacher.children.filter(c => !c.info?.finalEndDate && !c.info?.archivedAt).length;
+                    const terminatedCount = teacher.children.filter(c => c.info?.finalEndDate && !c.info?.archivedAt).length;
+                    const archivedCount = archivedKidsAll.length;
                     // ★ [3번] 필터에 맞는 아동이 없는 선생님은 숨김
                     const matchCount = dashFilter === "active" ? activeCount : dashFilter === "terminated" ? terminatedCount : teacher.childCount;
                     // ★ [80-1] 단, '전체' 보기에서는 아동 0명인 등록 선생님도 보여 준다.
@@ -11747,6 +11752,9 @@ export default function App() {
                           {terminatedCount > 0 && (
                             <span style={{ fontSize: 9.5, padding: "1px 7px", borderRadius: 8, background: "#fee2e2", color: "#991b1b", fontWeight: 600, whiteSpace: "nowrap" }}>종료 {terminatedCount}</span>
                           )}
+                          {archivedCount > 0 && (
+                            <span style={{ fontSize: 9.5, padding: "1px 7px", borderRadius: 8, background: "#fff8e1", color: "#92400e", fontWeight: 600, whiteSpace: "nowrap", border: "1px solid #ffe0b2" }}>보관 {archivedCount}</span>
+                          )}
                           {staleCount > 0 && (
                             <span title={`${staleCount}명 데이터 14일 이상 밀림`} style={{ fontSize: 9.5, padding: "1px 7px", borderRadius: 8, background: "#fef3c7", color: "#92400e", fontWeight: 700, whiteSpace: "nowrap" }}>⚠ 밀림 {staleCount}</span>
                           )}
@@ -11763,7 +11771,7 @@ export default function App() {
                       {isExpanded && (
                       <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 14px 12px", borderTop: `1px solid ${tc.edge}` }}>
                         <div style={{ height: 2 }} />
-                        {teacher.childCount === 0 && (
+                        {teacher.childCount === 0 && archivedCount === 0 && (
                           <div style={{ fontSize: 12, color: "#aaa", padding: "6px 2px" }}>아직 담당 아동이 없습니다.</div>
                         )}
                         {(() => {
@@ -11781,16 +11789,16 @@ export default function App() {
                             if (!sb) return -1;
                             return sa.localeCompare(sb);
                           };
-                          const activeKids = shown.filter(c => !c.info?.finalEndDate).sort(byStart);
-                          const endedKids = shown.filter(c => !!c.info?.finalEndDate).sort(byStart);
+                          const activeKids = shown.filter(c => !c.info?.finalEndDate && !c.info?.archivedAt).sort(byStart);
+                          const endedKids = shown.filter(c => !!c.info?.finalEndDate && !c.info?.archivedAt).sort(byStart);
+                          // ★ [보관 탭] 보관 아동은 '전체' 보기에서만, 종결처럼 접힌 칸으로
+                          const archivedKids = dashFilter === "all" ? archivedKidsAll.slice().sort(byStart) : [];
+                          const archivedOpen = !!archivedOpenMap[teacher.name];
                           // ★ 필터가 '종결'일 때는 접기 없이 바로 보여준다.
                           //    (그렇지 않으면 목록이 통째로 비고 버튼만 남는다)
                           const endedCollapsible = dashFilter !== "terminated";
                           const endedOpen = !endedCollapsible || !!endedOpenMap[teacher.name];
-                          const ordered = endedOpen ? [...activeKids, ...endedKids] : activeKids;
-                          return (<>
-                        {ordered
-                          .map(child => {
+                          const renderRow = (child) => {
                           const goals = (child.goals || []).filter(g => g.includeInIep);
                           // ★ [버그수정] 교사 헤더와 필터가 달라 아동 행만 "데이터 없음"이 떴다. || g.includeInIep 추가.
                           const dailyGoals = goals.filter(g => (g.tasks || []).some(t => t.showInDaily && t.isActive) || g.includeInIep);
@@ -11900,7 +11908,15 @@ export default function App() {
                               </div>
                             </div>
                           );
-                        })}
+                        };
+                          const toggleBtnStyle = {
+                            marginTop: 4, padding: "7px 12px", borderRadius: 8, cursor: "pointer",
+                            background: "#FAFAFA", border: "1px solid #E5E3DF", fontFamily: "inherit",
+                            fontSize: 11.5, color: "#7A736A", fontWeight: 600, textAlign: "left"
+                          };
+                          return (<>
+                        {activeKids.map(renderRow)}
+                        {!endedCollapsible && endedKids.map(renderRow)}
                         {endedCollapsible && endedKids.length > 0 && (
                           <button
                             onClick={() => setEndedOpenMap(m => ({ ...m, [teacher.name]: !m[teacher.name] }))}
@@ -11912,6 +11928,15 @@ export default function App() {
                             {endedOpen ? "\u25be" : "\u25b8"} 종결 아동 {endedKids.length}명
                           </button>
                         )}
+                        {endedCollapsible && endedOpen && endedKids.map(renderRow)}
+                        {archivedKids.length > 0 && (
+                          <button
+                            onClick={() => setArchivedOpenMap(m => ({ ...m, [teacher.name]: !m[teacher.name] }))}
+                            style={{ ...toggleBtnStyle, background: "#fffbf0", border: "1px solid #ffe0b2", color: "#92400e" }}>
+                            {archivedOpen ? "\u25be" : "\u25b8"} 🗄️ 보관 아동 {archivedKids.length}명
+                          </button>
+                        )}
+                        {archivedOpen && archivedKids.map(renderRow)}
                           </>);
                         })()}
                       </div>
