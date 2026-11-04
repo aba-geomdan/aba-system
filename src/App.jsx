@@ -11895,7 +11895,8 @@ export default function App() {
                           // ★ [보관·넘김 구별] 보관한 아동과 다른 선생님께 넘긴 기록은 '밀림' 대신 그 상태를 보여 준다
                           //    종결일이 있으면 '종료'가 먼저다 (종결 칸에 들어가는 아동) — 보관 표시는 종결일 없이 보관한 아동만
                           const isArchivedRow = !isTerminated && !!child.info?.archivedAt;
-                          const handedTo = (!isTerminated && !isArchivedRow) ? handedOverTo(child.id, latestDate) : null;
+                          // ★ '넘김'은 밀림 대신 붙이는 표시다 — 기록이 최근에 있으면(같이 맡는 아이 등) 붙이지 않는다.
+                          const handedTo = (!isTerminated && !isArchivedRow && (daysSinceData === null || daysSinceData >= 14)) ? handedOverTo(child.id, latestDate) : null;
                           const isStale = !isTerminated && !isArchivedRow && !handedTo && daysSinceData !== null && daysSinceData >= 14;
                           
                           return (
@@ -15330,6 +15331,8 @@ function buildVbmappFilled(goals) {
   const filled = {};
   domainNames.forEach(d => { filled[d] = { 1: new Set(), 2: new Set(), 3: new Set() }; });
   (goals || []).forEach(g => {
+    // ★ [평가도구 표시 정정] 직접 추가한(기타) 목표나 ESDM 목표는 영역 이름이 '맨드' 같아도 VB-MAPP 표에 칠하지 않는다
+    if (g && (g.source === "기타" || g.source === "ESDM")) return;
     const tasks = g.tasks || [];
     tasks.forEach(t => {
       const isMastered = t.listGroup === "2";
@@ -16438,7 +16441,7 @@ cleanedHTML + '\n' +
             {/* PDF-10: 본문 4섹션 다음 → VB-MAPP 마일스톤 (PDF 4페이지) */}
             {(() => {
               const hasVbmapp = (goals || []).some(g =>
-                g.source === "VB-MAPP" || classifyCurriculum(g.domain || "") === "vbmapp"
+                g.source === "VB-MAPP" || (g.source !== "기타" && g.source !== "ESDM" && classifyCurriculum(g.domain || "") === "vbmapp")
               );
               if (!hasVbmapp) return null;
               // ★ [58-6] 커리큘럼에서 몇 개만 고른 아동은 표가 거의 비어 나간다.
@@ -20855,7 +20858,7 @@ function ReportTab({ currentUser, info, goals, currentAvgs, balanceBarRows = [],
       {/* W-34: VB-MAPP 마일스톤 격자 (보고서 탭에도 표시 — 인쇄에는 별도 섹션) */}
       {(() => {
         const hasVbmapp = (goals || []).some(g =>
-          g.source === "VB-MAPP" || classifyCurriculum(g.domain || "") === "vbmapp"
+          g.source === "VB-MAPP" || (g.source !== "기타" && g.source !== "ESDM" && classifyCurriculum(g.domain || "") === "vbmapp")
         );
         if (!hasVbmapp) return null;
         return (
@@ -23915,7 +23918,12 @@ function GoalDashboard({ stos, therapistChanges, goalHandovers }) {
     const dom = (s.domain || "기타").replace(/^[Ⅰ-Ⅺ]\s*/, "");
     // ★ [55-3] 평가도구 분류는 원본 영역명으로 — 재매핑된 이름('에코익', '모방' 등)은
     //    classifyCurriculum의 ELCAR 목록과 안 맞아 전부 '기타 목표'로 빠진다.
-    const curr = classifyCurriculum((s.rawDomain || s.domain || "기타").replace(/^[Ⅰ-Ⅺ]\s*/, ""));
+    // ★ [평가도구 표시 정정] 목표를 고른 목록(source)이 VB-MAPP·ESDM·기타로 분명하면 그대로 따른다.
+    //    예전엔 영역 이름만 보고 나눠서, 직접 추가한 '기타' 목표의 영역을 '자조'라고 적으면
+    //    ESDM 평가를 안 한 아이 보고서에도 'ESDM 평가' 칸이 생겼다.
+    //    ELCAR(또는 source가 없던 옛 목표)는 예전처럼 영역 이름으로 나눈다.
+    const _srcCurr = { "VB-MAPP": "vbmapp", "ESDM": "esdm", "기타": "other" }[s.source];
+    const curr = _srcCurr || classifyCurriculum((s.rawDomain || s.domain || "기타").replace(/^[Ⅰ-Ⅺ]\s*/, ""));
     if (!currGroups[curr][dom]) {
       currGroups[curr][dom] = [];
       currOrder[curr].push(dom);
