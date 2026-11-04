@@ -11126,7 +11126,8 @@ export default function App() {
                                       ↺ 복구
                                     </button>
                                   ) : (
-                                    c.info?.finalEndDate && (
+                                    /* ★ 보관 — 종결일이 없어도(수업 시작 전 아동 등) 관리자는 바로 보관할 수 있다 */
+                                    (
                                       <button
                                         onClick={e => {
                                           e.stopPropagation();
