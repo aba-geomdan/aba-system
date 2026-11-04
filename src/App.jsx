@@ -6946,7 +6946,9 @@ export default function App() {
   const [dashFilter, setDashFilter] = useState("all"); // ★ 대시보드 카드 필터: all | active | terminated
   // ★ [신규] 선생님별 '종결 아동' 접힘 상태 (선생님 이름별로 따로 관리)
   const [endedOpenMap, setEndedOpenMap] = useState({});
-  const [archivedOpenMap, setArchivedOpenMap] = useState({});  // ★ 대시보드 선생님별 '보관 아동' 칸 펼침
+  const [archivedOpenMap, setArchivedOpenMap] = useState({});
+  // ★ 대시보드 '🗄️ 보관 아동' 카드 전용 — 위 아동 목록의 '종결·보관 아동 보기'와 따로 움직인다
+  const [dashShowArchived, setDashShowArchived] = useState(false);
   const [expandedTeachers, setExpandedTeachers] = useState({}); // ★ 대시보드 선생님 펼침 상태 (기본 접힘)
   const [openIepInfoSection, setOpenIepInfoSection] = useState(null); // ★ IEP 추가정보 아코디언 (한 번에 하나, 기본 전체 접힘)
   const [collapsedSubs, setCollapsedSubs] = useState({}); // ★ IEP 커리큘럼 세부영역 접힘 (사용자가 직접 토글한 것만 기록)
@@ -10776,6 +10778,11 @@ export default function App() {
                   filtered = filtered.filter(c => c.info?.therapist === filterTherapist);
                 }
                 
+                // ★ 아동 목록에는 평소 활동 중인 아이만 — 종결 아이는 '종결·보관 아동 보기'를 켜거나 '종료' 필터로 본다
+                //    (지금 열려 있는 아이는 종결됐어도 목록에서 빼지 않는다 — 종결일을 넣는 중에 사라지면 안 된다)
+                if (!showArchived && filterStatus !== "terminated") {
+                  filtered = filtered.filter(c => !c.info?.finalEndDate || c.id === activeChildId);
+                }
                 if (filterStatus === "active") {
                   filtered = filtered.filter(c => !c.info?.finalEndDate);
                 } else if (filterStatus === "terminated") {
@@ -10965,7 +10972,7 @@ export default function App() {
                             
                             {/* ★ [신규] 보관 아동 보기 토글 */}
                             <div>
-                              <label style={{ fontSize: 9.5, color: "#666", marginBottom: 3, display: "block", fontWeight: 600 }}>🗄️ 보관함</label>
+                              <label style={{ fontSize: 9.5, color: "#666", marginBottom: 3, display: "block", fontWeight: 600 }}>🗄️ 종결·보관</label>
                               <button
                                 onClick={() => setShowArchived(v => !v)}
                                 style={{
@@ -10979,7 +10986,7 @@ export default function App() {
                                   cursor: "pointer",
                                   fontWeight: 600
                                 }}>
-                                {showArchived ? "✓ 보관 아동 표시 중" : "보관 아동 보기"}
+                                {showArchived ? "✓ 종결·보관 아동 표시 중" : "종결·보관 아동 보기"}
                               </button>
                             </div>
                             
@@ -11166,7 +11173,7 @@ export default function App() {
                                       <button
                                         onClick={e => {
                                           e.stopPropagation();
-                                          askConfirm(`'${displayName}' 아동을 보관함으로 이동하시겠습니까?\n메인 목록에서 숨겨지며, 데이터는 보존됩니다.\n('보관 아동 보기' 토글로 다시 볼 수 있어요)`, () => archiveChild(c.id));
+                                          askConfirm(`'${displayName}' 아동을 보관함으로 이동하시겠습니까?\n메인 목록에서 숨겨지며, 데이터는 보존됩니다.\n('종결·보관 아동 보기' 토글로 다시 볼 수 있어요)`, () => archiveChild(c.id));
                                         }}
                                         title="보관함으로 이동"
                                         style={{ background: "none", border: "1px solid #f59e0b", color: "#92400e", cursor: "pointer", fontSize: 10, padding: "3px 8px", fontFamily: "inherit", fontWeight: 600, borderRadius: 4 }}
@@ -11581,7 +11588,7 @@ export default function App() {
           });
           // ★ [보관 칸] 보관 아동만 남은 선생님(그만둔 선생님 등)도 '표시 중'일 때는 줄이 생겨야 보관 칸을 열 수 있다.
           //    숫자(아동 수·목표 수)에는 더하지 않는다 — 보관 아동은 선생님 줄 안에서 따로 센다.
-          if (showArchived || dashFilter === "terminated") {
+          if (dashShowArchived || dashFilter === "terminated") {
             _liveAll.filter(c => c.info?.archivedAt).forEach(c => {
               const owner = c.info?.ownerName || "(미할당)";
               if (!teacherStats[owner]) {
@@ -11690,15 +11697,15 @@ export default function App() {
                   {/* ★ 보관 아동이 0명이어도 카드는 보인다 — 이 카드를 눌러야 선생님별 종결·보관 칸이 보이므로 */}
                   {(
                     <div
-                      onClick={() => setShowArchived(v => !v)}
-                      style={{ background: "#fff8e1", padding: "12px 14px", borderRadius: 10, border: "1px solid #ffe0b2", cursor: "pointer", outline: showArchived ? "2px solid #f59e0b" : "none", outlineOffset: -2, transition: "all 0.1s" }}
+                      onClick={() => setDashShowArchived(v => !v)}
+                      style={{ background: "#fff8e1", padding: "12px 14px", borderRadius: 10, border: "1px solid #ffe0b2", cursor: "pointer", outline: dashShowArchived ? "2px solid #f59e0b" : "none", outlineOffset: -2, transition: "all 0.1s" }}
                       onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; }}
                       onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; }}
                       title="누르면 선생님마다 '보관 아동' 칸이 생겨요">
                       <div style={{ fontSize: 11.5, color: "#888", marginBottom: 3, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                         <span>🗄️ 보관 아동</span>
-                        <span style={{ fontSize: 9, color: showArchived ? "#92400e" : "#aaa", fontWeight: 600 }}>
-                          {showArchived ? "표시 중" : "숨김"}
+                        <span style={{ fontSize: 9, color: dashShowArchived ? "#92400e" : "#aaa", fontWeight: 600 }}>
+                          {dashShowArchived ? "표시 중" : "숨김"}
                         </span>
                       </div>
                       <div style={{ fontSize: 23, fontWeight: 700, color: "#92400e" }}>{archivedChildren}<span style={{ fontSize: 12, fontWeight: 600, color: "#c9a878", marginLeft: 1 }}>명</span></div>
@@ -11726,7 +11733,7 @@ export default function App() {
                     //    (statsSource에는 보관 아동이 없으므로 전체 목록에서 따로 모은다)
                     //    ★ 종결과 보관은 따로: 종결일이 있으면 보관했어도 '종결'로, 종결일 없이 보관만 한 아동이 '보관'.
                     const _isMine = (c) => (c.info?.ownerName || "(미할당)") === teacher.name;
-                    const endedAllForTeacher = ((showArchived || dashFilter === "terminated") ? _liveAll.filter(_isMine) : teacher.children).filter(c => c.info?.finalEndDate);
+                    const endedAllForTeacher = ((dashShowArchived || dashFilter === "terminated") ? _liveAll.filter(_isMine) : teacher.children).filter(c => c.info?.finalEndDate);
                     const archivedKidsAll = _liveAll.filter(c => _isMine(c) && c.info?.archivedAt && !c.info?.finalEndDate);
                     const activeCount = teacher.children.filter(c => !c.info?.finalEndDate && !c.info?.archivedAt).length;
                     const terminatedCount = endedAllForTeacher.length;
@@ -11736,7 +11743,7 @@ export default function App() {
                     const isRegisteredTeacher = (teachers || []).some(t => (t?.name || "").trim() === teacher.name);
                     const matchCount = dashFilter === "active" ? activeCount
                       : dashFilter === "terminated" ? terminatedCount
-                      : (showArchived ? activeCount + terminatedCount + archivedCount : activeCount);
+                      : (dashShowArchived ? activeCount + terminatedCount + archivedCount : activeCount);
                     // ★ [80-1] 단, '전체' 보기에서는 등록된 선생님은 아동이 없어도 보여 준다.
                     if (matchCount === 0 && !(dashFilter === "all" && isRegisteredTeacher)) return null;
                     // ★ 선생님별 색 자동 배정 (순환)
@@ -11796,10 +11803,10 @@ export default function App() {
                             <span style={{ fontSize: 9.5, padding: "1px 7px", borderRadius: 8, background: "#d1fae5", color: "#065f46", fontWeight: 600, whiteSpace: "nowrap" }}>활동 {activeCount}</span>
                           )}
                           {/* ★ 종료·보관 숫자는 '🗄️ 보관 아동' 카드가 '표시 중'일 때만 (평소엔 활동만) */}
-                          {terminatedCount > 0 && ((showArchived && dashFilter === "all") || dashFilter === "terminated") && (
+                          {terminatedCount > 0 && ((dashShowArchived && dashFilter === "all") || dashFilter === "terminated") && (
                             <span style={{ fontSize: 9.5, padding: "1px 7px", borderRadius: 8, background: "#fee2e2", color: "#991b1b", fontWeight: 600, whiteSpace: "nowrap" }}>종료 {terminatedCount}</span>
                           )}
-                          {archivedCount > 0 && showArchived && dashFilter === "all" && (
+                          {archivedCount > 0 && dashShowArchived && dashFilter === "all" && (
                             <span style={{ fontSize: 9.5, padding: "1px 7px", borderRadius: 8, background: "#fff8e1", color: "#92400e", fontWeight: 600, whiteSpace: "nowrap", border: "1px solid #ffe0b2" }}>보관 {archivedCount}</span>
                           )}
                           {staleCount > 0 && (
@@ -11821,7 +11828,7 @@ export default function App() {
                         {dashFilter === "all" && activeCount === 0 && (
                           !_liveAll.some(_isMine) ? (
                             <div style={{ fontSize: 12, color: "#aaa", padding: "6px 2px" }}>아직 담당 아동이 없습니다.</div>
-                          ) : !showArchived ? (
+                          ) : !dashShowArchived ? (
                             <div style={{ fontSize: 12, color: "#aaa", padding: "6px 2px" }}>활동 중인 아동이 없습니다. 종결·보관 아동은 위 '🗄️ 보관 아동' 카드를 누르면 보입니다.</div>
                           ) : null
                         )}
@@ -11844,7 +11851,7 @@ export default function App() {
                           // ★ 종결 칸: 종결일이 있는 아동 전부 (보관 카드가 표시 중이면 보관한 종결 아동도 여기로)
                           const endedKids = dashFilter === "active" ? [] : endedAllForTeacher.slice().sort(byStart);
                           // ★ [보관 칸] '보관 아동' 카드가 '표시 중'일 때만, 종결 칸 아래 따로 접힌 칸으로
-                          const archivedKids = (showArchived && dashFilter === "all") ? archivedKidsAll.slice().sort(byStart) : [];
+                          const archivedKids = (dashShowArchived && dashFilter === "all") ? archivedKidsAll.slice().sort(byStart) : [];
                           const archivedOpen = !!archivedOpenMap[teacher.name];
                           // ★ 필터가 '종결'일 때는 접기 없이 바로 보여준다.
                           //    (그렇지 않으면 목록이 통째로 비고 버튼만 남는다)
@@ -11967,7 +11974,7 @@ export default function App() {
                         {activeKids.map(renderRow)}
                         {!endedCollapsible && endedKids.map(renderRow)}
                         {/* ★ 종결 아동 칸도 '🗄️ 보관 아동' 카드가 '표시 중'일 때만 (위 '종료' 카드를 누르면 바로 펼쳐 보임) */}
-                        {endedCollapsible && showArchived && endedKids.length > 0 && (
+                        {endedCollapsible && dashShowArchived && endedKids.length > 0 && (
                           <button
                             onClick={() => setEndedOpenMap(m => ({ ...m, [teacher.name]: !m[teacher.name] }))}
                             style={{
@@ -11978,7 +11985,7 @@ export default function App() {
                             {endedOpen ? "\u25be" : "\u25b8"} 종결 아동 {endedKids.length}명
                           </button>
                         )}
-                        {endedCollapsible && showArchived && endedOpen && endedKids.map(renderRow)}
+                        {endedCollapsible && dashShowArchived && endedOpen && endedKids.map(renderRow)}
                         {archivedKids.length > 0 && (
                           <button
                             onClick={() => setArchivedOpenMap(m => ({ ...m, [teacher.name]: !m[teacher.name] }))}
@@ -13810,7 +13817,7 @@ export default function App() {
             </div>
             <div style={{ fontSize: 11.5, color: "#666", marginBottom: 14, lineHeight: 1.6, padding: "8px 10px", background: "#fff8e1", borderRadius: 6 }}>
               종결 후 <b>3개월 이상</b> 경과한 아동입니다. 보관함으로 이동하면 메인 목록에서 숨겨지고, 데이터는 그대로 보존됩니다.<br/>
-              "보관 아동 보기" 토글로 언제든 다시 확인할 수 있어요.
+              "종결·보관 아동 보기" 토글로 언제든 다시 확인할 수 있어요.
             </div>
 
             {archiveCandidates.length === 0 ? (
@@ -13856,7 +13863,7 @@ export default function App() {
 
             <div style={{ display: "flex", gap: 8, justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ fontSize: 10, color: "#888" }}>
-                💡 보관 후에도 "보관 아동 보기"에서 복구 가능합니다
+                💡 보관 후에도 "종결·보관 아동 보기"에서 복구 가능합니다
               </div>
               <button
                 onClick={() => setShowArchiveCandidates(false)}
