@@ -4237,7 +4237,7 @@ function generateRationale(goal) {
   return rationale;
 }
 
-function generateCurriculumDescription(source, items) {
+function generateCurriculumDescription(source, items, allGoals) {
   if (!items || items.length === 0) return "";
   const domains = [...new Set(items.map(g => shortDomain(g.domain) || g.domain).filter(Boolean))];
   const domainCount = domains.length;
@@ -4263,7 +4263,14 @@ function generateCurriculumDescription(source, items) {
     } else {
       s += `${domainList} 영역을 중심으로 발달 단계의 핵심 선행 기술이 통합 지도되며, `;
     }
-    s += `VB-MAPP·ESDM 평가 결과와 연계하여 단계적으로 학습 목표가 확장됩니다.`;
+    // ★ [평가 문장 정정] 예전엔 ELCAR만 쓴 아이에게도 항상 "VB-MAPP·ESDM 평가 결과와 연계하여"가 인쇄됐다.
+    //    이 IEP에 실제로 VB-MAPP·ESDM 목록에서 고른 목표가 있을 때만 그 평가를 이름으로 적는다.
+    const _all = Array.isArray(allGoals) ? allGoals : items;
+    const _tools = [];
+    if (_all.some(g => g && g.source === "VB-MAPP")) _tools.push("VB-MAPP");
+    if (_all.some(g => g && g.source === "ESDM")) _tools.push("ESDM");
+    if (_tools.length > 0) s += `${_tools.join("·")} 평가 결과와 연계하여 단계적으로 학습 목표가 확장됩니다.`;
+    else s += `단계적으로 학습 목표가 확장됩니다.`;
     return s;
   }
 
@@ -6938,6 +6945,7 @@ export default function App() {
   const [dashFilter, setDashFilter] = useState("all"); // ★ 대시보드 카드 필터: all | active | terminated
   // ★ [신규] 선생님별 '종결 아동' 접힘 상태 (선생님 이름별로 따로 관리)
   const [endedOpenMap, setEndedOpenMap] = useState({});
+  const [archivedOpenMap, setArchivedOpenMap] = useState({});  // ★ 대시보드 선생님별 '보관 아동' 칸 펼침
   const [expandedTeachers, setExpandedTeachers] = useState({}); // ★ 대시보드 선생님 펼침 상태 (기본 접힘)
   const [openIepInfoSection, setOpenIepInfoSection] = useState(null); // ★ IEP 추가정보 아코디언 (한 번에 하나, 기본 전체 접힘)
   const [collapsedSubs, setCollapsedSubs] = useState({}); // ★ IEP 커리큘럼 세부영역 접힘 (사용자가 직접 토글한 것만 기록)
@@ -11519,8 +11527,9 @@ export default function App() {
           //    (그 토글이 실제로 먹는 곳은 아동 선택 목록이라 여기서는 티가 안 났다.)
           //    선생님별 현황에만 반영한다 — 위 숫자 카드(활동 중·종료)는 그대로 둔다.
           //    보관 아동을 활동 중으로 세면 안 되고, 카드 자체가 보관을 따로 세고 있다.
-          // ★ [보관 탭] 보관 아동은 위 '🗄️ 보관 아동' 카드(탭)를 눌렀을 때만 따로 보여 준다.
-          //    전체·활동 중·종료 화면에서는 보관 아동이 선생님별 목록에 섞이지 않는다.
+          // ★ [보관 칸] 보관 아동은 활동 목록에 섞지 않는다.
+          //    위 '🗄️ 보관 아동' 카드를 눌러 '표시 중'이 되면, 선생님마다 '종결 아동' 칸 아래에
+          //    '보관 아동' 칸이 따로 생긴다 (종결 아동 칸처럼 눌러서 펼침).
           const statsSource = visibleForStats;
 
           const teacherStats = {};
@@ -11666,10 +11675,15 @@ export default function App() {
                   {/* ★ [신규] 보관 아동 카드 — 보관된 아동이 있을 때만 표시 */}
                   {archivedChildren > 0 && (
                     <div
-                      onClick={() => setDashFilter(f => f === "archived" ? "all" : "archived")}
-                      style={{ background: "#fff8e1", padding: "12px 14px", borderRadius: 10, border: "1px solid #ffe0b2", cursor: "pointer", outline: dashFilter === "archived" ? "2px solid #f59e0b" : "none", outlineOffset: -2, transition: "all 0.1s" }}
-                      title="보관 아동만 보기">
-                      <div style={{ fontSize: 11.5, color: "#888", marginBottom: 3 }}>🗄️ 보관 아동</div>
+                      onClick={() => setShowArchived(v => !v)}
+                      style={{ background: "#fff8e1", padding: "12px 14px", borderRadius: 10, border: "1px solid #ffe0b2", cursor: "pointer", outline: showArchived ? "2px solid #f59e0b" : "none", outlineOffset: -2, transition: "all 0.1s" }}
+                      title="누르면 선생님마다 '보관 아동' 칸이 생겨요">
+                      <div style={{ fontSize: 11.5, color: "#888", marginBottom: 3, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <span>🗄️ 보관 아동</span>
+                        <span style={{ fontSize: 9, color: showArchived ? "#92400e" : "#aaa", fontWeight: 600 }}>
+                          {showArchived ? "표시 중" : "숨김"}
+                        </span>
+                      </div>
                       <div style={{ fontSize: 23, fontWeight: 700, color: "#92400e" }}>{archivedChildren}<span style={{ fontSize: 12, fontWeight: 600, color: "#c9a878", marginLeft: 1 }}>명</span></div>
                     </div>
                   )}
@@ -11698,7 +11712,7 @@ export default function App() {
                     const terminatedCount = teacher.children.filter(c => c.info?.finalEndDate && !c.info?.archivedAt).length;
                     const archivedCount = archivedKidsAll.length;
                     // ★ [3번] 필터에 맞는 아동이 없는 선생님은 숨김
-                    const matchCount = dashFilter === "active" ? activeCount : dashFilter === "terminated" ? terminatedCount : dashFilter === "archived" ? archivedCount : teacher.childCount;
+                    const matchCount = dashFilter === "active" ? activeCount : dashFilter === "terminated" ? terminatedCount : teacher.childCount;
                     // ★ [80-1] 단, '전체' 보기에서는 아동 0명인 등록 선생님도 보여 준다.
                     if (matchCount === 0 && !(dashFilter === "all" && teacher.childCount === 0 && teacher.name !== "(미할당)")) return null;
                     // ★ 선생님별 색 자동 배정 (순환)
@@ -11747,10 +11761,11 @@ export default function App() {
                           {activeCount > 0 && (
                             <span style={{ fontSize: 9.5, padding: "1px 7px", borderRadius: 8, background: "#d1fae5", color: "#065f46", fontWeight: 600, whiteSpace: "nowrap" }}>활동 {activeCount}</span>
                           )}
-                          {terminatedCount > 0 && (
+                          {/* ★ 종료·보관 숫자는 '🗄️ 보관 아동' 카드가 '표시 중'일 때만 (평소엔 활동만) */}
+                          {terminatedCount > 0 && (showArchived || dashFilter === "terminated") && (
                             <span style={{ fontSize: 9.5, padding: "1px 7px", borderRadius: 8, background: "#fee2e2", color: "#991b1b", fontWeight: 600, whiteSpace: "nowrap" }}>종료 {terminatedCount}</span>
                           )}
-                          {archivedCount > 0 && (
+                          {archivedCount > 0 && showArchived && (
                             <span style={{ fontSize: 9.5, padding: "1px 7px", borderRadius: 8, background: "#fff8e1", color: "#92400e", fontWeight: 600, whiteSpace: "nowrap", border: "1px solid #ffe0b2" }}>보관 {archivedCount}</span>
                           )}
                           {staleCount > 0 && (
@@ -11769,7 +11784,7 @@ export default function App() {
                       {isExpanded && (
                       <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 14px 12px", borderTop: `1px solid ${tc.edge}` }}>
                         <div style={{ height: 2 }} />
-                        {teacher.childCount === 0 && archivedCount === 0 && (
+                        {teacher.childCount === 0 && (archivedCount === 0 || !showArchived) && (
                           <div style={{ fontSize: 12, color: "#aaa", padding: "6px 2px" }}>아직 담당 아동이 없습니다.</div>
                         )}
                         {(() => {
@@ -11790,8 +11805,9 @@ export default function App() {
                           const activeKids = shown.filter(c => !c.info?.finalEndDate && !c.info?.archivedAt).sort(byStart);
                           const endedKids = shown.filter(c => !!c.info?.finalEndDate && !c.info?.archivedAt).sort(byStart);
                           // ★ [보관 탭] 보관 아동은 '전체' 보기에서만, 종결처럼 접힌 칸으로
-                          // ★ [보관 탭] 보관 아동은 '보관 아동' 탭에서만 보인다
-                          const archivedKids = dashFilter === "archived" ? archivedKidsAll.slice().sort(byStart) : [];
+                          // ★ [보관 칸] '보관 아동' 카드가 '표시 중'일 때만, 종결 칸 아래 따로 접힌 칸으로
+                          const archivedKids = (showArchived && dashFilter !== "terminated") ? archivedKidsAll.slice().sort(byStart) : [];
+                          const archivedOpen = !!archivedOpenMap[teacher.name];
                           // ★ 필터가 '종결'일 때는 접기 없이 바로 보여준다.
                           //    (그렇지 않으면 목록이 통째로 비고 버튼만 남는다)
                           const endedCollapsible = dashFilter !== "terminated";
@@ -11908,10 +11924,10 @@ export default function App() {
                           );
                         };
                           return (<>
-                        {dashFilter === "archived" && archivedKids.map(renderRow)}
-                        {dashFilter !== "archived" && activeKids.map(renderRow)}
+                        {activeKids.map(renderRow)}
                         {!endedCollapsible && endedKids.map(renderRow)}
-                        {dashFilter !== "archived" && endedCollapsible && endedKids.length > 0 && (
+                        {/* ★ 종결 아동 칸도 '🗄️ 보관 아동' 카드가 '표시 중'일 때만 (위 '종료' 카드를 누르면 바로 펼쳐 보임) */}
+                        {endedCollapsible && showArchived && endedKids.length > 0 && (
                           <button
                             onClick={() => setEndedOpenMap(m => ({ ...m, [teacher.name]: !m[teacher.name] }))}
                             style={{
@@ -11922,7 +11938,19 @@ export default function App() {
                             {endedOpen ? "\u25be" : "\u25b8"} 종결 아동 {endedKids.length}명
                           </button>
                         )}
-                        {dashFilter !== "archived" && endedCollapsible && endedOpen && endedKids.map(renderRow)}
+                        {endedCollapsible && showArchived && endedOpen && endedKids.map(renderRow)}
+                        {archivedKids.length > 0 && (
+                          <button
+                            onClick={() => setArchivedOpenMap(m => ({ ...m, [teacher.name]: !m[teacher.name] }))}
+                            style={{
+                              marginTop: 4, padding: "7px 12px", borderRadius: 8, cursor: "pointer",
+                              background: "#fffbf0", border: "1px solid #ffe0b2", fontFamily: "inherit",
+                              fontSize: 11.5, color: "#92400e", fontWeight: 600, textAlign: "left"
+                            }}>
+                            {archivedOpen ? "\u25be" : "\u25b8"} 🗄️ 보관 아동 {archivedKids.length}명
+                          </button>
+                        )}
+                        {archivedOpen && archivedKids.map(renderRow)}
                           </>);
                         })()}
                       </div>
@@ -16163,7 +16191,7 @@ cleanedHTML + '\n' +
                     </div>
                     {/* ★ [정밀화] 커리큘럼 단위 설명 단락 — 자동 생성 + 이름 자동 치환 */}
                     <div style={{ fontSize: 12, lineHeight: 1.75, color: "#333", marginBottom: 10, padding: "0 4px" }}>
-                      {personalizeText(generateCurriculumDescription(src, items), childName)}
+                      {personalizeText(generateCurriculumDescription(src, items, goals), childName)}
                     </div>
                     {/* 영역별 작은 카드들 */}
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
