@@ -11687,14 +11687,26 @@ export default function App() {
                     ];
                     const tc = TEACHER_COLORS[tIdx % TEACHER_COLORS.length];
                     const isExpanded = !!expandedTeachers[teacher.name];
-                    // ★ 밀림 아동 수 (활동중 + 최근입력 14일↑)
+                    // ★ [보관·넘김 구별] 이 기록을 다른 선생님께 복사해 넘겼고,
+                    //    복사한 날 이후로 이 기록에는 새 데이터가 없으면 '넘김'으로 본다 (밀림 아님).
+                    //    복사한 뒤에도 이 기록에 데이터가 쌓이면(둘이 나눠 맡는 경우) 평소대로 밀림을 센다.
+                    const handedOverTo = (cid, last) => {
+                      const cp = (children || []).find(x => x && !x.deletedAt && x.info?.copiedFrom === cid);
+                      if (!cp) return null;
+                      const at = String(cp.info?.copiedAt || "").slice(0, 10);
+                      if (!at || !last || last <= at) return cp;
+                      return null;
+                    };
+                    // ★ 밀림 아동 수 (활동중 + 최근입력 14일↑) — 보관·넘김 아동은 빼고 센다
                     const staleCount = teacher.children.filter(c => {
                       if (c.info?.finalEndDate) return false;
+                      if (c.info?.archivedAt) return false;
                       let last = null;
                       (c.goals || []).filter(g => g.includeInIep).forEach(g => (g.tasks || []).forEach(t => {
                         Object.keys(t.daily || {}).forEach(d => { if (!last || d > last) last = d; });
                       }));
                       if (!last) return false;
+                      if (handedOverTo(c.id, last)) return false;
                       return Math.floor((Date.now() - new Date(last).getTime()) / 86400000) >= 14;
                     }).length;
                     return (
@@ -11798,7 +11810,10 @@ export default function App() {
                             : null;
                           // ★ [2번] 최근 입력일이 오래됐는지 — 14일 이상이면 "밀림" 경고
                           const daysSinceData = latestDate ? Math.floor((Date.now() - new Date(latestDate).getTime()) / 86400000) : null;
-                          const isStale = !isTerminated && daysSinceData !== null && daysSinceData >= 14;
+                          // ★ [보관·넘김 구별] 보관한 아동과 다른 선생님께 넘긴 기록은 '밀림' 대신 그 상태를 보여 준다
+                          const isArchivedRow = !isTerminated && !!child.info?.archivedAt;
+                          const handedTo = (!isTerminated && !isArchivedRow) ? handedOverTo(child.id, latestDate) : null;
+                          const isStale = !isTerminated && !isArchivedRow && !handedTo && daysSinceData !== null && daysSinceData >= 14;
                           
                           return (
                             <div key={child.id} style={{ background: isTerminated ? "#fafafa" : "#fdfdfd", padding: "8px 10px", borderRadius: 7, border: `1px solid ${isTerminated ? "#e5e5e5" : "#f0e0e5"}`, fontSize: 12, opacity: isTerminated ? 0.85 : 1 }}>
@@ -11818,9 +11833,18 @@ export default function App() {
                                       <span style={{ fontSize: 9.5, padding: "1px 6px", borderRadius: 6, background: "#fee2e2", color: "#991b1b", fontWeight: 700 }}>
                                         종료
                                       </span>
+                                    ) : isArchivedRow ? (
+                                      <span title={child.info?.archivedAt ? `보관일: ${child.info.archivedAt}` : "보관한 아동"} style={{ fontSize: 9.5, padding: "1px 6px", borderRadius: 6, background: "#fff8e1", color: "#92400e", fontWeight: 700, border: "1px solid #ffe0b2" }}>
+                                        🗄️ 보관
+                                      </span>
                                     ) : (
                                       <span style={{ fontSize: 9.5, padding: "1px 6px", borderRadius: 6, background: "#d1fae5", color: "#065f46", fontWeight: 700 }}>
                                         활동 중
+                                      </span>
+                                    )}
+                                    {handedTo && (
+                                      <span title={`${String(handedTo.info?.copiedAt || "").slice(0, 10)}에 복사해 넘긴 기록입니다. 그 뒤로 이 기록에는 새 데이터가 없습니다.`} style={{ fontSize: 9.5, padding: "1px 6px", borderRadius: 6, background: "#eef2ff", color: "#3730a3", fontWeight: 700 }}>
+                                        ↗ {handedTo.info?.ownerName || "다른"} 선생님께 넘김
                                       </span>
                                     )}
                                     {isStale && (
