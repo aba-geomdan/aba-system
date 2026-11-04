@@ -4259,7 +4259,7 @@ function generateCurriculumDescription(source, items, allGoals) {
     let s = `본 아동은 ELCAR 커리큘럼 기반 평가를 통해 ${domainCount}개 영역에 걸쳐 ${goalCount}개의 세부 목표가 IEP에 포함되었습니다. `;
     if (topDomains.length > 0) {
       const topNames = topDomains.map(([n, c]) => `${n}(${c}개)`).join("·");
-      s += `특히 ${topNames} 영역에 가장 많은 목표가 포함되었습니다. `;   // ★ 목표 수만 보고 '우선 지도가 필요한 핵심 영역'이라 판단하지 않는다
+      s += `특히 ${topNames} 영역의 목표가 많습니다. `;   // ★ 목표 수만 보고 '우선 지도가 필요한 핵심 영역'이라 판단하지 않는다
     } else {
       s += `${domainList} 영역을 중심으로 발달 단계의 핵심 선행 기술이 통합 지도되며, `;
     }
@@ -4306,7 +4306,7 @@ function generateCurriculumDescription(source, items, allGoals) {
     let s = `ESDM 발달 평가에서 ${esdmList} 영역의 발달 항목 ${goalCount}개가 본 아동의 현 단계에 적합한 학습 목표로 도출되었습니다. `;
     if (topDomains.length > 0) {
       const topNames = topDomains.map(([n, c]) => `${n}(${c}개)`).join("·");
-      s += `${topNames} 영역에 가장 많은 목표가 포함되었으며, `;
+      s += `${topNames} 영역의 목표가 많으며, `;
     }
     s += `놀이 중심의 자연주의 교수법으로 일상 속 일반화를 강조하여 지도합니다.`;
     return s;
@@ -4316,7 +4316,7 @@ function generateCurriculumDescription(source, items, allGoals) {
   let s = `본 아동의 발달 특성과 가정·학습 환경의 우선순위를 고려하여 ${domainList} 영역에 걸쳐 ${goalCount}개의 목표가 추가로 선정되었습니다. `;
   if (topDomains.length > 0) {
     const topNames = topDomains.map(([n, c]) => `${n}(${c}개)`).join("·");
-    s += `특히 ${topNames} 영역에 가장 많은 목표가 포함되었으며, `;
+    s += `특히 ${topNames} 영역의 목표가 많으며, `;
   }
   s += `표준 커리큘럼 외에도 개별 아동의 필요에 부합하는 영역에 대해 체계적인 중재를 진행합니다.`;
   return s;
@@ -11786,7 +11786,12 @@ export default function App() {
                         style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", cursor: "pointer", background: isExpanded ? tc.tint : "#fff" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", minWidth: 0 }}>
                           <span style={{ fontSize: 13.5, fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>👨‍🏫 {teacher.name}</span>
-                          <span style={{ fontSize: 10.5, color: "#999", whiteSpace: "nowrap" }}>아동 {teacher.childCount} · 목표 {teacher.totalGoals}</span>
+                          {/* ★ 이름 옆 '아동 · 목표'는 활동 중인 아이만 센다 (종결·보관 아이는 빼고) */}
+                          {(() => {
+                            const _act = teacher.children.filter(c => !c.info?.finalEndDate && !c.info?.archivedAt);
+                            const _goals = _act.reduce((n, c) => n + (c.goals || []).length, 0);
+                            return <span style={{ fontSize: 10.5, color: "#999", whiteSpace: "nowrap" }}>아동 {_act.length} · 목표 {_goals}</span>;
+                          })()}
                           {activeCount > 0 && (
                             <span style={{ fontSize: 9.5, padding: "1px 7px", borderRadius: 8, background: "#d1fae5", color: "#065f46", fontWeight: 600, whiteSpace: "nowrap" }}>활동 {activeCount}</span>
                           )}
@@ -11814,7 +11819,7 @@ export default function App() {
                       <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 14px 12px", borderTop: `1px solid ${tc.edge}` }}>
                         <div style={{ height: 2 }} />
                         {dashFilter === "all" && activeCount === 0 && (
-                          (teacher.childCount === 0 && archivedCount === 0 && terminatedCount === 0) ? (
+                          !_liveAll.some(_isMine) ? (
                             <div style={{ fontSize: 12, color: "#aaa", padding: "6px 2px" }}>아직 담당 아동이 없습니다.</div>
                           ) : !showArchived ? (
                             <div style={{ fontSize: 12, color: "#aaa", padding: "6px 2px" }}>활동 중인 아동이 없습니다. 종결·보관 아동은 위 '🗄️ 보관 아동' 카드를 누르면 보입니다.</div>
@@ -16076,28 +16081,30 @@ cleanedHTML + '\n' +
             });
             const groupPhrases = [];
             if (groupedCats.reinforcer.length > 0) {
-              groupPhrases.push("강화제 영역에는 선호도 평가(MSWO·PSPA)와 강화제 체계 정교화");
+              groupPhrases.push("강화제 영역에는 선호도 확인과 강화제 다양화");   // ★ 실제로 하지 않았을 수 있는 평가 이름(MSWO·PSPA)은 넣지 않는다
             }
             if (groupedCats.language.length > 0) {
               groupPhrases.push("언어 영역(요구·명명·청자 반응 등)에는 분리 시도 교수(DTT)와 자연 환경 교수(NET), 시간 지연");
             }
             if (groupedCats.social.length > 0) {
-              groupPhrases.push("사회·놀이 영역에는 또래 매개 학습과 비디오 모델링");
+              groupPhrases.push("사회·놀이 영역에는 시범과 자연 환경 교수(NET)");   // ★ 개별 수업에서 쓰지 않을 수 있는 또래 매개·비디오 모델링은 넣지 않는다
             }
             if (groupedCats.imitation.length > 0) {
               groupPhrases.push("모방·운동 영역에는 무오류 교수(Errorless Teaching)와 즉각 시범, 신체 형성(shaping)");
             }
             if (groupedCats.selfCare.length > 0) {
-              groupPhrases.push("자조·행동 영역에는 역방향 연쇄와 시각 스케줄, 기능평가 기반 대체 행동 강화(FCT·DRA)");
+              groupPhrases.push("자조·행동 영역에는 역방향 연쇄와 시각 스케줄, 대체 행동 강화");   // ★ 기능평가를 하지 않은 아이에게 '기능평가 기반'이 나가지 않게
             }
             if (groupedCats.cognitive.length > 0) {
               groupPhrases.push("시각·인지·학습 영역에는 시각 단서를 활용한 매칭 변별과 점진적 난이도 조정");
             }
+            // ★ 조사는 괄호 앞 낱말로 고른다 — '신체 형성(shaping)를' → '신체 형성(shaping)을'
+            const _j = (w) => josa을를(String(w).replace(/\s*\([^)]*\)\s*$/, ""));
             const joined = groupPhrases.length === 0
               ? ""
               : groupPhrases.length === 1
-                ? `${groupPhrases[0]}${josa을를(groupPhrases[0])}`
-                : groupPhrases.slice(0, -1).map(p => `${p}${josa을를(p)},`).join(" ") + " " + groupPhrases[groupPhrases.length - 1] + josa을를(groupPhrases[groupPhrases.length - 1]);
+                ? `${groupPhrases[0]}${_j(groupPhrases[0])}`
+                : groupPhrases.slice(0, -1).map(p => `${p}${_j(p)},`).join(" ") + " " + groupPhrases[groupPhrases.length - 1] + _j(groupPhrases[groupPhrases.length - 1]);
             return (
               <div style={{ fontSize: 12.5, lineHeight: 1.85, color: "#444" }}>
                 <p style={{ margin: "0 0 10px" }}>
