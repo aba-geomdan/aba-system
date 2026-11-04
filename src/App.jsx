@@ -4259,7 +4259,7 @@ function generateCurriculumDescription(source, items, allGoals) {
     let s = `본 아동은 ELCAR 커리큘럼 기반 평가를 통해 ${domainCount}개 영역에 걸쳐 ${goalCount}개의 세부 목표가 IEP에 포함되었습니다. `;
     if (topDomains.length > 0) {
       const topNames = topDomains.map(([n, c]) => `${n}(${c}개)`).join("·");
-      s += `특히 ${topNames} 영역에 가장 많은 목표가 집중되어 우선 지도가 필요한 핵심 영역으로 선정되었습니다. `;
+      s += `특히 ${topNames} 영역에 가장 많은 목표가 포함되었습니다. `;   // ★ 목표 수만 보고 '우선 지도가 필요한 핵심 영역'이라 판단하지 않는다
     } else {
       s += `${domainList} 영역을 중심으로 발달 단계의 핵심 선행 기술이 통합 지도되며, `;
     }
@@ -4288,7 +4288,7 @@ function generateCurriculumDescription(source, items, allGoals) {
     }
     let s = `VB-MAPP 마일스톤 평가 결과 ${vbList} 영역의 ${lvRange}에 걸친 ${goalCount}개 목표가 본 아동의 출발점으로 도출되었습니다. `;
     if (minLv !== null && minLv === 1) {
-      s += `특히 Level 1 수준으로 측정된 영역은 발달의 핵심 선행 기술이 형성되는 시점에 해당하므로, 자발성과 일반화에 중점을 두어 단계적으로 확장 지도합니다.`;
+      s += `특히 Level 1 마일스톤을 목표로 한 영역은 발달의 핵심 선행 기술이 형성되는 시점에 해당하므로, 자발성과 일반화에 중점을 두어 단계적으로 확장 지도합니다.`;
     } else if (minLv !== null) {
       s += `현 발달 단계에 적합한 출발점 기술을 토대로 단계적 확장을 목표로 하며, 자발성과 일반화에 중점을 두어 지도합니다.`;
     } else {
@@ -4306,7 +4306,7 @@ function generateCurriculumDescription(source, items, allGoals) {
     let s = `ESDM 발달 평가에서 ${esdmList} 영역의 발달 항목 ${goalCount}개가 본 아동의 현 단계에 적합한 학습 목표로 도출되었습니다. `;
     if (topDomains.length > 0) {
       const topNames = topDomains.map(([n, c]) => `${n}(${c}개)`).join("·");
-      s += `${topNames} 영역에 목표가 집중되어 해당 영역이 본 아동의 발달 우선 지도 대상으로 선정되었으며, `;
+      s += `${topNames} 영역에 가장 많은 목표가 포함되었으며, `;
     }
     s += `놀이 중심의 자연주의 교수법으로 일상 속 일반화를 강조하여 지도합니다.`;
     return s;
@@ -4316,7 +4316,7 @@ function generateCurriculumDescription(source, items, allGoals) {
   let s = `본 아동의 발달 특성과 가정·학습 환경의 우선순위를 고려하여 ${domainList} 영역에 걸쳐 ${goalCount}개의 목표가 추가로 선정되었습니다. `;
   if (topDomains.length > 0) {
     const topNames = topDomains.map(([n, c]) => `${n}(${c}개)`).join("·");
-    s += `특히 ${topNames} 영역의 비중이 높아 우선 중재 대상으로 선정되었으며, `;
+    s += `특히 ${topNames} 영역에 가장 많은 목표가 포함되었으며, `;
   }
   s += `표준 커리큘럼 외에도 개별 아동의 필요에 부합하는 영역에 대해 체계적인 중재를 진행합니다.`;
   return s;
@@ -4472,8 +4472,9 @@ function generatePLPText(domain, goalsInDomain) {
   const list2 = goalsInDomain.filter(g => (g.listGroup || "1") === "2");
   // ★ [평가 문장 정정] '사전 평가 결과 VB-MAPP…', 'ESDM 발달 평가에서는…' 문장은
   //    실제로 그 평가도구 목록에서 고른 목표가 있을 때만 쓴다.
-  //    예전엔 ELCAR 목표에 붙은 연결표(VB: Mand L1 같은 배지)만 보고도 이 문장을 써서,
-  //    VB-MAPP·ESDM 평가를 하지 않은 아이 IEP에도 "평가 결과 확인되었습니다"가 나갔다.
+  //    예전엔 ELCAR 목표에 붙은 연결표(VB: Mand L1 같은 배지)만 보고도 이 문장을 썼다.
+  //    (이 함수를 쓰던 '영역별 현행수준 편집' 칸은 화면에서 빠져 있어 지금은 인쇄에 나가지 않는다.
+  //     인쇄에 나가던 같은 문제는 generateCurriculumDescription에서 고쳤다.)
   const vbmappList = goalsInDomain.filter(g => g.vbmapp && g.source === "VB-MAPP");
   const esdmList = goalsInDomain.filter(g => g.esdm && g.source === "ESDM");
   const recommended = goalsInDomain.filter(g => g.isRecommended && (g.source === "VB-MAPP" || g.source === "ESDM"));
@@ -10459,7 +10460,7 @@ export default function App() {
               {!deleteRequestTarget.info?.finalEndDate && (
                 <div style={{ background: "#fff8e1", border: "1px solid #f5c26b", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 12, color: "#7a4a00", lineHeight: 1.7 }}>
                   <b>⚠ 종결일이 비어 있습니다.</b><br />
-                  수업을 끝낸 아이라면 보관·삭제 요청 전에 <b>보고서 탭</b>에서 종결일을 먼저 넣어 주세요.
+                  수업을 끝낸 아이라면 보관·삭제 요청 전에 <b>보고서 탭 → 🎓 종결보고서</b>를 누르고 위쪽 분홍 칸에서 종결일을 먼저 넣어 주세요.
                   종결일이 있어야 종결보고서와 '종료' 표시가 맞게 나옵니다.<br />
                   <span style={{ color: "#9a7a40" }}>수업을 시작하지 않았거나 중복 등록이라면 그대로 진행하셔도 됩니다.</span>
                   <div style={{ marginTop: 8 }}>
@@ -11516,10 +11517,13 @@ export default function App() {
           //   삭제 표식(deletedAt)이 달린 아동도 제외
           const _liveAll = liveChildren(children);
           const visibleForStats = _liveAll.filter(c => !c.info?.archivedAt);
-          const totalChildren = visibleForStats.length;
+          // ★ [종결·보관 기준 통일] 선생님별 칸과 같은 기준으로 센다.
+          //    종료 = 종결일이 있는 아동 (보관했어도 종료), 보관 = 종결일 없이 보관만 한 아동.
+          //    전체 = 활동 중 + 종료 (종결일 없이 보관만 한 아동은 '보관'에서 따로 센다).
           const activeChildren = visibleForStats.filter(c => !c.info?.finalEndDate).length;
-          const terminatedChildren = visibleForStats.filter(c => c.info?.finalEndDate).length;
-          const archivedChildren = _liveAll.filter(c => c.info?.archivedAt).length;
+          const terminatedChildren = _liveAll.filter(c => c.info?.finalEndDate).length;
+          const archivedChildren = _liveAll.filter(c => c.info?.archivedAt && !c.info?.finalEndDate).length;
+          const totalChildren = activeChildren + terminatedChildren;
 
           // ★ [75-1] '🗄️ 보관 아동' 카드를 눌러도 이 화면이 그대로였다.
           //    카드는 showArchived를 뒤집는데 아래 선생님별 현황은 visibleForStats(보관 항상 제외)만
@@ -11575,6 +11579,16 @@ export default function App() {
               teacherStats[owner].lastDataDate = latestDate;
             }
           });
+          // ★ [보관 칸] 보관 아동만 남은 선생님(그만둔 선생님 등)도 '표시 중'일 때는 줄이 생겨야 보관 칸을 열 수 있다.
+          //    숫자(아동 수·목표 수)에는 더하지 않는다 — 보관 아동은 선생님 줄 안에서 따로 센다.
+          if (showArchived || dashFilter === "terminated") {
+            _liveAll.filter(c => c.info?.archivedAt).forEach(c => {
+              const owner = c.info?.ownerName || "(미할당)";
+              if (!teacherStats[owner]) {
+                teacherStats[owner] = { name: owner, childCount: 0, children: [], totalGoals: 0, totalDataPoints: 0, lastDataDate: null };
+              }
+            });
+          }
           
           return (
             <div style={{ background: "#fff", borderRadius: 12, padding: 24, border: `1px solid ${PKL}` }}>
@@ -11673,10 +11687,13 @@ export default function App() {
                     <div style={{ fontSize: 23, fontWeight: 700, color: "#dc2626" }}>{terminatedChildren}<span style={{ fontSize: 12, fontWeight: 600, color: "#e0a0a0", marginLeft: 1 }}>명</span></div>
                   </div>
                   {/* ★ [신규] 보관 아동 카드 — 보관된 아동이 있을 때만 표시 */}
-                  {archivedChildren > 0 && (
+                  {/* ★ 보관 아동이 0명이어도 카드는 보인다 — 이 카드를 눌러야 선생님별 종결·보관 칸이 보이므로 */}
+                  {(
                     <div
                       onClick={() => setShowArchived(v => !v)}
                       style={{ background: "#fff8e1", padding: "12px 14px", borderRadius: 10, border: "1px solid #ffe0b2", cursor: "pointer", outline: showArchived ? "2px solid #f59e0b" : "none", outlineOffset: -2, transition: "all 0.1s" }}
+                      onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; }}
                       title="누르면 선생님마다 '보관 아동' 칸이 생겨요">
                       <div style={{ fontSize: 11.5, color: "#888", marginBottom: 3, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                         <span>🗄️ 보관 아동</span>
@@ -11705,16 +11722,23 @@ export default function App() {
                     return (a.name || "").localeCompare(b.name || "");
                   }).map((teacher, tIdx) => {
                     // ★ [신규] 선생님별 활동/종료 아동 카운트
-                    // ★ [보관 탭] 보관 아동은 활동·종료에서 빼고 따로 센다.
-                    //    '보관 아동 보기'를 꺼 둬도 선생님별로 보관 아동 칸이 항상 있도록 전체 목록에서 따로 모은다.
-                    const archivedKidsAll = _liveAll.filter(c => c.info?.archivedAt && (c.info?.ownerName || "(미할당)") === teacher.name);
+                    // ★ [보관 칸] 보관 아동은 활동·종료에서 빼고 따로 센다.
+                    //    (statsSource에는 보관 아동이 없으므로 전체 목록에서 따로 모은다)
+                    //    ★ 종결과 보관은 따로: 종결일이 있으면 보관했어도 '종결'로, 종결일 없이 보관만 한 아동이 '보관'.
+                    const _isMine = (c) => (c.info?.ownerName || "(미할당)") === teacher.name;
+                    const endedAllForTeacher = ((showArchived || dashFilter === "terminated") ? _liveAll.filter(_isMine) : teacher.children).filter(c => c.info?.finalEndDate);
+                    const archivedKidsAll = _liveAll.filter(c => _isMine(c) && c.info?.archivedAt && !c.info?.finalEndDate);
                     const activeCount = teacher.children.filter(c => !c.info?.finalEndDate && !c.info?.archivedAt).length;
-                    const terminatedCount = teacher.children.filter(c => c.info?.finalEndDate && !c.info?.archivedAt).length;
+                    const terminatedCount = endedAllForTeacher.length;
                     const archivedCount = archivedKidsAll.length;
                     // ★ [3번] 필터에 맞는 아동이 없는 선생님은 숨김
-                    const matchCount = dashFilter === "active" ? activeCount : dashFilter === "terminated" ? terminatedCount : teacher.childCount;
-                    // ★ [80-1] 단, '전체' 보기에서는 아동 0명인 등록 선생님도 보여 준다.
-                    if (matchCount === 0 && !(dashFilter === "all" && teacher.childCount === 0 && teacher.name !== "(미할당)")) return null;
+                    //    ★ [보관 칸] '전체' 보기: 평소엔 활동 아동 기준, '보관 아동' 카드가 표시 중이면 종결·보관까지.
+                    const isRegisteredTeacher = (teachers || []).some(t => (t?.name || "").trim() === teacher.name);
+                    const matchCount = dashFilter === "active" ? activeCount
+                      : dashFilter === "terminated" ? terminatedCount
+                      : (showArchived ? activeCount + terminatedCount + archivedCount : activeCount);
+                    // ★ [80-1] 단, '전체' 보기에서는 등록된 선생님은 아동이 없어도 보여 준다.
+                    if (matchCount === 0 && !(dashFilter === "all" && isRegisteredTeacher)) return null;
                     // ★ 선생님별 색 자동 배정 (순환)
                     const TEACHER_COLORS = [
                       { bar: "#D4728A", tint: "#fdf8f9", edge: "#f0dfe4" },
@@ -11732,7 +11756,12 @@ export default function App() {
                     const handedOverTo = (cid, last) => {
                       const cp = (children || []).find(x => x && !x.deletedAt && x.info?.copiedFrom === cid);
                       if (!cp) return null;
-                      const at = String(cp.info?.copiedAt || "").slice(0, 10);
+                      // 복사한 날짜는 한국 시간 기준 날짜로 비교한다 (기록 날짜도 한국 날짜로 적힌다)
+                      let at = "";
+                      try {
+                        const d = new Date(cp.info?.copiedAt || "");
+                        if (!isNaN(d.getTime())) at = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                      } catch (e) { at = ""; }
                       if (!at || !last || last <= at) return cp;
                       return null;
                     };
@@ -11762,10 +11791,10 @@ export default function App() {
                             <span style={{ fontSize: 9.5, padding: "1px 7px", borderRadius: 8, background: "#d1fae5", color: "#065f46", fontWeight: 600, whiteSpace: "nowrap" }}>활동 {activeCount}</span>
                           )}
                           {/* ★ 종료·보관 숫자는 '🗄️ 보관 아동' 카드가 '표시 중'일 때만 (평소엔 활동만) */}
-                          {terminatedCount > 0 && (showArchived || dashFilter === "terminated") && (
+                          {terminatedCount > 0 && ((showArchived && dashFilter === "all") || dashFilter === "terminated") && (
                             <span style={{ fontSize: 9.5, padding: "1px 7px", borderRadius: 8, background: "#fee2e2", color: "#991b1b", fontWeight: 600, whiteSpace: "nowrap" }}>종료 {terminatedCount}</span>
                           )}
-                          {archivedCount > 0 && showArchived && (
+                          {archivedCount > 0 && showArchived && dashFilter === "all" && (
                             <span style={{ fontSize: 9.5, padding: "1px 7px", borderRadius: 8, background: "#fff8e1", color: "#92400e", fontWeight: 600, whiteSpace: "nowrap", border: "1px solid #ffe0b2" }}>보관 {archivedCount}</span>
                           )}
                           {staleCount > 0 && (
@@ -11784,8 +11813,12 @@ export default function App() {
                       {isExpanded && (
                       <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 14px 12px", borderTop: `1px solid ${tc.edge}` }}>
                         <div style={{ height: 2 }} />
-                        {teacher.childCount === 0 && (archivedCount === 0 || !showArchived) && (
-                          <div style={{ fontSize: 12, color: "#aaa", padding: "6px 2px" }}>아직 담당 아동이 없습니다.</div>
+                        {dashFilter === "all" && activeCount === 0 && (
+                          (teacher.childCount === 0 && archivedCount === 0 && terminatedCount === 0) ? (
+                            <div style={{ fontSize: 12, color: "#aaa", padding: "6px 2px" }}>아직 담당 아동이 없습니다.</div>
+                          ) : !showArchived ? (
+                            <div style={{ fontSize: 12, color: "#aaa", padding: "6px 2px" }}>활동 중인 아동이 없습니다. 종결·보관 아동은 위 '🗄️ 보관 아동' 카드를 누르면 보입니다.</div>
+                          ) : null
                         )}
                         {(() => {
                           // ★ [신규] 종결 아동은 맨 아래로 내리고 기본 접음.
@@ -11803,10 +11836,10 @@ export default function App() {
                             return sa.localeCompare(sb);
                           };
                           const activeKids = shown.filter(c => !c.info?.finalEndDate && !c.info?.archivedAt).sort(byStart);
-                          const endedKids = shown.filter(c => !!c.info?.finalEndDate && !c.info?.archivedAt).sort(byStart);
-                          // ★ [보관 탭] 보관 아동은 '전체' 보기에서만, 종결처럼 접힌 칸으로
+                          // ★ 종결 칸: 종결일이 있는 아동 전부 (보관 카드가 표시 중이면 보관한 종결 아동도 여기로)
+                          const endedKids = dashFilter === "active" ? [] : endedAllForTeacher.slice().sort(byStart);
                           // ★ [보관 칸] '보관 아동' 카드가 '표시 중'일 때만, 종결 칸 아래 따로 접힌 칸으로
-                          const archivedKids = (showArchived && dashFilter !== "terminated") ? archivedKidsAll.slice().sort(byStart) : [];
+                          const archivedKids = (showArchived && dashFilter === "all") ? archivedKidsAll.slice().sort(byStart) : [];
                           const archivedOpen = !!archivedOpenMap[teacher.name];
                           // ★ 필터가 '종결'일 때는 접기 없이 바로 보여준다.
                           //    (그렇지 않으면 목록이 통째로 비고 버튼만 남는다)
@@ -11855,6 +11888,7 @@ export default function App() {
                           // ★ [2번] 최근 입력일이 오래됐는지 — 14일 이상이면 "밀림" 경고
                           const daysSinceData = latestDate ? Math.floor((Date.now() - new Date(latestDate).getTime()) / 86400000) : null;
                           // ★ [보관·넘김 구별] 보관한 아동과 다른 선생님께 넘긴 기록은 '밀림' 대신 그 상태를 보여 준다
+                          //    종결일이 있으면 '종료'가 먼저다 (종결 칸에 들어가는 아동) — 보관 표시는 종결일 없이 보관한 아동만
                           const isArchivedRow = !isTerminated && !!child.info?.archivedAt;
                           const handedTo = (!isTerminated && !isArchivedRow) ? handedOverTo(child.id, latestDate) : null;
                           const isStale = !isTerminated && !isArchivedRow && !handedTo && daysSinceData !== null && daysSinceData >= 14;
@@ -11887,7 +11921,7 @@ export default function App() {
                                       </span>
                                     )}
                                     {handedTo && (
-                                      <span title={`${String(handedTo.info?.copiedAt || "").slice(0, 10)}에 복사해 넘긴 기록입니다. 그 뒤로 이 기록에는 새 데이터가 없습니다.`} style={{ fontSize: 9.5, padding: "1px 6px", borderRadius: 6, background: "#eef2ff", color: "#3730a3", fontWeight: 700 }}>
+                                      <span title="다른 선생님께 복사해 넘긴 기록입니다. 복사한 뒤로 이 기록에는 새 데이터가 없습니다." style={{ fontSize: 9.5, padding: "1px 6px", borderRadius: 6, background: "#eef2ff", color: "#3730a3", fontWeight: 700 }}>
                                         ↗ {handedTo.info?.ownerName || "다른"} 선생님께 넘김
                                       </span>
                                     )}
