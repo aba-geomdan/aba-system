@@ -10443,6 +10443,21 @@ export default function App() {
                 <b>보관</b>은 목록에서만 숨기고 데이터는 그대로 남습니다. 언제든 다시 꺼낼 수 있습니다.<br />
                 <b>삭제 요청</b>은 관리자에게 전달되며, 관리자가 확인 후 처리합니다. 그때까지는 보관함에 있습니다.
               </div>
+              {/* ★ [종결일 확인] 종결일이 비어 있으면 먼저 넣도록 안내 (막지는 않는다 — 시작 전 아동은 종결일이 없는 게 맞다) */}
+              {!deleteRequestTarget.info?.finalEndDate && (
+                <div style={{ background: "#fff8e1", border: "1px solid #f5c26b", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 12, color: "#7a4a00", lineHeight: 1.7 }}>
+                  <b>⚠ 종결일이 비어 있습니다.</b><br />
+                  수업을 끝낸 아이라면 보관·삭제 요청 전에 <b>보고서 탭</b>에서 종결일을 먼저 넣어 주세요.
+                  종결일이 있어야 종결보고서와 '종료' 표시가 맞게 나옵니다.<br />
+                  <span style={{ color: "#9a7a40" }}>수업을 시작하지 않았거나 중복 등록이라면 그대로 진행하셔도 됩니다.</span>
+                  <div style={{ marginTop: 8 }}>
+                    <button style={{ ...BS, fontSize: 11.5, padding: "4px 10px" }}
+                      onClick={() => { const t = deleteRequestTarget; setDeleteRequestTarget(null); setDeleteRequestReason(""); setActiveChildId(t.id); setTab("report"); }}>
+                      📝 보고서 탭으로 가서 종결일 넣기
+                    </button>
+                  </div>
+                </div>
+              )}
               <textarea
                 value={deleteRequestReason}
                 onChange={e => setDeleteRequestReason(e.target.value)}
@@ -10560,6 +10575,13 @@ export default function App() {
                       <div style={{ color: "#5a3030", marginBottom: 3 }}>
                         <b>{r.childName}</b>
                         <span style={{ fontSize: 10.5, color: "#a87878", marginLeft: 6 }}>{r.requestedBy} 선생님 · {String(r.requestedAt).slice(0, 10)}</span>
+                        {/* ★ [종결일 확인] 요청 들어온 아동에 종결일이 없으면 표시 */}
+                        {(() => {
+                          const rc = (children || []).find(x => x && !x.deletedAt && x.id === r.childId);
+                          return rc && !rc.info?.finalEndDate ? (
+                            <span title="종결일이 비어 있습니다. 수업을 끝낸 아이라면 종결일부터 넣는 편이 좋습니다." style={{ fontSize: 10, marginLeft: 6, padding: "1px 6px", borderRadius: 6, background: "#fff8e1", color: "#92400e", fontWeight: 700, border: "1px solid #ffe0b2" }}>⚠ 종결일 없음</span>
+                          ) : null;
+                        })()}
                       </div>
                       {r.reason && <div style={{ fontSize: 11, color: "#8a6060", marginBottom: 6 }}>사유: {r.reason}</div>}
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
