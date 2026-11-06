@@ -736,6 +736,22 @@ function TeacherScheduleStrip({ isAdmin = false }) {
           })
           .sort((a, b) => String(a.d).localeCompare(String(b.d)) || String(a.start_time).localeCompare(String(b.start_time)));
         // 이 결강들에 이어진 보강(언제 몇 분 했는지) — 실패해도 남은 시간 표시는 그대로
+        // ★ [같은 날 시간 변경] '이 날만 시간 바꾸기'는 시간표 앱에 보강처럼 저장된다.
+        //    원래 수업 날짜와 바뀐 수업 날짜가 같으면 보강이 아니라 그날 시간만 바꾼 것으로 본다.
+        let movedIds = [], movedFrom = [];
+        const _mkFor = Array.from(new Set((ss.value || []).filter((s) => s.status === "보강" && s.makeup_for).map((s) => s.makeup_for)));
+        if (_mkFor.length > 0) {
+          try {
+            const orig = await schedRead(`v_sessions?select=id,d&id=in.(${_mkFor.join(",")})&limit=60`, headers);
+            const dOf = new Map((orig || []).map((o) => [String(o.id), String(o.d).slice(0, 10)]));
+            (ss.value || []).forEach((s) => {
+              if (s.status === "보강" && s.makeup_for && dOf.get(String(s.makeup_for)) === String(s.d).slice(0, 10)) {
+                movedIds.push(String(s.id)); movedFrom.push(String(s.makeup_for));
+              }
+            });
+          } catch (e) { movedIds = []; movedFrom = []; }
+          if (!on || my !== seq) return;
+        }
         let linked = [];
         if (unmadeList.length > 0) {
           try {
@@ -748,6 +764,8 @@ function TeacherScheduleStrip({ isAdmin = false }) {
           unmade: unmadeList.length,
           unmadeList,
           linked,
+          movedIds,
+          movedFrom,
           nt: nt.status === "fulfilled" ? nt.value : [],
           today: _sIso(now),
         });
@@ -781,9 +799,11 @@ function TeacherScheduleStrip({ isAdmin = false }) {
   // 일정 변경: 선생님은 원장님이 보낸 것, 원장님은 본인 수업에 남은 것
   const changes = data.nt.filter((n) => n.to_staff != null && n.kind !== "close_req");
   const fromTeachers = isAdmin ? data.nt.filter((n) => n.to_staff == null) : []; // 원장님: 선생님이 보낸 보강 체크 · 마감 답
-  const todays = data.ss.filter((s) => String(s.d).slice(0, 10) === data.today);
+  const _moved = new Set(data.movedIds || []);       // 같은 날 시간만 바꾼 수업
+  const _movedFrom = new Set(data.movedFrom || []);  // 그 수업의 원래 시간 칸 (오늘 목록에서 뺌)
+  const todays = data.ss.filter((s) => String(s.d).slice(0, 10) === data.today && !_movedFrom.has(String(s.id)));
   // ★ [남은 보강 시간] 오늘 보강은 '오늘 수업'에 이미 나오므로 '다가오는 보강'에는 내일부터만
-  const weekMakeups = data.ss.filter((s) => s.status === "보강" && String(s.d).slice(0, 10) > data.today);
+  const weekMakeups = data.ss.filter((s) => s.status === "보강" && !_moved.has(String(s.id)) && String(s.d).slice(0, 10) > data.today);
   const unmadeList = data.unmadeList || [];
   const leftSum = unmadeList.reduce((a, u) => a + u.left, 0);
   const _durMin = (s) => {
@@ -903,7 +923,9 @@ function TeacherScheduleStrip({ isAdmin = false }) {
                 <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0" }}>
                   <span style={{ width: 82, color: "#888", flexShrink: 0 }}>{_sClock(s.start_time)}~{_sClock(s.end_time)}</span>
                   <span style={{ fontWeight: 700, color: s.status === "결강" ? "#aaa" : "#333", textDecoration: s.status === "결강" ? "line-through" : "none" }}>{s.student_name}</span>
-                  {s.status === "보강" && chip("#E07B00", "#fff", s.makeup_for && _durMin(s) > 0 && _durMin(s) < 50 ? `보강 ${_durMin(s)}분` : "보강")}
+                  {s.status === "보강" && (_moved.has(String(s.id))
+                    ? chip("#EEF2FF", "#3730A3", "시간 변경")
+                    : chip("#E07B00", "#fff", s.makeup_for && _durMin(s) > 0 && _durMin(s) < 50 ? `보강 ${_durMin(s)}분` : "보강"))}
                   {s.status === "결강" && chip("#FDECEF", "#AE2340", "결강")}
                 </div>
               ))}
@@ -11757,22 +11779,27 @@ export default function App() {
                     ];
                     const tc = TEACHER_COLORS[tIdx % TEACHER_COLORS.length];
                     const isExpanded = !!expandedTeachers[teacher.name];
-                    // ★ [보관·넘김 구별] 이 기록을 다른 선생님께 복사해 넘겼고,
-                    //    복사한 날 이후로 이 기록에는 새 데이터가 없으면 '넘김'으로 본다 (밀림 아님).
-                    //    복사한 뒤에도 이 기록에 데이터가 쌓이면(둘이 나눠 맡는 경우) 평소대로 밀림을 센다.
-                    const handedOverTo = (cid, last) => {
-                      const cp = (children || []).find(x => x && !x.deletedAt && x.info?.copiedFrom === cid);
-                      if (!cp) return null;
-                      // 복사한 날짜는 한국 시간 기준 날짜로 비교한다 (기록 날짜도 한국 날짜로 적힌다)
-                      let at = "";
-                      try {
-                        const d = new Date(cp.info?.copiedAt || "");
-                        if (!isNaN(d.getTime())) at = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-                      } catch (e) { at = ""; }
-                      if (!at || !last || last <= at) return cp;
-                      return null;
+                    // ★ [함께 맡는 아동] 복사로 이어진 기록(같은 아동을 다른 선생님도 맡음)을 찾아
+                    //    '○○ 선생님과 함께'로 보여 준다. 밀림은 다른 아동과 똑같이 센다.
+                    const _liveAll = (children || []).filter(x => x && !x.deletedAt);
+                    const _byId = new Map(_liveAll.map(x => [x.id, x]));
+                    const _rootOf = (c) => {
+                      let cur = c, guard = 0;
+                      while (cur && cur.info?.copiedFrom && _byId.has(cur.info.copiedFrom) && guard < 20) { cur = _byId.get(cur.info.copiedFrom); guard++; }
+                      return cur?.info?.copiedFrom || cur?.id;
                     };
-                    // ★ 밀림 아동 수 (활동중 + 최근입력 14일↑) — 보관·넘김 아동은 빼고 센다
+                    const partnersOf = (child) => {
+                      const r = _rootOf(child);
+                      const names = [];
+                      _liveAll.forEach(x => {
+                        if (x.id === child.id || x.info?.archivedAt || x.info?.finalEndDate) return;
+                        if (_rootOf(x) !== r) return;
+                        const n = x.info?.ownerName;
+                        if (n && n !== teacher.name && !names.includes(n)) names.push(n);
+                      });
+                      return names;
+                    };
+                    // ★ 밀림 아동 수 (활동중 + 최근입력 14일↑) — 보관 아동은 빼고 센다
                     const staleCount = teacher.children.filter(c => {
                       if (c.info?.finalEndDate) return false;
                       if (c.info?.archivedAt) return false;
@@ -11781,7 +11808,6 @@ export default function App() {
                         Object.keys(t.daily || {}).forEach(d => { if (!last || d > last) last = d; });
                       }));
                       if (!last) return false;
-                      if (handedOverTo(c.id, last)) return false;
                       return Math.floor((Date.now() - new Date(last).getTime()) / 86400000) >= 14;
                     }).length;
                     return (
@@ -11899,12 +11925,12 @@ export default function App() {
                             : null;
                           // ★ [2번] 최근 입력일이 오래됐는지 — 14일 이상이면 "밀림" 경고
                           const daysSinceData = latestDate ? Math.floor((Date.now() - new Date(latestDate).getTime()) / 86400000) : null;
-                          // ★ [보관·넘김 구별] 보관한 아동과 다른 선생님께 넘긴 기록은 '밀림' 대신 그 상태를 보여 준다
+                          // ★ 보관한 아동은 '밀림' 대신 보관 표시를 보여 준다
                           //    종결일이 있으면 '종료'가 먼저다 (종결 칸에 들어가는 아동) — 보관 표시는 종결일 없이 보관한 아동만
                           const isArchivedRow = !isTerminated && !!child.info?.archivedAt;
-                          // ★ '넘김'은 밀림 대신 붙이는 표시다 — 기록이 최근에 있으면(같이 맡는 아이 등) 붙이지 않는다.
-                          const handedTo = (!isTerminated && !isArchivedRow && (daysSinceData === null || daysSinceData >= 14)) ? handedOverTo(child.id, latestDate) : null;
-                          const isStale = !isTerminated && !isArchivedRow && !handedTo && daysSinceData !== null && daysSinceData >= 14;
+                          // ★ 함께 맡는 선생님 (종결·보관 아동에는 붙이지 않음)
+                          const partners = (!isTerminated && !isArchivedRow) ? partnersOf(child) : [];
+                          const isStale = !isTerminated && !isArchivedRow && daysSinceData !== null && daysSinceData >= 14;
                           
                           return (
                             <div key={child.id} style={{ background: isTerminated ? "#fafafa" : "#fdfdfd", padding: "8px 10px", borderRadius: 7, border: `1px solid ${isTerminated ? "#e5e5e5" : "#f0e0e5"}`, fontSize: 12, opacity: isTerminated ? 0.85 : 1 }}>
@@ -11933,9 +11959,9 @@ export default function App() {
                                         활동 중
                                       </span>
                                     )}
-                                    {handedTo && (
-                                      <span title="다른 선생님께 복사해 넘긴 기록입니다. 복사한 뒤로 이 기록에는 새 데이터가 없습니다." style={{ fontSize: 9.5, padding: "1px 6px", borderRadius: 6, background: "#eef2ff", color: "#3730a3", fontWeight: 700 }}>
-                                        ↗ {handedTo.info?.ownerName || "다른"} 선생님께 넘김
+                                    {partners.length > 0 && (
+                                      <span title="여러 선생님이 함께 맡는 아동입니다." style={{ fontSize: 9.5, padding: "1px 6px", borderRadius: 6, background: "#eef2ff", color: "#3730a3", fontWeight: 700 }}>
+                                        🔗 {partners.join("·")} 선생님과 함께
                                       </span>
                                     )}
                                     {isStale && (
