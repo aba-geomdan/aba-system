@@ -11781,19 +11781,19 @@ export default function App() {
                     const isExpanded = !!expandedTeachers[teacher.name];
                     // ★ [함께 맡는 아동] 복사로 이어진 기록(같은 아동을 다른 선생님도 맡음)을 찾아
                     //    '○○ 선생님과 함께'로 보여 준다. 밀림은 다른 아동과 똑같이 센다.
-                    const _liveAll = (children || []).filter(x => x && !x.deletedAt);
-                    const _byId = new Map(_liveAll.map(x => [x.id, x]));
-                    const _rootOf = (c) => {
+                    const _pAll = (children || []).filter(x => x && !x.deletedAt);
+                    const _pById = new Map(_pAll.map(x => [x.id, x]));
+                    const _pRootOf = (c) => {
                       let cur = c, guard = 0;
-                      while (cur && cur.info?.copiedFrom && _byId.has(cur.info.copiedFrom) && guard < 20) { cur = _byId.get(cur.info.copiedFrom); guard++; }
+                      while (cur && cur.info?.copiedFrom && _pById.has(cur.info.copiedFrom) && guard < 20) { cur = _pById.get(cur.info.copiedFrom); guard++; }
                       return cur?.info?.copiedFrom || cur?.id;
                     };
                     const partnersOf = (child) => {
-                      const r = _rootOf(child);
+                      const r = _pRootOf(child);
                       const names = [];
-                      _liveAll.forEach(x => {
+                      _pAll.forEach(x => {
                         if (x.id === child.id || x.info?.archivedAt || x.info?.finalEndDate) return;
-                        if (_rootOf(x) !== r) return;
+                        if (_pRootOf(x) !== r) return;
                         const n = x.info?.ownerName;
                         if (n && n !== teacher.name && !names.includes(n)) names.push(n);
                       });
