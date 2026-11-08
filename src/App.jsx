@@ -330,6 +330,44 @@ window.storage = {
     return { value };
   },
 
+  // ★ [동시 저장] 값과 그 값의 저장 시각(updated_at)을 함께 읽는다.
+  //    저장할 때 "내가 읽은 뒤 누가 올렸나"를 확인하는 기준이 된다. 실패 처리는 get과 같다.
+  async getWithStamp(key /*, shared */) {
+    const headers = await _authHeaders();
+    const url = `${SUPABASE_URL}/rest/v1/aba_data?user_id=eq.${ABA_OWNER_ID}&key=eq.${encodeURIComponent(key)}&select=value,updated_at`;
+    let r;
+    try { r = await fetch(url, { headers }); }
+    catch (e) { throw new Error("cloud read failed (network): " + (e && e.message ? e.message : "unknown")); }
+    if (!r.ok) throw new Error("cloud read failed (HTTP " + r.status + ")");
+    let rows;
+    try { rows = await r.json(); } catch (e) { throw new Error("cloud read failed (bad body)"); }
+    return (rows && rows.length > 0) ? { value: rows[0].value, updatedAt: rows[0].updated_at } : null;
+  },
+
+  // ★ [동시 저장] 서버 값이 내가 읽은 그대로(updated_at이 같을 때)만 덮어쓴다.
+  //    예전엔 읽고 → 합치고 → 올리는 몇 초 사이에 다른 기기가 올린 것을, 확인 없이 덮어 지웠다.
+  //    돌려주는 값: { ok: true, updatedAt } = 올라감 / { ok: false } = 그사이 누가 올렸음(다시 읽어 합칠 것).
+  //    네트워크·서버 실패는 set과 같이 예외로 알린다.
+  async setIfStamp(key, value, stamp /*, shared */) {
+    const headers = await _authHeaders();
+    const url = `${SUPABASE_URL}/rest/v1/aba_data?user_id=eq.${ABA_OWNER_ID}&key=eq.${encodeURIComponent(key)}&updated_at=eq.${encodeURIComponent(stamp)}&select=updated_at`;
+    let r;
+    try {
+      r = await fetch(url, {
+        method: "PATCH",
+        headers: { ...headers, "Prefer": "return=representation" },
+        body: JSON.stringify({ value, updated_at: new Date().toISOString() }),
+      });
+    } catch (e) {
+      throw new Error("cloud write failed (network): " + (e && e.message ? e.message : "unknown"));
+    }
+    if (!r.ok) throw new Error("cloud write failed (HTTP " + r.status + ")");
+    let rows = null;
+    try { rows = await r.json(); } catch (e) { rows = null; }
+    if (!Array.isArray(rows) || rows.length === 0) return { ok: false };
+    return { ok: true, updatedAt: rows[0].updated_at };
+  },
+
   async delete(key /*, shared */) {
     try {
       const headers = await _authHeaders();
@@ -3533,8 +3571,13 @@ const ESDM_REPORT_ALIAS = {
   "개인적 독립: 위생": "자조기술: 위생",
   "개인적 독립: 가사": "자조기술: 가사",
   "자조 기술": "자조기술",
-  "사회 기술": "사회기술",
-  "사회기술: 어른과 동료": "사회기술: 어른 혹은 친구",
+  // ★ [사회성 묶기 · 2026-11 원장 결정] ESDM 사회 영역 다섯 이름을 모두 '사회성' 한 줄로.
+  //    예전엔 이 표를 한 번만 찾아서 레벨 3 '어른과 동료'가 "사회기술: 어른 혹은 친구"로,
+  //    레벨 1·4가 "사회기술"로 따로 나갔다(레벨 2 '어른 혹은 친구'만 사회성으로 묶였다).
+  "사회기술": "사회성",
+  "사회 기술": "사회성",
+  "사회기술: 친구": "사회성",
+  "사회기술: 어른과 동료": "사회성",
   // ★ [69-1] ESDM 사회 영역을 ELCAR·VB-MAPP과 같은 '사회성'으로 묶는다.
   //    이름만 다르고 보는 것이 같아, 안 묶으면 한 아동 보고서에
   //    "사회성"과 "사회기술: 어른/친구"가 따로 나온다.
@@ -3568,6 +3611,46 @@ const ELCAR_OLD_DOMAIN_ALIAS = {
   "교수 준비도": "교수 준비도 스크리닝",
   "신체발달": "신체 발달",
 };
+
+// ★ [보고 종료일 하나로 나눈다 · 2026-11 원장 결정]
+//    과제를 '완료'로 바꾼 날 — 완료를 누른 날(completedAt). 예전 기록은 누른 날이 masteredAt에 들어 있다.
+//    (masteredAt은 이제 '기준 도달일'이라 종결보고서 '숙달 시기'에 쓴다)
+function taskDoneOn(t) { return (t && (t.completedAt || t.masteredAt)) || ""; }
+//    보고 종료일(end) 기준 상태 — 종료일 다음 날부터 누른 완료·중단은 그 보고서에서는 '진행중'.
+function taskGroupAsOf(t, end) {
+  const lg = (t && t.listGroup) || "1";
+  if (!end) return lg;
+  if (lg === "2") { const d = taskDoneOn(t); if (d && d > end) return "1"; }
+  if (lg === "paused" && t.pausedAt && t.pausedAt > end) return "1";
+  return lg;
+}
+function goalsAsOf(goals, end) {
+  if (!end) return goals;
+  return (goals || []).map(g => {
+    let changed = false;
+    const tasks = (g.tasks || []).map(t => {
+      const lg = taskGroupAsOf(t, end);
+      if (lg !== ((t && t.listGroup) || "1")) { changed = true; return { ...t, listGroup: lg }; }
+      return t;
+    });
+    let status = g.status;
+    if (g.status === "mastered") {
+      const ds = (g.tasks || []).map(taskDoneOn).filter(Boolean).sort();
+      const gd = ds.length ? ds[ds.length - 1] : (g.masteredAt || "");
+      if (gd && gd > end) { status = "active"; changed = true; }
+    }
+    return changed ? { ...g, tasks, status } : g;
+  });
+}
+
+// ★ [VB-MAPP 이름] VB-MAPP 목록에서 고른 목표는 vbmapp.v에 영역 이름의 첫 낱말만 저장된다
+//    ("동작 모방"→"동작", "학급 일과와 집단활동기술"→"학급"). 저장값은 그대로 두고, 보여 줄 때만 고른 영역의 전체 이름을 쓴다.
+//    (엘카 목표의 연결 표시는 2026-11에 숨겼으므로 그대로 vbmapp.v를 쓴다)
+function vbmappAreaName(g) {
+  if (!g) return "";
+  if (g.source === "VB-MAPP" && g.domain) return cleanDomainKey(g.domain) || g.domain;
+  return (g.vbmapp && g.vbmapp.v) || "";
+}
 
 const VBMAPP_REPORT_ALIAS = {
   // ── 새 이름 (67-1 이후) ──
@@ -3614,7 +3697,8 @@ function reportDomainOf(goal) {
     return tidyReportDomainName(domain);
   }
   // ESDM 레벨별 이름 흔들림 통일 (위 표에 걸리지 않은 영역만)
-  const alias = ESDM_REPORT_ALIAS[domain.trim()];
+  // ★ [사회성 묶기] '사회기술'은 선생님이 직접 만든 목표(기타)에도 흔한 이름이라, ESDM 목표일 때만 '사회성'으로 바꾼다
+  const alias = (domain.trim() === "사회기술" && goal && goal.source && goal.source !== "ESDM") ? null : ESDM_REPORT_ALIAS[domain.trim()];
   if (alias) return alias;
   // ★ [68-1] VB-MAPP 영역명을 ELCAR 쪽 보고서 이름으로 맞춘다.
   //    67-1로 맨드·택트·에코익·인트라버벌은 이름이 같아져 저절로 한 줄이 됐는데,
@@ -4411,7 +4495,7 @@ function generateCurriculumDescription(source, items, allGoals) {
   }
 
   if (source === "VB-MAPP") {
-    const vbDomains = [...new Set(items.filter(g => g.vbmapp).map(g => g.vbmapp.v))];
+    const vbDomains = [...new Set(items.filter(g => g.vbmapp).map(g => vbmappAreaName(g)))];
     const vbLevels = items.filter(g => g.vbmapp).map(g => g.vbmapp.lv);
     const minLv = vbLevels.length > 0 ? Math.min(...vbLevels) : null;
     const maxLv = vbLevels.length > 0 ? Math.max(...vbLevels) : null;
@@ -4843,6 +4927,7 @@ function hasCloudHadData() {
 }
 const LAST_BACKUP_KEY = "gd-aba-last-backup-at";   // 마지막 💾 전체 백업 시각 (ISO)
 const AUTO_BACKUP_ENABLED_KEY = "gd-aba-auto-backup-enabled";  // "1" | "0"
+const AUTO_FILE_BACKUP_ALLOWED = false;   // ★ [자동 파일 백업 끔] 위 설정이 '켜짐'이어도 돌지 않는다
 const AUTO_BACKUP_INTERVAL_KEY = "gd-aba-auto-backup-interval"; // 분 단위: "30" | "60" | "120" | "240"
 const BACKUP_HISTORY_KEY = "gd-aba-backup-history";  // 최근 10개 백업 기록 (JSON 배열)
 
@@ -4859,6 +4944,26 @@ const DELETE_REQUEST_KEY = "gd-aba-delete-requests";
 //    측정치: 살아 있는 아동 28명 = 약 1.6MB. 7일치라도 12MB 안쪽이고
 //    키 하나당 한도(5MB)에 날짜별로 나눠 담으므로 여유가 있다.
 const SNAPSHOT_PREFIX = "gd-aba-snapshot:";     // + YYYY-MM-DD
+// ★ [사본 정리] 기록 합치기 전·아동 복사 전·날짜별 기록 되살리기 직전에 남기는 안전용 사본.
+//    예전엔 지우는 곳이 없어 할 때마다 서버 사용량이 늘었다(사용량 한도를 넘어 접속이 막혔던 적이 있다).
+//    종류마다 가장 최근 5개만 남기고 오래된 것은 지운다. 열쇠 이름에 만든 시각이 들어 있어 이름순 = 시간순이다.
+async function pruneSafetyCopies(prefix, keep = 5) {
+  if (!prefix) return;
+  try {
+    if (typeof localStorage !== "undefined") {
+      const ks = [];
+      for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(prefix)) ks.push(k); }
+      ks.sort().slice(0, Math.max(0, ks.length - keep)).forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+    }
+  } catch (e) {}
+  try {
+    if (typeof window !== "undefined" && window.storage && window.storage.list) {
+      const { keys } = await window.storage.list(prefix, true);
+      const ks = (keys || []).filter(k => k && k.startsWith(prefix)).sort();
+      for (const k of ks.slice(0, Math.max(0, ks.length - keep))) { await window.storage.delete(k, true); }
+    }
+  } catch (e) { console.warn("[사본 정리 실패]", e?.message); }
+}
 const SNAPSHOT_INDEX_KEY = "gd-aba-snapshot-index";
 const SNAPSHOT_KEEP_DAYS = 7;
 // ★ [88-1] 월 1회 파일 백업 표식 — "YYYY-MM"을 남겨 그 달에 받았는지 본다.
@@ -5079,7 +5184,7 @@ async function loadArchiveItem(archiveId, expectedSavedAt) {
   return local;
 }
 
-async function saveArchiveItem(snapshot, autoMode) {
+async function saveArchiveItem(snapshot, autoMode, opts = {}) {
   if (!snapshot || !snapshot.childId) return null;
   try {
     const childId = snapshot.childId;
@@ -5092,16 +5197,24 @@ async function saveArchiveItem(snapshot, autoMode) {
     let list = (cloudIndexOk && cloudIdx.list.length > 0)
       ? cloudIdx.list
       : (readLocalArchiveIndex(childId) || []);
-    if (autoMode) {
+    // ★ [덮어쓰기] 같은 종류(중간/종결/IEP)·같은 기간을 24시간 안에 다시 인쇄하면 새로 쌓지 않고 덮어쓴다.
+    //    예전엔 중간보고서만 덮어써서, 종결보고서·IEP 계획안은 인쇄할 때마다 보관본이 하나씩 늘었다.
+    //    opts.replaceId: [↩ 그래프 복원]으로 다시 낸 보고서 — 시간과 상관없이 그 보관본을 고쳐 쓴다.
+    const _sameKind = (item) => !!item.isFinal === !!snapshot.isFinal && !!item.isIep === !!snapshot.isIep;
+    if (autoMode || opts.replaceSame || opts.replaceId) {
       const now = Date.now();
-      const sameRecent = list.find(item =>
-        item.auto === true &&
+      const sameRecent = (opts.replaceId && list.find(item => item.id === opts.replaceId && _sameKind(item))) || list.find(item =>
+        (item.auto === true || opts.replaceSame) &&
+        _sameKind(item) &&
         item.period === snapshot.period &&
         (now - new Date(item.savedAt || 0).getTime() < 24 * 3600 * 1000)
       );
       if (sameRecent) {
         const fullId = sameRecent.id;
-        const fullSnap = { ...snapshot, id: fullId, order: sameRecent.order, auto: true, savedAt: new Date().toISOString() };
+        // 차수 번호는 덮어쓰는 보관본의 것을 그대로 쓴다(새로 세면 하나 늘어난 번호가 붙는다)
+        const _ordM = /(\d+)차\s*$/.exec(String(sameRecent.title || ""));
+        const _title = _ordM ? String(snapshot.title || "").replace(/\d+차\s*$/, _ordM[1] + "차") : snapshot.title;
+        const fullSnap = { ...snapshot, id: fullId, order: sameRecent.order, title: _title, auto: true, savedAt: new Date().toISOString() };
         try {
           if (typeof localStorage !== "undefined") localStorage.setItem(ARCHIVE_ITEM_PREFIX + fullId, JSON.stringify(fullSnap));
         } catch (e) {}
@@ -5114,7 +5227,9 @@ async function saveArchiveItem(snapshot, autoMode) {
             bodyOk = true;
           }
         } catch (e) { console.warn("[보관] 본문 클라우드 저장 실패:", e); }
-        list = list.map(item => item.id === fullId ? { ...item, savedAt: fullSnap.savedAt, cutoffDataDate: fullSnap.cutoffDataDate || item.cutoffDataDate || "" } : item);
+        list = list.map(item => item.id === fullId ? { ...item, title: fullSnap.title, period: fullSnap.period, savedAt: fullSnap.savedAt, auto: true,
+          prevEvalStart: fullSnap.prevEvalStart || item.prevEvalStart || "", prevEvalEnd: fullSnap.prevEvalEnd || item.prevEvalEnd || "",
+          cutoffDataDate: fullSnap.cutoffDataDate || item.cutoffDataDate || "" } : item);
         try {
           if (typeof localStorage !== "undefined") localStorage.setItem(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(list));
         } catch (e) {}
@@ -5171,6 +5286,11 @@ const ARCHIVE_CLOUD_FAIL_MSG =
   "⚠ 보관본이 이 기기에만 저장되었습니다.\n" +
   "인터넷 연결 문제로 서버에 올라가지 않아, 다른 기기에서는 이 보관본이 보이지 않습니다.\n\n" +
   "인터넷 연결을 확인한 뒤 보관함의 [💾 현재 보고서 보관]으로 다시 보관해 주세요.";
+// ★ [보관 실패 알림-재인쇄] 종결·IEP 보관함에는 [💾 보관] 버튼이 없다 — 인쇄할 때 보관되므로 다시 인쇄하도록 안내한다
+const ARCHIVE_CLOUD_FAIL_MSG_REPRINT =
+  "⚠ 보관본이 이 기기에만 저장되었습니다.\n" +
+  "인터넷 연결 문제로 서버에 올라가지 않아, 다른 기기에서는 이 보관본이 보이지 않습니다.\n\n" +
+  "인터넷 연결을 확인한 뒤 같은 화면에서 다시 인쇄해 주세요. 하루 안에 다시 인쇄하면 같은 보관본을 고쳐 써서 하나만 남습니다.";
 
 async function deleteArchiveItem(childId, archiveId) {
   if (!childId || !archiveId) return false;
@@ -5450,10 +5570,17 @@ function _mergeTaskDaily(winDaily, loseDaily, deletedDays) {
 //    그래서 표식이 없는 옛 항목만, 그것도 아주 오래된 경우에만 살리지 않는다.
 //    (이 판단은 표식이 없을 때만 쓴다 — 표식이 있으면 표식이 항상 우선한다.)
 const STALE_ITEM_MS = 24 * 60 * 60 * 1000;   // 하루
+// ★ [표식 이후] 삭제 표식은 99번(2026-09-03 이전)부터 모든 삭제에 남는다.
+//    그 뒤에 만든 목표·과제는 지웠다면 반드시 표식이 있으므로, 한쪽에만 있으면 '새로 추가한 것'이다.
+//    예전엔 만든 날짜와 상관없이 '이긴 쪽보다 하루 넘게 먼저 만든 것'을 버려서,
+//    월요일에 패드에서 추가하고 저장이 실패한 과제가 수요일에 합칠 때 사라졌다.
+//    '오래된 것은 버린다'는 판단은 표식이 없던 시절에 만든 항목에만 쓴다.
+const TOMBSTONE_ERA_MS = Date.parse("2026-09-01T00:00:00+09:00");
 function _looksLikeOldDeletion(id, winner) {
   const m = /^[a-z]+_(\d{13})/.exec(String(id || ""));
   if (!m) return false;                       // 시각을 못 읽으면 살린다(안전한 쪽)
   const made = Number(m[1]);
+  if (made >= TOMBSTONE_ERA_MS) return false; // 표식이 생긴 뒤에 만든 것 — 지웠으면 표식이 있다
   const w = Date.parse((winner && winner.updatedAt) || "");
   if (!Number.isFinite(w)) return false;
   return (w - made) > STALE_ITEM_MS;          // 이긴 쪽보다 하루 넘게 전에 만들어짐
@@ -5468,6 +5595,9 @@ const _FIELD_KEYS = [
   "reportReinfSchedule", "reportBehaviors", "domainLevelOverrides", "mediaList",
   // ★ [칸별-병합] 3단계에 새로 생긴 보고서 칸 — 빠져 있어서 두 기기를 쓰면 나중에 저장한 쪽이 통째로 덮었다.
   "reportReinfType", "reportPromptStart", "reportPromptNow", "reportNextPlans",
+  // ★ [문장 시점] '이 문장을 만든 데이터' 표시도 칸마다 시각을 남긴다 — 없으면 두 기기를 합칠 때
+  //    문장은 새것, 표시는 옛것이 되어 방금 [🔄 보고서 다시 생성]을 눌렀는데도 '예전 데이터' 확인 창이 떴다.
+  "reportSectionsStamp",
 ];
 // patch에 담긴 것 중 실제로 값이 바뀐 칸만 시각을 새로 찍는다.
 // (같은 값을 다시 저장하는 경우까지 최신으로 만들면, 안 고친 쪽이 고친 쪽을 이긴다.)
@@ -5602,6 +5732,10 @@ function _pickNewerChild(a, b) {
 
   // 삭제 표식은 그대로 이겨야 한다 — 다른 기기의 삭제가 전파되지 않으면 지운 아동이 되살아난다.
   if (winner && winner.deletedAt) return winner;
+  // ★ [삭제 유지] 지운 직후 그 아동을 열어 둔 다른 기기에서 기록을 누르면, 그 사본이 '더 최근'이 되어
+  //    삭제가 무시되고 아동이 다시 나타났다. 삭제한 아동은 되살리는 기능이 없으므로(완전 삭제),
+  //    어느 쪽이든 삭제 표식이 있으면 삭제가 이긴다.
+  if (loser && loser.deletedAt) return loser;
 
   // ★ [83-1] 시각이 늦다는 이유만으로 회기 기록이 통째로 사라지던 것.
   //    병합은 아동을 한쪽으로 바꿔치기했다. 그래서 기록이 빠진 사본을 든 기기가
@@ -5641,6 +5775,7 @@ function _pickNewerChild(a, b) {
     const daily = { ...(lg.daily || {}), ...(g.daily || {}) };
 
     const delTasks = _mergeDeletedDays(g.deletedTasks, lg.deletedTasks);
+    const undelTasks = _mergeDeletedDays(g.undeletedTasks, lg.undeletedTasks);   // ★ [되살리기-과제]
     const loseTasks = new Map(_arr(lg && lg.tasks).filter(t => t && t.id != null).map(t => [t.id, t]));
     const tasks = _arr(g && g.tasks).map(t => {
       const lt = loseTasks.get(t.id);
@@ -5656,7 +5791,7 @@ function _pickNewerChild(a, b) {
     const winTaskIds = new Set(tasks.map(t => t.id));
     _arr(lg && lg.tasks).forEach(t => {
       if (t && t.id != null && !winTaskIds.has(t.id) && !delTasks[t.id]
-          && !_looksLikeOldDeletion(t.id, winner)) tasks.push(t);
+          && (undelTasks[t.id] || !_looksLikeOldDeletion(t.id, winner))) tasks.push(t);
     });
 
     // ★ [99-6] 다른 기기에서 지운 과제는 이쪽에 남아 있어도 지운다.
@@ -5665,7 +5800,8 @@ function _pickNewerChild(a, b) {
     const keptTasks = tasks.filter(t => !delTasks[t.id]);
 
     // ★ [100-3] 목표의 전략·촉구단계·메모 등도 칸 단위로 고른다.
-    return { ..._mergePlain(g, lg), daily, tasks: keptTasks, deletedTasks: delTasks };
+    return { ..._mergePlain(g, lg), daily, tasks: keptTasks, deletedTasks: delTasks,
+      ...(Object.keys(undelTasks).length ? { undeletedTasks: undelTasks } : {}) };
   });
 
   // ★ [99-4] 진 쪽에만 있는 목표도 같은 이유로 살린다.
@@ -5813,7 +5949,9 @@ function restoreIntoChild(cur, snap, now) {
       if (!st || st.id == null) return;
       const ct = tById.get(st.id);
       if (!ct) {
-        if (!delT[st.id]) { cg.tasks = [...(cg.tasks || []), JSON.parse(JSON.stringify(st))]; changed = true; }
+        // ★ [되살리기-과제] 되살린 과제에도 '되살림' 시각을 남긴다 — 목표에만 있어서, 옛 번호를 그대로 쓰는 과제는
+        //    다른 기기가 저장할 때 '오래전에 지운 것'으로 보여 다시 사라졌다.
+        if (!delT[st.id]) { cg.tasks = [...(cg.tasks || []), JSON.parse(JSON.stringify(st))]; cg.undeletedTasks = { ...(cg.undeletedTasks || {}), [st.id]: now }; changed = true; }
         return;
       }
       const dd = ct.deletedDays || {};
@@ -5873,6 +6011,8 @@ function liveChildren(list) {
 //    addChild가 이름을 "새 아동"으로라도 채우므로 여기 걸리지 않는다.
 function isBlankPlaceholderChild(c) {
   if (!c) return true;
+  // ★ [새 아동] 예전엔 '미할당'으로 추가한 아동의 이름을 목표·생년월일을 넣기 전에 지우면 빈 자리로 보고 서버에 올리지 않았다.
+  if (c.userCreated) return false;
   if (((c.info?.name || "").trim())) return false;
   if (((c.info?.ownerName || "").trim())) return false;
   const goals = Array.isArray(c.goals) ? c.goals : [];
@@ -7310,7 +7450,7 @@ export default function App() {
   const [deleteRequestReason, setDeleteRequestReason] = useState("");
   const [showDeleteRequests, setShowDeleteRequests] = useState(false);  // 관리자 요청함 펼침
   const [snapshotIndex, setSnapshotIndex] = useState([]);               // ★ [85-2] 스냅샷 목록
-  const [monthlyBackupDone, setMonthlyBackupDone] = useState(null);     // ★ [88-1] "YYYY-MM" | null
+  const [monthlyBackupDone, setMonthlyBackupDone] = useState(undefined);   // ★ [첫 달 알림] undefined = 아직 안 읽음, null = 한 번도 안 받음     // ★ [88-1] "YYYY-MM" | null
   const [monthlyDismissed, setMonthlyDismissed] = useState(false);
   const [showSnapshots, setShowSnapshots] = useState(false);
   const [dashFilter, setDashFilter] = useState("all"); // ★ 대시보드 카드 필터: all | active | terminated
@@ -7649,6 +7789,7 @@ export default function App() {
     // 실제 아동 추가 처리 함수 (담당자 결정 후 호출)
     const doAdd = (ownerName) => {
       const nc = blankChild();
+      nc.userCreated = true;   // ★ [새 아동] 사람이 만든 아동 — 이름을 지워도 빈 자리표시자로 보지 않는다
       nc.info.name = trimmedName;
       nc.info.ownerName = ownerName || "";
       // ★ 담당 치료사도 담당 선생님 이름으로 자동 입력 (나중에 수정 가능)
@@ -7920,7 +8061,7 @@ export default function App() {
     const backupKey = MERGE_BACKUP_PREFIX + nowIso.replace(/[:.]/g, "-");
     const backupBody = JSON.stringify({ at: nowIso, by: currentUser?.name || "", keep, from });
     try { if (typeof localStorage !== "undefined") localStorage.setItem(backupKey, backupBody); } catch (e) {}
-    try { if (typeof window !== "undefined" && window.storage) window.storage.set(backupKey, backupBody, true).catch(() => {}); } catch (e) {}
+    try { if (typeof window !== "undefined" && window.storage) window.storage.set(backupKey, backupBody, true).then(() => pruneSafetyCopies(backupKey.slice(0, backupKey.indexOf(":") + 1))).catch(() => {}); } catch (e) {}
 
     // ── 2. 목표 옮기기 (지운 목표 제외, id가 겹치면 새 id) ─────────
     const fromDelGoals = from.deletedGoals || {};
@@ -8017,6 +8158,10 @@ export default function App() {
         ]
       },
       goals: [...(keep.goals || []), ...movedGoals],
+      // ★ [합치기-보호] 옮겨 온 목표는 원래 번호(몇 달 전에 만든 것)를 그대로 쓴다.
+      //    '되살림' 시각이 없으면, 이 아동을 열어 둔 채 잠들어 있던 다른 기기가 저장할 때
+      //    '오래전에 지운 목표'로 보여 서버에서 사라졌다. 되살린 목표와 같이 보호한다.
+      undeletedGoals: { ...(keep.undeletedGoals || {}), ...Object.fromEntries(movedGoals.map(g => [g.id, nowIso])) },
       dailyMemos: memos,
       deletedMemos: delMemos,
       memoTimes: memoTimesMerged,
@@ -8099,7 +8244,7 @@ export default function App() {
     const backupKey = COPY_BACKUP_PREFIX + nowIso.replace(/[:.]/g, "-");
     const backupBody = JSON.stringify({ at: nowIso, by: currentUser?.name || "", to: owner, src });
     try { if (typeof localStorage !== "undefined") localStorage.setItem(backupKey, backupBody); } catch (e) {}
-    try { if (typeof window !== "undefined" && window.storage) window.storage.set(backupKey, backupBody, true).catch(() => {}); } catch (e) {}
+    try { if (typeof window !== "undefined" && window.storage) window.storage.set(backupKey, backupBody, true).then(() => pruneSafetyCopies(backupKey.slice(0, backupKey.indexOf(":") + 1))).catch(() => {}); } catch (e) {}
 
     // ── 2. 목표 복사 (지운 목표 제외, 새 id + 원본 id 기억) ─────────
     const srcDelGoals = src.deletedGoals || {};
@@ -8130,6 +8275,13 @@ export default function App() {
       if ("masteredAt" in ng) ng.masteredAt = null;
       // 진행 중 과제만, 기록 없이
       const delT = g.deletedTasks || {};
+      // ★ [복사-단계 번호] 완료된 앞 단계를 빼면 번호가 L1부터 다시 시작했다(L5까지 온 과제가 새 기록에서 L1).
+      //    첫 진행 중 단계의 원래 번호에서 이어지게 시작 번호를 옮긴다.
+      {
+        const _live = (g.tasks || []).filter(t => t && !delT[t.id]);
+        const _first = _live.findIndex(t => (t.listGroup || "1") === "1");
+        if (_first > 0) ng.startListNum = (g.startListNum || 1) + _first;
+      }
       ng.tasks = (g.tasks || [])
         .filter(t => t && !delT[t.id] && (t.listGroup || "1") === "1")
         .map(t => ({
@@ -8160,7 +8312,11 @@ export default function App() {
       copiedFrom: src.id,
       copiedFromOwner: oldOwner,
       copiedAt: nowIso,
-      goalHandovers: []
+      goalHandovers: [],
+      // ★ [복사-사진] 활동 사진은 info.mediaList에 있다 — 예전엔 바깥 칸만 비워서, 안내("사진은 넘어가지 않습니다")와 달리
+      //    앞 선생님 사진이 새 기록에 그대로 들어가 같은 사진이 두 번 저장됐다.
+      mediaList: [],
+      mediaDeleted: {}
     };
     // 보고서·평가 칸은 빈 값으로 (blankChild 기본값 그대로)
     const _blankInfo = blankChild().info;
@@ -8421,6 +8577,34 @@ export default function App() {
   const [activeGoalId, setActiveGoalId] = useState(null);
 
   const [dailyDate, setDailyDate] = useState(() => localToday());
+  // ★ [날짜 넘어감] 기록 날짜는 앱을 열 때 한 번만 오늘로 정해졌다. 패드에서 탭을 닫지 않고 다음 날 그대로 쓰면
+  //    날짜 칸이 어제로 남아 오늘 회기 기록이 어제 칸에 쌓였다. 앱으로 돌아오거나 1분마다 확인해서,
+  //    날짜가 바뀌었고 기록 날짜가 '그때의 오늘'이면 새 오늘로 옮긴다(지난 날짜를 직접 골라 둔 경우는 그대로 둔다).
+  const [dateRollNotice, setDateRollNotice] = useState("");
+  const lastTodayRef = useRef(localToday());
+  const dailyDateRef = useRef(dailyDate);
+  dailyDateRef.current = dailyDate;
+  useEffect(() => {
+    let clearT = null;
+    const check = () => {
+      const t = localToday();
+      const prev = lastTodayRef.current;
+      if (t === prev) return;
+      lastTodayRef.current = t;
+      if (dailyDateRef.current === prev) {
+        setDailyDate(t);
+        const [, mm, dd] = t.split("-");
+        setDateRollNotice(`기록 날짜를 오늘(${parseInt(mm, 10)}월 ${parseInt(dd, 10)}일)로 바꿨습니다.`);
+        if (clearT) clearTimeout(clearT);
+        clearT = setTimeout(() => setDateRollNotice(""), 8000);
+      }
+    };
+    const onVis = () => { if (document.visibilityState === "visible") check(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", check);
+    const iv = setInterval(check, 60000);
+    return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", check); clearInterval(iv); if (clearT) clearTimeout(clearT); };
+  }, []);
 
   const [showExtForm, setShowExtForm] = useState(false);
   const [extForm, setExtForm] = useState({ source: "기타", domain: "", subDomain: "", item: "" });
@@ -8448,7 +8632,7 @@ export default function App() {
 
         if (typeof window !== "undefined" && window.storage) {
           try {
-            const res = await window.storage.get(FILE_KEY, true);  // true = shared
+            const res = await window.storage.getWithStamp(FILE_KEY, true);  // true = shared
             markCloudSeen();   // ★ [60-15] 읽기 성공 — 이후 읽기 실패는 진짜 장애로 본다
             setCloudReadFailed(false);   // ★ [95-3]
             if (res?.value) {
@@ -8461,6 +8645,9 @@ export default function App() {
                 isInitializedRef.current = true;
                 if (Array.isArray(d.children) && d.children.length > 0) {
                   childrenList = d.children.map(migrateChild);
+                  // ★ [동시 저장] 처음 연 화면이 이 판을 담고 있다 — 첫 저장이 받지 않고 바로 올라갈 수 있게,
+                  //    폴링이 같은 판을 도로 받지 않게. (서버 값을 아동 목록으로 읽어 냈을 때만 — 못 읽었으면 저장할 때 다시 받아 확인한다)
+                  if (res.updatedAt) { lastMergedStampRef.current = res.updatedAt; cloudStampRef.current = res.updatedAt; }
                   // ★ [106-2] 클라우드 파일의 activeChildId는 '마지막으로 저장한 사람'이 보던 아동이다
                   //    (공용 파일이라 김은혜 선생님이 저장하면 그 선생님 화면의 아동이 들어간다).
                   //    관리자는 모든 아동이 '열어도 되는 범위'라 그 값이 그대로 열렸다 — 내가 마지막에 본 아동이 아니었다.
@@ -8582,26 +8769,47 @@ export default function App() {
   const lastLocalEditRef = useRef(0);
   const savePendingRef = useRef(false);   // ★ [창 닫기 경고] 저장 대기 중인 수정이 있는가
   const saveSeqRef = useRef(0);   // ★ [끊김-복구] 저장 순번
+  // ★ [동시 저장] 이 기기 화면이 이미 합쳐 둔 서버 판의 저장 시각(updated_at).
+  //    저장할 때 서버가 아직 이 판이면 받지 않고 바로 올리고(전송량 절약),
+  //    그사이 누가 올렸으면 서버가 거절하므로 그때만 받아서 합친 뒤 다시 올린다.
+  const lastMergedStampRef = useRef(null);
+  const needsUploadRef = useRef(false);     // ★ [다시 올리기] 이 기기에서 고친 것 중 아직 서버에 안 올라간 것이 있다
+  const nudgeRef = useRef(false);           // ★ [다시 올리기] 이번 저장은 실패 뒤 자동으로 다시 하는 것
+  const retryTimerRef = useRef(null);
+  const pendingSaveFnRef = useRef(null);    // ★ [바로 남기기] 0.5초 기다리는 중인 저장 — 앱을 나가면 바로 실행
+  const [saveNudge, setSaveNudge] = useState(0);
+  const [localSaveFailed, setLocalSaveFailed] = useState(false);   // ★ [기기 공간] 이 기기 사본을 못 남김
+  const childrenNowRef = useRef(children);   // ★ [동시 저장] 지금 화면의 목록 — 늦게 도는 저장이 옛 목록인지 가린다
+  childrenNowRef.current = children;
+  const scheduleSaveRetry = () => {
+    // ★ [다시 올리기] 예전엔 한 번 실패하면 다음에 무언가를 고칠 때까지 다시 올리지 않았다.
+    //    마지막 입력이 실패한 채 다른 기기로 옮겨 가면 그 기록이 안 보였다. 15초 뒤 저절로 다시 한다.
+    if (retryTimerRef.current) return;
+    retryTimerRef.current = setTimeout(() => {
+      retryTimerRef.current = null;
+      if (!needsUploadRef.current) return;
+      nudgeRef.current = true;
+      setSaveNudge(n => n + 1);
+    }, 15000);
+  };
+  useEffect(() => () => { if (retryTimerRef.current) clearTimeout(retryTimerRef.current); }, []);
   useEffect(() => {
     if (!loaded) return;  // 로드 완료 전에는 저장하지 않음
     const fromRemote = remoteAppliedRef.current === children;
-    if (!fromRemote) lastLocalEditRef.current = Date.now();
-    if (!fromRemote) savePendingRef.current = true;   // ★ [창 닫기 경고] 0.5초 저장 대기 중
+    const isNudge = nudgeRef.current; nudgeRef.current = false;
+    if (!fromRemote && !isNudge) { lastLocalEditRef.current = Date.now(); needsUploadRef.current = true; }
+    // ★ [다시 올리기] 다른 기기 변경을 받아 합친 뒤라도, 아직 못 올린 내 수정이 있으면 올린다
+    const shouldUpload = !fromRemote || needsUploadRef.current;
+    if (shouldUpload) savePendingRef.current = true;   // ★ [창 닫기 경고] 0.5초 저장 대기 중
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
+    const runSave = () => {
+      pendingSaveFnRef.current = null;
       savePendingRef.current = false;   // 이제부터는 '못 올라감' 표식(UNSYNCED_KEY)이 대신 지킨다
       let pendingMark = null;   // ★ [끊김-복구] 이번 저장이 단 '못 올라감' 표식
       try {
         if (typeof localStorage !== "undefined") {
-          // ★ [61-3] 61-1로 children이 []가 될 수 있게 되면서 생긴 자리.
-          //    로드가 실패했는데(예외가 catch로 삼켜짐) loaded=true가 되면 여기서
-          //    빈 배열이 localStorage의 멀쩡한 사본을 덮어쓴다.
-          //    (기존엔 [blankChild()]가 덮어썼으니 위험 자체는 원래 있던 것이다.)
-          //    로컬에 이미 아동이 있는데 메모리가 비었으면 정상 상태가 아니므로 쓰지 않는다.
+          // ★ [61-3] 로드가 실패해 메모리가 비었는데 로컬에 아동이 있으면 정상 상태가 아니므로 쓰지 않는다.
           //    사용자가 마지막 아동을 지운 경우는 tombstone이 남아 length>0이라 여기 안 걸린다.
-          //    ※ 지금 코드엔 children을 통째로 []로 만드는 경로가 없다(안내 문구만 있고
-          //      '아동 데이터 초기화' 기능은 미구현). 나중에 그런 기능을 만들면
-          //      이 가드를 우회하는 플래그가 필요하다 — 안 그러면 초기화가 저장되지 않는다.
           let skipLocalWrite = false;
           if (children.length === 0) {
             try {
@@ -8611,41 +8819,50 @@ export default function App() {
             } catch (e) { skipLocalWrite = true; }   // 파싱 실패 = 원본 보존
           }
           if (!skipLocalWrite) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(children));
-            if (activeChildId) localStorage.setItem(activeKeyFor(currentUser?.name), activeChildId);
-            // ★ [끊김-복구] 내가 고친 것은 클라우드에 올라가기 전까지 '못 올라감' 표식을 달아 둔다
-            if (!fromRemote) { pendingMark = String(Date.now()); localStorage.setItem(UNSYNCED_KEY, pendingMark); }
+            // ★ [끊김-복구] '못 올라감' 표식을 먼저 단다 — 사본 쓰기가 공간 부족으로 실패해도 표식은 남게.
+            if (shouldUpload) { pendingMark = String(Date.now()); try { localStorage.setItem(UNSYNCED_KEY, pendingMark); } catch (e) {} }
+            // ★ [기기 공간] 브라우저 저장 공간(보통 5MB, 같은 사이트의 다른 앱과 나눠 씀)이 차면 여기서 실패한다.
+            //    예전엔 실패를 삼켜 아무 안내가 없었고, 끊겼을 때 대비한 사본이 조용히 안 남았다.
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(children));
+              setLocalSaveFailed(false);
+            } catch (e) {
+              console.warn("[이 기기 사본 저장 실패]", e?.name || e?.message);
+              setLocalSaveFailed(true);
+            }
           }
         }
       } catch (e) {}
-      if (fromRemote) return;  // 클라우드에서 온 것은 로컬에만 저장하고 끝
-      try {
-        if (typeof window !== "undefined" && window.storage) {
-          // ★ 저장 직전 클라우드 최신본과 병합 → 다른 사람이 수정한 아동을 덮어쓰지 않음
-          (async () => {
-            // ★ [끊김-복구] 저장 순번 — 저장이 순서가 뒤바뀌어 끝나도 표식을 잘못 지우지 않게
-            const mySeq = ++saveSeqRef.current;
-            const startedAt = new Date().toISOString();
-            try {
-              let cloudChildren = null;
-              // ★ [60-15] 읽기 실패와 "아직 데이터 없음"을 구분한다.
-              //    기존엔 둘 다 cloudChildren=null이라, 읽기가 실패해도 로컬만으로
-              //    통째 덮어썼다(storage.set은 키 전체를 갈아치운다).
-              //    새 기기 첫 로그인처럼 로컬이 비어 있는 상태에서 읽기가 실패하면
-              //    클라우드의 아동 전체를 날릴 수 있는 자리였다.
-              //    (지금 눈에 띈 '이름 없는 (미할당) 아동'도 같은 뿌리 —
-              //     읽기 실패를 데이터 없음으로 보고 자리표시자를 올려버린 것.)
-              let cloudReadOk = false;
-              // ★ [95-2] 클라우드에 값이 분명히 있는데 그걸 아동 목록으로 못 읽어낸 경우.
-              //    (JSON.parse 실패, children이 배열이 아님 — 잘린 저장·형식 변경 등)
-              //    이때 cloudChildren은 null이라 아래에서 병합을 건너뛰고 로컬만 올린다.
-              //    읽기 실패와 결과가 똑같으므로 똑같이 막는다.
-              let cloudHasValue = false;
-              const _hadCloudBefore = hasCloudHadData();   // ★ [빈 응답 막기] 이번 읽기 전에 기록을 본 적이 있었나
+      if (!shouldUpload) return;  // 클라우드에서 온 것은 로컬에만 저장하고 끝
+      if (!(typeof window !== "undefined" && window.storage)) return;
+      (async () => {
+        // ★ [끊김-복구] 저장 순번 — 저장이 순서가 뒤바뀌어 끝나도 표식을 잘못 지우지 않게
+        const mySeq = ++saveSeqRef.current;
+        const startedAt = new Date().toISOString();
+        const startedMs = Date.now();
+        // ★ [60-8] 업로드 대상에서 빈 자리표시자를 뺀다(로컬에는 그대로 둔다).
+        const _localToSend = children.filter(c => !isBlankPlaceholderChild(c));
+        let toSave = _localToSend;
+        let cloudChildren = null;
+        // 이 판이면 받지 않고 바로 올린다. 단 이 저장이 옛 목록으로 도는 중이면(그사이 화면이 다른 기기 변경을 합쳤으면)
+        // 그 판을 담고 있지 않을 수 있으므로 받아서 합친다.
+        let stamp = childrenNowRef.current === children ? lastMergedStampRef.current : null;
+        let saved = null;
+        try {
+          let useplainSet = false, stampWasFresh = false;
+          for (let attempt = 0; attempt < 5 && !saved; attempt++) {
+            stampWasFresh = !stamp;
+            if (!stamp) {
+              // ── 서버 판을 받아서 합친다 ──────────────────────
+              // ★ [60-15] 읽기 실패와 "아직 데이터 없음"을 구분한다 — 실패면 덮어쓰지 않는다.
+              // ★ [95-2] 값은 있는데 아동 목록으로 못 읽으면(잘린 저장 등) 읽기 실패와 같이 막는다.
+              let cloudReadOk = false, cloudHasValue = false, res = null;
+              const _hadCloudBefore = hasCloudHadData();   // ★ [빈 응답 막기]
               try {
-                const res = await window.storage.get(FILE_KEY, true);
+                res = await window.storage.getWithStamp(FILE_KEY, true);
                 cloudReadOk = true;
                 markCloudSeen();
+                cloudChildren = null;
                 if (res?.value) {
                   cloudHasValue = true;
                   markCloudHadData();
@@ -8653,97 +8870,119 @@ export default function App() {
                   if (Array.isArray(parsed.children)) cloudChildren = parsed.children.map(migrateChild);
                 }
               } catch (e) {}
-              // 한 번도 읽힌 적 없는 키면 최초 생성이므로 그대로 올린다.
-              // (읽기 실패는 [95-1]로 예외가 되어 cloudReadOk가 false로 남는다.
-              //  키가 없는 것만 null로 오므로, 이제 장애와 '아직 없음'이 구분된다.
-              //  여기서 무조건 막으면 클라우드 데이터가 영영 만들어지지 않는다.)
-              // ★ [새 기기 덮어쓰기] 예전엔 '이 기기에서 한 번이라도 읽은 적 있을 때'만 막아서,
-              //    새 기기(또는 사이트 데이터를 지운 기기)에서 읽기가 실패하면 이 기기 내용만으로 공유 기록 전체를 덮었다.
-              //    지금은 읽기 실패가 '키 없음'(null)과 구분되므로 실패면 언제나 막는다.
-              //    (막힌 동안 넣은 기록은 이 기기에 '못 올라감' 표식과 함께 남아, 다음에 열 때 합쳐진다)
-              if (!cloudReadOk) { setCloudReadFailed(true); return; }
-              // ★ [빈 응답 막기] 이 기기에서 클라우드 기록을 읽은 적이 있는데 갑자기 '없음'이 오면(로그인 갱신 순간 실패 등)
-              //    진짜로 비었다기보다 못 읽은 것이다 — 이 기기 내용만으로 공유 기록 전체를 덮지 않게 막는다.
-              if (!cloudHasValue && _hadCloudBefore) { setCloudReadFailed(true); return; }
+              if (!cloudReadOk) { setCloudReadFailed(true); scheduleSaveRetry(); return; }
+              // ★ [빈 응답 막기] 기록을 본 적이 있는데 갑자기 '없음'이면 못 읽은 것으로 본다.
+              if (!cloudHasValue && _hadCloudBefore) { setCloudReadFailed(true); scheduleSaveRetry(); return; }
               if (cloudHasValue && !cloudChildren) {
                 console.warn("[자동저장 보류] 클라우드 값을 읽었으나 아동 목록으로 해석하지 못함 — 덮어쓰기 중단");
                 setCloudReadFailed(true);
                 return;
               }
-              if (cloudReadOk) setCloudReadFailed(false);   // ★ [95-3] 읽기가 되면 스스로 꺼진다
-              // ★ [60-8] 업로드 대상에서 빈 자리표시자를 뺀다.
-              //    로컬(localStorage)에는 그대로 둔다 — 아동이 0명일 때 화면이 기댈 자리가
-              //    필요하고, 로컬은 이 기기 밖으로 안 나가므로 번지지 않는다.
-              //    클라우드는 모든 기기가 병합해 가는 곳이라 여기만 막으면 된다.
-              const _localToSend = children.filter(c => !isBlankPlaceholderChild(c));
-              const toSave = cloudChildren ? mergeChildren(_localToSend, cloudChildren) : _localToSend;
-              // 보낼 게 아무것도 없으면 저장 자체를 건너뛴다 — 빈 배열을 올리면
-              // 다른 기기의 아동이 지워지는 게 아니라(병합은 id 합집합) 무의미한 쓰기만 는다.
-              if (toSave.length === 0) return;
-              const _myEditTime = Date.now();
-              try {
-                await window.storage.set(FILE_KEY, JSON.stringify({
-                  children: toSave,
-                  activeChildId,
-                  savedAt: new Date().toISOString(),
-                  lastEditor: currentUser?.name || "(unknown)",
-                  lastEditTime: _myEditTime
-                }), true);
-                myEditTimesRef.current = [...myEditTimesRef.current.slice(-19), _myEditTime];   // ★ [다른 기기 반영]
-                setCloudSaveFailed(false);   // ★ [96-2] 저장이 되면 스스로 꺼진다
-                // ★ [끊김-복구] 올라갔으니 표식을 지운다 — 그사이 새로 고친 게 있으면(표식이 바뀌었으면) 남겨 둔다
-                try {
-                  if (mySeq === saveSeqRef.current) {
-                    if (pendingMark && localStorage.getItem(UNSYNCED_KEY) === pendingMark) localStorage.removeItem(UNSYNCED_KEY);
-                    localStorage.setItem(LAST_SYNC_KEY, startedAt);
-                  } else {
-                    // 더 나중에 시작한 저장이 이미 있는데 이 저장이 늦게 끝났다 — 클라우드가 이 기기보다 옛 내용일 수 있다.
-                    // 다음에 열 때 이 기기 사본을 통째로 다시 합치도록 표식을 남긴다.
-                    localStorage.setItem(UNSYNCED_KEY, String(Date.now()));
-                    localStorage.removeItem(LAST_SYNC_KEY);
-                  }
-                } catch (e) {}
-                // ★ [97-5] 방금 내가 올린 것을 폴링이 '남의 변경'으로 보고
-                //    380KB를 도로 내려받던 것을 막는다.
-                //    저장 직후 스탬프(약 30바이트)만 한 번 읽어 기준값으로 삼는다.
-                //    선생님이 하루 150번 저장하면 150번의 전체 수신이 통째로 사라진다.
-                try {
-                  const st = await window.storage.getStamp(FILE_KEY, true);
-                  if (st?.updatedAt) cloudStampRef.current = st.updatedAt;
-                } catch (e) { /* 실패해도 폴링이 알아서 따라잡는다 */ }
-              } catch (e) {
-                // ★ [96-2] 로컬에는 이미 저장돼 있다(위 localStorage.setItem).
-                //    데이터를 잃은 것은 아니지만 이 기기 밖으로 나가지 못한 상태다.
-                console.warn("[자동저장 실패]", e?.message);
-                setCloudSaveFailed(true);
-                return;
-              }
-              // 병합 결과가 현재 메모리와 다르면(다른 사람 아동이 합쳐졌으면) 화면에도 반영
-              if (cloudChildren) {
-                const mergedIds = toSave.map(c => c.id).join("|");
-                const localIds = children.map(c => c.id).join("|");
-                // ★ [다른 기기 반영] 아동 수가 같아도, 클라우드에 이 화면보다 최근에 고친 아동이 있었으면 화면에도 합쳐 보여 준다.
-                //    (예전엔 아동이 새로 생기거나 빠졌을 때만 화면을 바꿔, 입력 중인 기기는 다른 기기 변경을 새로고침 전까지 못 봤다)
-                const _localUp = new Map(children.map(c => [c.id, String(c.updatedAt || "")]));
-                const cloudNewer = cloudChildren.some(c => c && _localUp.has(c.id) && String(c.updatedAt || "") > _localUp.get(c.id));
-                if (mergedIds !== localIds || cloudNewer) {
-                  // ★ [저장 중 입력] 저장하는 1초 남짓 사이에 새로 누른 기록이 있으면 그대로 덮어써 사라졌다.
-                  //    그사이 화면 목록이 바뀌었으면 덮지 말고 합친다(새로 누른 쪽이 더 최근이라 이긴다).
-                  setChildren(prev => {
-                    if (prev === children) { remoteAppliedRef.current = toSave; return toSave; }   // 방금 올린 그대로 — 다시 올리지 않게 '받아온 것'으로 표시
-                    return mergeChildren(prev, toSave);   // 그사이 새로 누른 기록이 있으면 합치고, 그 기록은 다음 저장에서 올라간다
-                  });
+              setCloudReadFailed(false);   // ★ [95-3] 읽기가 되면 스스로 꺼진다
+              toSave = cloudChildren ? mergeChildren(_localToSend, cloudChildren) : _localToSend;
+              stamp = (res && res.updatedAt) || null;   // null = 아직 한 번도 저장된 적 없는 키
+            }
+            // 보낼 게 아무것도 없으면 저장 자체를 건너뛴다.
+            if (toSave.length === 0) return;
+            const _myEditTime = Date.now();
+            const body = JSON.stringify({
+              children: toSave,
+              activeChildId,
+              savedAt: new Date().toISOString(),
+              lastEditor: currentUser?.name || "(unknown)",
+              lastEditTime: _myEditTime
+            });
+            if (stamp && !useplainSet) {
+              const r = await window.storage.setIfStamp(FILE_KEY, body, stamp, true);
+              if (r.ok) saved = { updatedAt: r.updatedAt, editTime: _myEditTime };
+              else {
+                // 방금 받은 판으로도 거절되면 '그사이 누가 올림'이 아니라 서버가 조건부 저장을 못 받는 것일 수 있다.
+                // 다시 받아 보아 시각이 그대로면, 예전 방식(조건 없이 올리기)으로 물러나 저장이 영영 막히지 않게 한다.
+                if (stampWasFresh) {
+                  try {
+                    const chk = await window.storage.getStamp(FILE_KEY, true);
+                    if (chk && chk.updatedAt === stamp) { useplainSet = true; console.warn("[동시 저장] 조건부 저장이 거절됨 — 이번엔 예전 방식으로 올립니다."); continue; }
+                  } catch (e) {}
                 }
+                stamp = null; console.info("[동시 저장] 그사이 다른 기기가 올려서, 받아 합친 뒤 다시 올립니다.");
               }
-            } catch (e) {}
-          })();
+            } else {
+              // 처음 만드는 키(서버에 아직 없음) — 이때만 조건 없이 올린다
+              await window.storage.set(FILE_KEY, body, true);
+              saved = { updatedAt: null, editTime: _myEditTime };
+            }
+          }
+        } catch (e) {
+          // ★ [96-2] 로컬에는 이미 저장돼 있다. 이 기기 밖으로 나가지 못한 상태다.
+          console.warn("[자동저장 실패]", e?.message);
+          setCloudSaveFailed(true);
+          scheduleSaveRetry();
+          return;
         }
-      } catch (e) {}
-    }, 500);
+        if (!saved) {   // 네 번 연속 다른 기기가 먼저 올림 — 잠시 뒤 다시
+          setCloudSaveFailed(true);
+          scheduleSaveRetry();
+          return;
+        }
+        myEditTimesRef.current = [...myEditTimesRef.current.slice(-19), saved.editTime];   // ★ [다른 기기 반영]
+        setCloudSaveFailed(false);   // ★ [96-2] 저장이 되면 스스로 꺼진다
+        if (lastLocalEditRef.current <= startedMs) needsUploadRef.current = false;   // 그사이 새로 고친 게 없으면 다 올라갔다
+        // ★ [끊김-복구] 올라갔으니 표식을 지운다 — 그사이 새로 고친 게 있으면(표식이 바뀌었으면) 남겨 둔다
+        try {
+          if (mySeq === saveSeqRef.current) {
+            if (pendingMark && localStorage.getItem(UNSYNCED_KEY) === pendingMark) localStorage.removeItem(UNSYNCED_KEY);
+            localStorage.setItem(LAST_SYNC_KEY, startedAt);
+          } else {
+            // 더 나중에 시작한 저장이 이미 있는데 이 저장이 늦게 끝났다 — 다음에 열 때 이 기기 사본을 다시 합치도록 표식을 남긴다.
+            localStorage.setItem(UNSYNCED_KEY, String(Date.now()));
+            localStorage.removeItem(LAST_SYNC_KEY);
+          }
+        } catch (e) {}
+        // ★ [97-5] 방금 올린 판의 시각을 기준으로 삼는다 — 폴링이 내 저장을 '남의 변경'으로 보고 도로 받지 않게.
+        let newStamp = saved.updatedAt;
+        if (!newStamp) { try { const st = await window.storage.getStamp(FILE_KEY, true); newStamp = st?.updatedAt || null; } catch (e) {} }
+        if (newStamp) {
+          cloudStampRef.current = newStamp;
+          // 올린 내용(toSave)이 화면에 들어가야 '합쳐 둔 판'이 된다 — 아래에서 화면에 반영한다
+          lastMergedStampRef.current = newStamp;
+        }
+        // ★ [동시 저장] 서버 판을 받아 합쳐 올렸으면, 올린 그대로를 화면에도 넣는다.
+        //    예전엔 아동 수가 달라지거나 더 최근 아동이 있을 때만 넣었는데, 이제는 '화면 = 합쳐 둔 판'이어야
+        //    다음 저장이 받지 않고 바로 올라갈 수 있다(아동 안의 과제 하나만 합쳐진 경우도 화면에 들어가야 한다).
+        if (cloudChildren) {
+          // ★ [저장 중 입력] 저장하는 사이에 새로 누른 기록이 있으면 덮지 말고 합친다(새로 누른 쪽이 더 최근이라 이긴다).
+          setChildren(prev => {
+            if (prev === children) { remoteAppliedRef.current = toSave; return toSave; }   // 방금 올린 그대로 — 다시 올리지 않게 '받아온 것'으로 표시
+            return mergeChildren(prev, toSave);   // 그사이 새로 누른 기록은 다음 저장에서 올라간다
+          });
+        }
+      })();
+    };
+    if (!shouldUpload) { runSave(); return; }   // 받아온 것은 이 기기 사본만 바로 남긴다
+    pendingSaveFnRef.current = runSave;
+    saveTimerRef.current = setTimeout(runSave, 500);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [children, activeChildId, loaded]);
+    // ★ [아동 바꿈] activeChildId를 뺐다 — 아동만 바꿔도 센터 전체 파일을 받고 올렸다(원장님이 20명을 눌러 보면 20번).
+    //    마지막에 보던 아동은 사람별 키에 따로 남긴다(아래 activeKeyFor 효과).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [children, loaded, saveNudge]);
+
+  // ★ [바로 남기기] 패드에서 마지막 칸을 누르자마자 홈 버튼으로 나가면, 0.5초 저장을 기다리다 앱이 정리돼
+  //    그 입력이 이 기기에도 서버에도 안 남았다. 화면이 가려지는 순간 기다리던 저장을 바로 한다.
+  useEffect(() => {
+    const flush = () => {
+      const fn = pendingSaveFnRef.current;
+      if (!fn) return;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      fn();
+    };
+    const onVis = () => { if (document.visibilityState === "hidden") flush(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", flush);
+    return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("pagehide", flush); };
+  }, []);
 
   useEffect(() => {
     if (!loaded) return;
@@ -8870,6 +9109,10 @@ export default function App() {
   useEffect(() => { lastBackupAtRef.current = lastBackupAt; }, [lastBackupAt]);
   useEffect(() => {
     if (!loaded) return;
+    // ★ [자동 파일 백업 끔 · 2026-11 원장 결정] 서버에 '켜짐'이 남아 있으면 모든 기기에서 한 시간마다
+    //    센터 전체 기록 파일이 다운로드 폴더에 떨어졌다(켜고 끄는 스위치는 숨겨 둔 띠 안에 있어 끌 수도 없었다).
+    //    클라우드 자동저장과 '이번 달 백업 파일' 알림이 있으므로 시간마다 받는 파일 백업은 쓰지 않는다. (코드는 보존)
+    if (!AUTO_FILE_BACKUP_ALLOWED) return;
     if (!autoBackupEnabled) return;
     const intervalMs = autoBackupInterval * 60 * 1000;
     const timerId = setInterval(() => {
@@ -8926,8 +9169,11 @@ export default function App() {
           const _prevStamp = cloudStampRef.current;
           cloudStampRef.current = stamp.updatedAt;
 
-          const res = await window.storage.get(FILE_KEY, true);
+          // ★ [동시 저장] 값과 그 값의 시각을 함께 받는다 — 스탬프를 본 뒤 그사이 또 바뀌었을 수 있다
+          const res = await window.storage.getWithStamp(FILE_KEY, true);
           if (!res?.value) return;
+          const _gotStamp = res.updatedAt || stamp.updatedAt;
+          cloudStampRef.current = _gotStamp;
           
           let parsed;
           try {
@@ -8936,11 +9182,13 @@ export default function App() {
           
           if (!parsed.lastEditTime || !parsed.lastEditor) return;
           
+          // ★ [연결 복구] 예전엔 첫 확인을 '기준 잡기'로만 쓰고 버렸다. 처음 열 때 서버를 못 읽어 이 기기 옛 사본으로 열린 경우,
+          //    연결이 돌아와도 그동안 다른 사람이 바꾼 내용을 가져오지 않았다(안내는 사라져 최신처럼 보였다).
+          //    이제 첫 확인에서도 합친다 — 합치기는 기록을 줄이지 않으므로 같은 내용을 다시 합쳐도 안전하다.
           if (!isInitializedRef.current) {
             lastKnownEditTimeRef.current = parsed.lastEditTime;
             lastKnownEditorRef.current = parsed.lastEditor;
             isInitializedRef.current = true;
-            return;
           }
           
           // ★ [다른 기기 반영] 예전엔 '마지막 저장자 이름'이 나와 다를 때만 받아왔다.
@@ -8977,6 +9225,7 @@ export default function App() {
               // ★ [다른 기기 반영] 받는 사이 입력을 시작했으면 지금은 합치지 않되, 다음 확인에서 다시 받도록 기준값을 되돌린다
               //    (예전엔 기준값만 갱신돼 그 변경을 영영 다시 받지 않았다)
               if (editingNow) { cloudStampRef.current = _prevStamp; return; }
+              lastMergedStampRef.current = _gotStamp;   // ★ [동시 저장] 아래에서 이 판을 화면에 합친다
               {
                 const cloudList = parsed.children.map(migrateChild);
                 setChildren(prev => {
@@ -9467,7 +9716,11 @@ export default function App() {
             ...t,
             listGroup: newGroup,
             listGroupLocked: newGroup === "1" ? false : true,
-            masteredAt: newGroup === "2" ? (t.masteredAt || localToday()) : null
+            // ★ [완료 날짜 = 기준 도달일 · 2026-11 원장 결정] 예전엔 [✓ 완료 처리]를 누른 날이 완료 날짜가 됐다.
+            //    4/28~29에 2일 연속 80%가 나오고 5/3에 눌러도 5/3으로 남아, 종결 '숙달 시기'가 누른 날 기준으로 나갔다.
+            //    기준에 도달한 날이 있으면 그날을 쓰고, 누른 날은 completedAt에 따로 남긴다.
+            masteredAt: newGroup === "2" ? (t.masteredAt || t.reachedCriteriaDate || localToday()) : null,
+            completedAt: newGroup === "2" ? (t.completedAt || localToday()) : null
           };
           if (newGroup === "1") {
             next.reachedCriteria = false;      // 되돌리면 기준도달 표시도 초기화
@@ -9617,6 +9870,10 @@ export default function App() {
   };
 
   const includedGoals = useMemo(() => sortGoals(goals.filter(g => g.includeInIep)), [goals]);
+  // ★ [시트 목표만] 중간·종결보고서(화면·인쇄)는 데이터시트에 올린 목표만 센다 — 원장 결정.
+  //    예전엔 일부 자리(인쇄 성장 추이, 종결 '성장과 변화' 문장, 기본 권고, ④ 화면 요약·그래프)가
+  //    IEP에 넣은 목표 전부를 세서, 같은 보고서 안에서도 숫자가 달랐다. IEP 계획안 인쇄는 그대로 includedGoals.
+  const reportGoals = useMemo(() => includedGoals.filter(g => g.showInDaily), [includedGoals]);
   const dailyGoals = useMemo(
     () => includedGoals.filter(g => g.showInDaily),
     [includedGoals]
@@ -9698,11 +9955,18 @@ export default function App() {
   }, [archiveList, currentUser, info.ownerName]);
 
   const [cutoffDisabled, setCutoffDisabled] = useState(false);
-  const effectiveArchiveList = (cutoffDisabled || reportMode === "final")
+  // ★ [아동 바꿈] [↩ 그래프 복원]은 그 아동에만 — 예전엔 다른 아동으로 바꿔도 켜진 채라
+  //    그 아동 보고서도 지난 기간까지 다 보이고 종료일 칸이 잠긴 채 열렸다(그대로 인쇄하면 보관본이 하나 더 생겼다).
+  useEffect(() => { setCutoffDisabled(false); }, [activeChildId]);
+  // ★ [그래프 복원 = 직전 보관본 하나만 풀기] 예전엔 복원하면 보관본을 전부 풀어서, 보고 시작일이
+  //    '직전 보고서의 시작일'이 아니라 '이 아동의 맨 처음 기록일'이 됐다. 3차(9~12월)를 다시 내려고 복원하면
+  //    그래프·영역 평균·준거 달성 수·자동 문장이 1년치로 계산되고, 기간 이름이 달라 보관본이 하나 더 생겼다.
+  //    이제 가장 최근 보관본 하나만 풀어 그 보고서 기간 그대로 다시 낼 수 있다(그 앞 차수 컷오프는 그대로).
+  const effectiveArchiveList = (reportMode === "final")
     ? []
     // ★ [IEP 제외] IEP 계획안 보관본은 '직전 보고서'가 아니다 — 데이터 기준일(cutoff)로 쓰지 않는다.
     //    (IEP를 인쇄하면 그것이 가장 최근 보관본이 되어, 다음 중간보고서 기간이 IEP 평가 종료일로 잘렸다)
-    : archiveList.filter(item => !item.isFinal && !item.isIep && item.id !== printingSuppressArchiveId);
+    : archiveList.filter(item => !item.isFinal && !item.isIep && item.id !== printingSuppressArchiveId).slice(cutoffDisabled ? 1 : 0);
   const effectiveInfo = (() => {
     if (!cutoffDisabled || !archiveList || archiveList.length === 0) return info;
     const cutoffArchives = archiveList.filter(item => !item.isFinal && !item.isIep);
@@ -9783,6 +10047,12 @@ export default function App() {
     return pe || ld || "";
   })();
   const effectivePStart = reportPeriodStart;
+  // ★ [보고 종료일 하나로 나눈다] 중간보고서용 목표 — 과제의 완료·중단을 '보고 종료일' 기준 상태로 바꿔 둔다.
+  //    표지·종합 현황·강점·영역별 세부 목표·중단 목록이 모두 이 값을 쓴다. 종결보고서는 그대로.
+  const reportGoalsAsOf = useMemo(
+    () => (_isFinalReport ? reportGoals : goalsAsOf(reportGoals, reportPeriodEnd)),
+    [reportGoals, _isFinalReport, reportPeriodEnd]
+  );
 
   const stosForReport = useMemo(() => {
     if (!needsReportCalc) return [];
@@ -9796,16 +10066,26 @@ export default function App() {
       return true;
     };
     const result = [];
+    // ★ [보고 종료일 하나로 나눈다 · 2026-11 원장 결정] 과제 상태는 '보고 종료일 기준'(reportGoalsAsOf).
+    //    종료일 다음 날부터 누른 완료·중단은 인쇄를 언제 하든 이 보고서에서는 '진행중', 다음 보고서에서 '완료'·'중단'.
+    //    지난 보고서에 이미 '완료'·'중단'으로 나간 것 = 완료·중단을 누른 날이 지난 보고서 종료일(cutoff) 이하.
     // ★ 데이터시트(데일리 탭)에 올린 목표만 보고서에 포함 — 시트 OFF 목표는 제외
     //   (데일리 탭 dailyGoals와 동일 기준: includeInIep && showInDaily)
-    includedGoals.filter(g => g.showInDaily).forEach(g => {
+    reportGoalsAsOf.forEach(g => {
       (g.tasks || []).forEach(t => {
-        if (cutoffDate && t.listGroup === "2" && t.masteredAt && t.masteredAt <= cutoffDate) {
-          return;
+        const _lg = t.listGroup || "1";
+        const _doneOn = taskDoneOn(t);
+        if (cutoffDate && _lg === "2" && _doneOn && _doneOn <= cutoffDate) {
+          return;   // 지난 보고서에 '완료'로 나감
         }
-        if (cutoffDate && t.listGroup === "paused" && t.pausedAt && t.pausedAt <= cutoffDate) {
-          return;
+        if (cutoffDate && _lg === "paused" && t.pausedAt && t.pausedAt <= cutoffDate) {
+          return;   // 지난 보고서에 '중단'으로 나감
         }
+        // ★ [지난 기간 도달·이번 기간 완료] 기준 도달일은 지난 기간인데 [✓ 완료 처리]는 지난 보고서 종료일 뒤에 누른 과제.
+        //    지난 보고서에는 '진행중'으로 나갔으므로, 이번 보고서 완료 수에 넣고 따로 적는다.
+        const lateConfirm = !!(cutoffDate && _lg === "2" && t.completedAt && t.masteredAt && t.masteredAt <= cutoffDate);
+        // 중단도 같은 방식 — 지난 보고서 종료일 뒤에 중단했으면, 이번 기간 기록이 없어도 이번 보고서에 '중단'으로 넣는다.
+        const latePause = !!(cutoffDate && _lg === "paused" && t.pausedAt && t.pausedAt > cutoffDate);
         const points = Object.entries(t.daily || {}).map(([date, day]) => {
           const v = calcDayRateGlobal(day, t.plannedTrials);
           if (v === null) return null;
@@ -9816,7 +10096,7 @@ export default function App() {
         const latestPoint = points.length > 0 ? points[points.length - 1] : null;
         const lg = t.listGroup || "1";
         const status = lg === "2" ? "완료" : lg === "paused" ? "중단" : "진행중";
-        if ((status === "완료" || status === "중단") && points.length === 0) {
+        if ((status === "완료" || status === "중단") && points.length === 0 && !lateConfirm && !latePause) {
           return;
         }
         result.push({
@@ -9843,12 +10123,38 @@ export default function App() {
           points,
           phases: [],  // v9 사용 호환
           vbmapp: g.vbmapp,
-          esdm: g.esdm
+          esdm: g.esdm,
+          lateConfirm   // ★ [지난 기간 도달·이번 기간 완료]
         });
       });
     });
     return result;
-  }, [includedGoals, effectiveArchiveList, needsReportCalc, reportMode, reportPeriodStart, reportPeriodEnd]);
+  }, [includedGoals, reportGoalsAsOf, effectiveArchiveList, needsReportCalc, reportMode, reportPeriodStart, reportPeriodEnd]);
+
+  // ★ [보고서 안내 두 가지] 이번 보고서에 따로 적어 둘 것.
+  //    ① 지난 기간에 기준에 도달하고 이번 기간에 [✓ 완료 처리]를 누른 과제 — 이번 완료 수에 들어간다.
+  //    ② 지난 보고서를 낸 뒤 지난 기간 날짜에 늦게 넣은 기록 — 지난 기간 기록이라 이번 수치(그래프·평균·시작/종결 비교)에는
+  //       넣지 않는다. 넣으면 이번 기간 '시작 값'이 지난 기간 기록이 되어 비교가 틀어진다. 대신 어떤 기록인지 적어 둔다.
+  const reportLateNotes = useMemo(() => {
+    const out = { confirmed: [], entries: [] };
+    if (!needsReportCalc || reportMode === "final" || !reportCutoffDate) return out;
+    out.confirmed = (stosForReport || []).filter(s => s.lateConfirm).map(s => s.name).filter(Boolean);
+    const a0 = (effectiveArchiveList || [])[0];
+    const printedOn = a0 && a0.savedAt ? localDateOf(a0.savedAt) : "";
+    if (!printedOn) return out;
+    reportGoals.forEach(g => {
+      (g.tasks || []).forEach(t => {
+        Object.entries(t.daily || {}).forEach(([d, day]) => {
+          if (d > reportCutoffDate) return;                       // 이번 기간 기록은 이미 수치에 들어 있다
+          if (!day || !day.enteredOn || day.enteredOn <= printedOn) return;   // 지난 보고서를 낸 뒤에 넣은 것만
+          if (calcDayRateGlobal(day, t.plannedTrials) === null) return;
+          out.entries.push({ date: d, name: t.name || "" });
+        });
+      });
+    });
+    out.entries.sort((x, y) => x.date.localeCompare(y.date));
+    return out;
+  }, [needsReportCalc, reportMode, reportCutoffDate, stosForReport, effectiveArchiveList, reportGoals]);
 
   const goalsForReport = useMemo(() => {
     if (!needsReportCalc) return [];
@@ -9861,13 +10167,14 @@ export default function App() {
       if (periodEnd && d > periodEnd) return false;
       return true;
     };
-    return includedGoals
-      .filter(g => g.showInDaily)   // ★ 데이터시트에 올린(시트 ON) 목표만 보고서에 포함
+    // ★ 데이터시트에 올린(시트 ON) 목표만 · 과제 상태는 보고 종료일 기준(reportGoalsAsOf)
+    return reportGoalsAsOf
       .filter(g => {
         if (cutoffDate && g.status === "mastered") {
-          const taskMastered = (g.tasks || []).map(t => t.masteredAt).filter(Boolean).sort();
-          const realMasteredAt = taskMastered.length > 0 ? taskMastered[taskMastered.length - 1] : g.masteredAt;
-          if (realMasteredAt && realMasteredAt <= cutoffDate) return false;
+          // ★ [보고 종료일 하나로] 지난 보고서에 '완료'로 나간 목표 = 완료를 누른 날이 지난 보고서 종료일 이하
+          const taskDone = (g.tasks || []).map(taskDoneOn).filter(Boolean).sort();
+          const realDoneOn = taskDone.length > 0 ? taskDone[taskDone.length - 1] : g.masteredAt;
+          if (realDoneOn && realDoneOn <= cutoffDate) return false;
         }
         return true;
       })
@@ -9942,14 +10249,16 @@ export default function App() {
         isOX: goalIsOX(g),
         vbmapp: g.vbmapp,
         esdm: g.esdm,
-        source: g.source
+        source: g.source,
+        // ★ [지난 기간 도달·이번 기간 완료] 이번 기간 기록이 없어도 지난 보고서 종료일 뒤에 완료를 눌렀으면 이번 보고서에 남긴다
+        doneThisPeriod: !!(cutoffDate && (g.tasks || []).some(t => (t.listGroup || "1") === "2" && taskDoneOn(t) > cutoffDate))
       };
     })
     .filter(g => {
-      if (g.status === "완료" && g.points.length === 0) return false;
+      if (g.status === "완료" && g.points.length === 0 && !g.doneThisPeriod) return false;
       return true;
     });
-  }, [includedGoals, effectiveArchiveList, needsReportCalc, reportMode, reportPeriodStart, reportPeriodEnd]);
+  }, [includedGoals, reportGoalsAsOf, effectiveArchiveList, needsReportCalc, reportMode, reportPeriodStart, reportPeriodEnd]);
 
   const currentAvgs = useMemo(() => {
     if (!needsReportCalc) return [];
@@ -10022,7 +10331,7 @@ export default function App() {
     return () => { cancelled = true; };
   }, [activeChildId]);
 
-  const archiveCurrentIep = async (autoMode = false) => {
+  const archiveCurrentIep = async (autoMode = false, saveOpts = {}) => {
     if (!activeChildId) return null;
     if (!info?.name?.trim()) return null;
     if (!includedGoals || includedGoals.length === 0) {
@@ -10070,14 +10379,14 @@ export default function App() {
       goalsSummary,
     };
     const _cid = activeChildId;
-    const result = await saveArchiveItem(snapshot, autoMode);
-    if (result && result.cloudSaveFailed) alert(ARCHIVE_CLOUD_FAIL_MSG);   // ★ [보관 실패 알림]
+    const result = await saveArchiveItem(snapshot, autoMode, saveOpts);
+    if (result && result.cloudSaveFailed) alert(ARCHIVE_CLOUD_FAIL_MSG_REPRINT);   // ★ [보관 실패 알림]
     const newList = await loadArchiveList(_cid);
     if (activeChildIdRef.current === _cid) setArchiveList(newList);   // ★ [아동 바꿈] 그사이 아동을 바꿨으면 목록을 넣지 않는다
     return result;
   };
 
-  const archiveCurrentReport = async (autoMode = false, finalMode = false) => {
+  const archiveCurrentReport = async (autoMode = false, finalMode = false, saveOpts = {}) => {
     if (!activeChildId) return null;
     if (!info?.name?.trim()) return null;
     const sections = reportSections || {};
@@ -10139,8 +10448,8 @@ export default function App() {
       goalsSummary,
     };
     const _cid = activeChildId;
-    const result = await saveArchiveItem(snapshot, autoMode);
-    if (result && result.cloudSaveFailed) alert(ARCHIVE_CLOUD_FAIL_MSG);   // ★ [보관 실패 알림]
+    const result = await saveArchiveItem(snapshot, autoMode, saveOpts);
+    if (result && result.cloudSaveFailed) alert(finalMode ? ARCHIVE_CLOUD_FAIL_MSG_REPRINT : ARCHIVE_CLOUD_FAIL_MSG);   // ★ [보관 실패 알림]
     const newList = await loadArchiveList(_cid);
     // 보관 목록은 즉시 반영한다(상태 불일치 방지). ★ [아동 바꿈] 단, 그사이 아동을 바꿨으면 넣지 않는다.
     // "방금 저장한 아카이브가 자기 보고서를 컷오프하는" 문제는, 인쇄 중에만
@@ -10482,7 +10791,7 @@ export default function App() {
       mode="iep" onBack={() => { setAutoPrintAction(""); setView("edit"); }} />;
   }
   if (view === "print") {
-    return <PrintView info={effectiveInfo} goals={includedGoals} domainAvgs={domainAvgs} balanceBarRows={balanceBarRows} domainLevelOverrides={domainLevelOverrides} reportSections={reportSections}
+    return <PrintView lateNotes={reportLateNotes} info={effectiveInfo} goals={reportGoalsAsOf} domainAvgs={domainAvgs} balanceBarRows={balanceBarRows} domainLevelOverrides={domainLevelOverrides} reportSections={reportSections}
       reportSelStrats={reportSelStrats} reportSelStratsCustom={reportSelStratsCustom}
       reportSelPrein={reportSelPrein} reportSelSrein={reportSelSrein} reportReinfSchedule={reportReinfSchedule}
       reportBehaviors={reportBehaviors} stosForReport={stosForReport} goalsForReport={goalsForReport}
@@ -10959,8 +11268,21 @@ export default function App() {
                     // 과거 방식 잔재 정리
                     try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(AUTH_CURRENT_USER_KEY); } catch (e) {}
                     try { if (typeof localStorage !== "undefined") localStorage.removeItem(AUTH_CURRENT_USER_KEY); } catch (e) {}
+                    // ★ [로그아웃 정리] 이 기기에 남은 센터 전체 기록 사본(아동·보관본·안전용 사본)을 지운다.
+                    //    예전엔 로그아웃해도 공용 패드에 모든 아동 기록이 남았다.
+                    //    단 서버에 아직 못 올라간 수정이 있으면 지우지 않는다 — 다음에 열 때 그 사본으로 합쳐야 한다.
+                    try {
+                      if (typeof localStorage !== "undefined" && !localStorage.getItem(UNSYNCED_KEY)) {
+                        const pre = [ARCHIVE_INDEX_PREFIX, ARCHIVE_ITEM_PREFIX, "gd-aba-merge-backup:", "gd-aba-copy-backup:"];
+                        const rm = [STORAGE_KEY, LAST_SYNC_KEY, DELETE_REQUEST_KEY];
+                        for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && pre.some(p => k.startsWith(p))) rm.push(k); }
+                        rm.forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+                      }
+                    } catch (e) {}
                     setCurrentUser(null);
                     setAuthView("login");
+                    // 화면에 들고 있던 기록도 비운다 — 같은 창에서 다른 선생님이 로그인해도 앞사람 화면이 남지 않게
+                    try { window.location.reload(); } catch (e) {}
                   }
                 });
               }}
@@ -11163,7 +11485,7 @@ export default function App() {
 
         {/* ★ [88-1] 이번 달 파일 백업 알림 — 관리자에게만, 그 달에 아직 안 받았을 때만.
             받고 나면 다음 달까지 안 뜬다. */}
-        {currentUser?.role === "admin" && monthlyBackupDone !== null && !monthlyDismissed &&
+        {currentUser?.role === "admin" && monthlyBackupDone !== undefined && !monthlyDismissed &&
          monthlyBackupDone !== localToday().slice(0, 7) && (
           <div style={{ marginBottom: 10, padding: "9px 13px", background: "#f2f8f0", border: "1.5px solid #b8d8a8", borderRadius: 10, fontSize: 12, color: "#3d6014", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <span style={{ flex: 1, minWidth: 240 }}>
@@ -11220,6 +11542,7 @@ export default function App() {
                               await window.storage.set(SNAPSHOT_PREFIX + "before-restore-" + now.slice(0, 19).replace(/[:T]/g, ""), JSON.stringify({
                                 date: localDateOf(now), savedAt: now, by: currentUser?.name || "", children: liveChildren(children)
                               }), true);
+                              pruneSafetyCopies(SNAPSHOT_PREFIX + "before-restore-");   // ★ [사본 정리] 최근 5개만 남긴다
                               const byId = new Map(children.map(c => [c.id, c]));
                               // ★ [되살리기-합치기] 그날 기록을 지금 아동에 '보태기'만 한다 — 그 뒤에 만든 목표·과제·기록은 그대로 남는다.
                               //    (예전엔 그날 사본으로 통째로 바꿔, 그 뒤에 만든 목표가 병합 때 지워질 수 있었다)
@@ -11408,6 +11731,18 @@ export default function App() {
             <span style={{ color: "#c05555" }}>인터넷 연결을 확인해 주세요. 계속 뜨면 <b>[💾 백업]</b>으로 파일을 먼저 내려받아 두시고, 이 기기에서 로그아웃하지 말아 주세요.</span>
           </div>
         )}
+        {dateRollNotice && (
+          <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 8, fontSize: 12, background: "#eef6e6", border: "1px solid #b9d99a", color: "#3d6a12", fontWeight: 600 }}>
+            📅 {dateRollNotice}
+          </div>
+        )}
+        {/* ★ [기기 공간] 이 기기 사본을 못 남길 때 — 예전엔 아무 안내가 없었다 */}
+        {loaded && localSaveFailed && (
+          <div style={{ marginBottom: 10, padding: "10px 13px", borderRadius: 10, fontSize: 12, background: "#fdecec", border: "1.5px solid #e88b8b", color: "#a03030", lineHeight: 1.65 }}>
+            🚨 이 기기 저장 공간이 가득 차서, 인터넷이 끊겼을 때를 대비한 사본을 남기지 못하고 있습니다. 서버 저장은 계속됩니다.
+            창을 닫기 전에 화면 위 저장 표시가 끝났는지 확인해 주세요.
+          </div>
+        )}
         {loadingLockNotice > 0 && Date.now() - loadingLockNotice < 4000 && (
           <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 8, fontSize: 12, background: "#fdecec", border: "1px solid #f0b8b8", color: "#a03030" }}>
             ⏳ 아직 데이터를 불러오는 중이라 저장하지 않았습니다. 잠시 뒤 다시 시도해 주세요.
@@ -11542,7 +11877,11 @@ export default function App() {
                     flexDirection: "column"
                   }}>
                     {/* 검색창 + 고급 필터 토글 */}
-                    {visibleChildren.length >= 4 && (
+                    {/* ★ [종결 아동 열기] 검색창 옆에 '종결·보관 아동 보기'와 필터가 있는데, 아동이 4명 이상일 때만 나와서
+                         3명을 맡은 선생님은 종결일을 넣은 아이를 다시 열 길이 없었다(필터를 건 채 3명 이하가 돼도 못 풀었다). */}
+                    {(visibleChildren.length >= 4 || showArchived || filterTherapist || filterStatus !== "all" ||
+                      liveChildren(children).some(c => (currentUser?.role === "admin" || (c.info?.ownerName || "") === currentUser?.name)
+                        && (c.info?.finalEndDate || c.info?.archivedAt))) && (
                       <div style={{ padding: 8, borderBottom: "1px solid #f0e0e5" }}>
                         <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: showAdvancedFilters ? 8 : 0 }}>
                           <input
@@ -11989,6 +12328,7 @@ export default function App() {
           });
           const removeList = list.filter(g => off[g.id]);
           const keepCount = list.length - removeList.length;
+          const _reviewLocked = adminReadOnlyBlocked();
           const fromName = activeChild.info?.copiedFromOwner || "원래";
           // ★ [105-4] 진행 중 과제가 없는 목표는 원래 기록에서 어떤 상태였는지 보여 준다 (중단·완료)
           const srcChild = (children || []).find(c => c.id === activeChild.info?.copiedFrom);
@@ -12024,6 +12364,10 @@ export default function App() {
           return (
             <div style={{ margin: "0 0 12px", padding: "12px 14px", background: "#fff8e1", border: "1.5px solid #f2c96b", borderRadius: 8 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#92400e", marginBottom: 4 }}>📋 복사받은 목표 정리</div>
+              {/* ★ [보기 전용] 원장님이 [✏️ 편집 허용] 전에는 눌러도 잠금 안내만 떴다 — 먼저 알려 주고 버튼을 막는다 */}
+              {_reviewLocked && (
+                <div style={{ fontSize: 11.5, color: "#8a5a00", fontWeight: 600, marginBottom: 6 }}>보기 전용입니다. 위 [✏️ 편집 허용]을 누른 뒤 정리할 수 있습니다.</div>
+              )}
               <div style={{ fontSize: 11.5, color: "#6b5a2e", lineHeight: 1.6, marginBottom: 8 }}>
                 {fromName} 선생님 기록에서 넘어온 목표입니다. <b>안 할 목표는 체크를 풀고</b> '정리 완료'를 누르세요.
                 체크를 푼 목표는 중단이 아니라 이 기록에서 빠집니다. ({fromName} 선생님 기록은 그대로입니다)
@@ -12034,7 +12378,7 @@ export default function App() {
                   const n = (g.tasks || []).filter(t => t && !dT[t.id] && (t.listGroup || "1") === "1").length;
                   return (
                     <label key={g.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: off[g.id] ? "#aaa" : "#333", cursor: "pointer", padding: "2px 0", textDecoration: off[g.id] ? "line-through" : "none" }}>
-                      <input type="checkbox" checked={!off[g.id]} onChange={() => toggle(g.id)} />
+                      <input type="checkbox" checked={!off[g.id]} disabled={_reviewLocked} onChange={() => toggle(g.id)} />
                       <span style={{ color: "#999" }}>{shortDomain(g.domain) || g.domain || ""}</span>
                       <span style={{ fontWeight: 600 }}>{itemLabel(g.item)}</span>
                       {n > 0
@@ -12045,6 +12389,7 @@ export default function App() {
                 })}
               </div>
               <button
+                disabled={_reviewLocked}
                 onClick={() => askConfirm(
                   `목표 정리를 마칠까요?\n\n` +
                   `· 남길 목표: ${keepCount}개\n` +
@@ -12053,7 +12398,7 @@ export default function App() {
                   `\n\n정리를 마치면 이 안내는 사라집니다. 뺀 목표는 나중에 다시 추가할 수 있습니다.`,
                   finish
                 )}
-                style={{ padding: "6px 14px", fontSize: 12, fontWeight: 700, fontFamily: "inherit", borderRadius: 6, cursor: "pointer", background: "#d97706", color: "#fff", border: "none" }}>
+                style={{ padding: "6px 14px", fontSize: 12, fontWeight: 700, fontFamily: "inherit", borderRadius: 6, cursor: _reviewLocked ? "default" : "pointer", opacity: _reviewLocked ? 0.45 : 1, background: "#d97706", color: "#fff", border: "none" }}>
                 정리 완료 (남길 목표 {keepCount}개)
               </button>
             </div>
@@ -14162,7 +14507,7 @@ export default function App() {
                       if (!activeChildId || !info?.name?.trim()) {
                         console.warn("[IEP 보관 건너뜀] activeChildId/info.name 없음");
                       } else {
-                        const result = await archiveCurrentIep(false);
+                        const result = await archiveCurrentIep(false, { replaceSame: true });   // ★ [덮어쓰기] 같은 기간 24시간 안 재인쇄는 덮어쓴다
                         if (!result || (result && result.skipped)) {
                           console.warn("[IEP 보관 건너뜀]", result?.reason || "unknown");
                         }
@@ -14212,6 +14557,7 @@ export default function App() {
               isFinalMode={true}
               cutoffDisabled={true}
               setCutoffDisabled={null}
+              kind="iep"
             />
 
             {/* ★ [제거] 목표 템플릿 라이브러리 — 커리큘럼(ELCAR/VB-MAPP/ESDM)+통합검색과 기능 중복으로 삭제 */}
@@ -14227,7 +14573,7 @@ export default function App() {
         {/* TAB 3: 데일리 데이터 (+/- 버튼, 실시간 계산)        */}
         {/* ═══════════════════════════════════════════════════ */}
         {tab === "daily" && (
-          <DailyTab goals={dailyGoals} dailyDate={dailyDate} setDailyDate={setDailyDate}
+          <DailyTab goals={dailyGoals} iepGoalCount={includedGoals.length} dailyDate={dailyDate} setDailyDate={setDailyDate}
             activeChildId={activeChildId}
             calcDayRate={calcDayRate}
             addTask={addTask} removeTask={removeTask} renameTask={renameTask}
@@ -14258,7 +14604,9 @@ export default function App() {
           <ReportTab 
             childId={activeChildId}
             currentUser={currentUser}
-            info={effectiveInfo} goals={includedGoals} currentAvgs={currentAvgs} balanceBarRows={balanceBarRows} baselineAvgs={baselineAvgs}
+            lateNotes={reportLateNotes}
+            iepGoalCount={includedGoals.length}
+            info={effectiveInfo} goals={reportGoalsAsOf} currentAvgs={currentAvgs} balanceBarRows={balanceBarRows} baselineAvgs={baselineAvgs}
             reportSectionsStamp={activeChild?.reportSectionsStamp || ""}   /* ★ [93-1] 아동 객체 최상위에 저장된다 */
             domainLevelOverrides={domainLevelOverrides}
             getTimeline={getTimeline}
@@ -14306,7 +14654,7 @@ export default function App() {
                     if (!activeChildId || !info?.name?.trim()) {
                       console.warn("[종결보관 건너뜀] activeChildId/info.name 없음");
                     } else {
-                      const result = await archiveCurrentReport(false, true);
+                      const result = await archiveCurrentReport(false, true, { replaceSame: true });   // ★ [덮어쓰기] 같은 기간 24시간 안 재인쇄는 덮어쓴다
                       if (result && result.id && !result.cloudSaveFailed) {
                         alert("✅ 종결보고서가 보관함에 저장되었습니다.");
                       }
@@ -14320,13 +14668,21 @@ export default function App() {
                 });
                 return;
               }
+              // ★ [빈 보관본 막기] 보관 직후 '새 데이터 입력 대기중'에 인쇄하면, 내용 없는 보관본이 엉뚱한 기간("2026.03 - 2차")으로
+              //    저장되고 다음 진짜 보고서가 3차가 됐다. 새 기록이 없으면 인쇄하지 않는다.
+              if (awaitingNewData) {
+                alert("아직 새 기록이 없어 인쇄할 내용이 없습니다.\n지난 보고서는 아래 보관함에서 [👁 보기]로 볼 수 있습니다.");
+                return;
+              }
               const confirmMsg = `📄 중간보고서 ${action === "pdf" ? "PDF로 저장" : "인쇄"}하기\n\n다음 작업이 자동으로 진행됩니다:\n  ✓ 현재 보고서가 보관함에 저장됨\n  ✓ 그래프에 컷오프 적용 (이전 데이터는 보관함에서 확인)\n  ✓ 다음 차수 시작일이 자동 갱신됨 (오늘+1)\n\n진행하시겠습니까?\n\n(보관 없이 양식만 보려면 [👁 미리보기]를 사용하세요)` + linkedOverlapNote;  /* ★ [103-2] 겹치는 목표 안내 */
               askConfirm(confirmMsg, async () => {
                 try {
                   if (!activeChildId || !info?.name?.trim()) {
                     console.warn("[보관 건너뜀] activeChildId/info.name 없음");
                   } else {
-                    const result = await archiveCurrentReport(true);
+                    // ★ [그래프 복원 재인쇄] 복원해서 다시 내는 보고서는 그 보관본을 고쳐 쓴다(하나 더 쌓지 않는다)
+                    const _restoredId = cutoffDisabled ? ((archiveList || []).filter(a => !a.isFinal && !a.isIep)[0]?.id || "") : "";
+                    const result = await archiveCurrentReport(true, false, _restoredId ? { replaceId: _restoredId } : {});
                     if (result && result.id) {
                       // 방금 저장한 아카이브는 인쇄가 끝날 때까지 컷오프 계산에서 제외한다.
                       // (자기 자신을 컷오프해 그래프가 사라지는 것을 방지)
@@ -15142,6 +15498,19 @@ function ExternalGoalModal({ extForm, setExtForm, onClose, onSubmit, onSubmitAnd
   );
 }
 
+// ★ [보관본 보기] 인쇄본(PrintView)의 stripMarker와 같은 규칙 — 직접 쓴 칸(MYNOTE)은 본문 뒤에 붙이고 나머지 표식은 뗀다.
+function stripReportMarkers(s) {
+  const raw = s || "";
+  const m = raw.match(/\n{0,2}<!--MYNOTE:([\s\S]*?)-->/);
+  const note = m ? String(m[1]).trim() : "";
+  const body = raw
+    .replace(/\n{0,2}<!--MYNOTE:[\s\S]*?-->/g, "")
+    .replace(/\n*<!--SELECTED:[^>]*-->\s*$/g, "")
+    .replace(/\n*<!--AUTOBASE:[\s\S]*?-->\s*/g, "\n\n")
+    .trim();
+  return note ? (body ? body + "\n\n" + note : note) : body;
+}
+
 function ArchiveViewModal({ item, onClose, list }) {
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -15229,7 +15598,9 @@ function ArchiveViewModal({ item, onClose, list }) {
                 return sectionOrder.map(key => {
                   const body = sections[key];
                   if (!body || !String(body).trim()) return null;
-                  const personalized = personalizeText(String(body), snapChildName);
+                  // ★ [보관본 보기] 저장된 글에는 숨은 표식(AUTOBASE·SELECTED·MYNOTE)이 들어 있다 — 인쇄본과 같이 다듬어 보여 준다.
+                  //    예전엔 그대로 보여 줘서 <!--AUTOBASE:…--> 같은 글자와 같은 문단이 두 번 보였다.
+                  const personalized = personalizeText(stripReportMarkers(String(body)), snapChildName);
                   // ★ [표기] 저장 키는 유지, 화면 표기만 '도전적 행동'으로
                   const personalizedKey = personalizeText(key, snapChildName).replace("문제행동", "도전적 행동");
                   return (
@@ -15645,7 +16016,8 @@ function GoalCard({ goal, active, onToggle, onRemove, onUpdate, onToggleStatus, 
             )}
             {/* ★ 보고서 발행 표시 — 마스터된 영역목표가 보관본에 포함되었으면 라벨 추가 */}
             {goal.status === "mastered" && (() => {
-              const taskDates = (goal.tasks || []).map(t => t.masteredAt).filter(Boolean).sort();
+              // ★ [완료 날짜] masteredAt은 이제 '기준 도달일'이다 — 보고서에 '완료'로 나간 시점은 완료를 누른 날(completedAt) 기준
+              const taskDates = (goal.tasks || []).map(t => t.completedAt || t.masteredAt).filter(Boolean).sort();
               const completedAt = (taskDates.length > 0 ? taskDates[taskDates.length - 1] : null) || goal.masteredAt;
               const cutoffArchives = (archiveList || []).filter(item => !item.isFinal && !item.isIep);
               if (!completedAt || cutoffArchives.length === 0) return null;
@@ -15753,7 +16125,7 @@ function GoalCard({ goal, active, onToggle, onRemove, onUpdate, onToggleStatus, 
             </span>
             {/* ★ [짝 표시 제거 · 2026-11 원장 결정] 엘카 목표에 붙던 "VB: … / ESDM: …"는 낱말 짝 맞추기라 정확하지 않아 숨긴다.
                 VB-MAPP·ESDM 목록에서 직접 고른 목표의 표시(실제로 고른 영역)는 그대로 둔다. */}
-            {vbmapp && source !== "ELCAR" && <span style={{ fontSize: 9, padding: "2px 6px", background: "#e6f1fb", color: "#2a6cb2", borderRadius: 8, fontWeight: 500, whiteSpace: "nowrap" }}>VB: {vbmapp.v} L{vbmapp.lv}</span>}
+            {vbmapp && source !== "ELCAR" && <span style={{ fontSize: 9, padding: "2px 6px", background: "#e6f1fb", color: "#2a6cb2", borderRadius: 8, fontWeight: 500, whiteSpace: "nowrap" }}>VB: {vbmappAreaName(goal)} L{vbmapp.lv}</span>}
             {esdm && source !== "ELCAR" && <span style={{ fontSize: 9, padding: "2px 6px", background: "#eaf3de", color: "#4a7316", borderRadius: 8, fontWeight: 500, whiteSpace: "nowrap" }}>ESDM: {esdm.v}</span>}
           </div>
           {/* 중단 사유 표시 — paused task가 있으면 사유 콤마로 나열 */}
@@ -16192,7 +16564,7 @@ function markedLines(text, keyPrefix) {
   });
 }
 
-function PrintView({ info, goals, domainAvgs, balanceBarRows = [], domainLevelOverrides, reportSections, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportBehaviors, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, archiveList, dailyMemos, mode, onBack, autoPrint = "", onAutoPrintDone }) {
+function PrintView({ lateNotes = null, info, goals, domainAvgs, balanceBarRows = [], domainLevelOverrides, reportSections, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportBehaviors, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, archiveList, dailyMemos, mode, onBack, autoPrint = "", onAutoPrintDone }) {
   const isIepMode = mode === "iep";
   const isFinalMode = mode === "final";  // ★ 종결보고서 모드
   const grouped = useMemo(() => {
@@ -17261,6 +17633,12 @@ cleanedHTML + '\n' +
                   <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
                     ※ 영역별로 묶은 목표마다 진행 상태와 시작부터 지금까지의 추이선 · 회기당 1회 시도 목표는 O(성공)·X(실패)로 표시
                   </div>
+                  {/* ★ [지난 기간 도달·이번 기간 완료] 완료 수에 들어간 과제를 적어 둔다 */}
+                  {lateNotes && lateNotes.confirmed && lateNotes.confirmed.length > 0 && (
+                    <div style={{ fontSize: 11, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
+                      ※ 지난 보고 기간에 기준에 도달하고 이번 기간에 완료를 확인한 과제: {lateNotes.confirmed.map(n => `'${n}'`).join(", ")} — 이번 보고서 완료 수에 포함했습니다.
+                    </div>
+                  )}
                   <GoalDashboard stos={goalsForReport} therapistChanges={info?.therapistChanges} goalHandovers={info?.goalHandovers} />
                 </PrintSection>
               )
@@ -18451,7 +18829,7 @@ function StrategyConsolidatedTable({ goals }) {
   );
 }
 
-function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, addTask, removeTask, renameTask, toggleTaskKeepRef, bumpTask, setTaskDayOX, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, clearPendingNext, updateGoal, dailyMemos, setDailyMemo, archiveList, mediaList, setInfo, addHistory, onPrev, onNext, renderLinkedGoalBadge }) {
+function DailyTab({ goals, iepGoalCount = 0, activeChildId, dailyDate, setDailyDate, calcDayRate, addTask, removeTask, renameTask, toggleTaskKeepRef, bumpTask, setTaskDayOX, resetTask, setTaskListGroup, setTaskMeasureMode, setTaskPlannedTrials, setTaskTrial, fillTaskTrials, askConfirm, askPauseReason, clearPendingNext, updateGoal, dailyMemos, setDailyMemo, archiveList, mediaList, setInfo, addHistory, onPrev, onNext, renderLinkedGoalBadge }) {
   const [hideMastered, setHideMastered] = useState({ "ELCAR": true, "VB-MAPP": true, "ESDM": true, "기타": true });
   const [hidePaused, setHidePaused] = useState({ "ELCAR": true, "VB-MAPP": true, "ESDM": true, "기타": true });
   const currentMemo = (dailyMemos && dailyMemos[dailyDate]) || "";
@@ -18510,7 +18888,8 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
     let n = 0;
     goals.forEach(g => (g.tasks || []).forEach(t => {
       if ((t.listGroup || "1") !== "2") return;
-      if (cutoffDate && t.masteredAt && t.masteredAt <= cutoffDate) return;
+      const _doneOn = t.completedAt || t.masteredAt;   // ★ [완료 날짜] 완료를 누른 날 기준
+      if (cutoffDate && _doneOn && _doneOn <= cutoffDate) return;
       n++;
     }));
     return n;
@@ -18603,6 +18982,19 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
   }, [goals, calcDayRate, dailyMemos, archiveList]);
   const [alertsExpanded, setAlertsExpanded] = useState(false);
 
+  // ★ [빈 안내] IEP 목표는 있는데 '시트'를 켠 목표가 없을 때 "IEP 목표가 아직 없습니다"라고 떠서 헷갈렸다
+  if (goals.length === 0 && iepGoalCount > 0) {
+    return (
+      <div style={{ ...CS, textAlign: "center", padding: 48 }}>
+        <div style={{ fontSize: 44, marginBottom: 10, opacity: 0.6 }}>📊</div>
+        <div style={{ fontSize: 15, color: "#888", marginBottom: 6, fontWeight: 500 }}>데이터 시트에 올린 목표가 없습니다</div>
+        <div style={{ fontSize: 12, color: "#bbb", lineHeight: 1.7 }}>
+          IEP 목표 {iepGoalCount}개 중 '시트'를 켠 목표가 없습니다.<br/>[② IEP 설정]에서 목표 카드 오른쪽 '시트'를 켜면 이곳에 나타납니다.
+        </div>
+        <button style={{ ...BP, marginTop: 18 }} onClick={onPrev}>← IEP 설정으로 이동</button>
+      </div>
+    );
+  }
   if (goals.length === 0) {
     return (
       <div style={{ ...CS, textAlign: "center", padding: 48 }}>
@@ -18866,7 +19258,7 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
         const isPast = dailyDate <= cutoff;
         return isPast ? (
           <div style={{ marginBottom: 12, padding: "10px 14px", background: "#f5f0e6", borderLeft: "3px solid #a87108", borderRadius: 6, fontSize: 11, color: "#604515", lineHeight: 1.65 }}>
-            ⚠ <b>지난 차수 데이터 ({dailyDate})</b> — 이 날짜는 {cutoff} 보고서 발행 <b>이전</b>입니다. 입력은 가능하지만 다음 보고서의 그래프에 반영되지 않습니다.
+            ⚠ <b>지난 차수 데이터 ({dailyDate})</b> — 이 날짜는 {cutoff} 보고서 발행 <b>이전</b>입니다. 입력은 가능하지만 다음 보고서의 그래프에 반영되지 않고, 다음 보고서 화면에 '지난 기간 추가 기록'으로 따로 적힙니다.
           </div>
         ) : (
           <div style={{ marginBottom: 12, padding: "10px 14px", background: "#eff5fc", borderLeft: "3px solid #2a6cb2", borderRadius: 6, fontSize: 11, color: "#1d4d80", lineHeight: 1.65 }}>
@@ -18962,7 +19354,12 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
             <textarea
               value={memoDraft}
               onChange={e => setMemoDraft(e.target.value)}
-              onBlur={() => setDailyMemo(dailyDate, memoDraft)}
+              onBlur={() => {
+                // ★ [메모 그대로] 열었다가 아무것도 안 쓰고 나와도 '방금 수정됨'이 되어 서버에 다시 올라갔다
+                //    (원장님이 보기 전용으로 볼 때는 "저장하지 않았습니다" 빨간 안내까지 떴다). 내용이 같으면 저장하지 않는다.
+                if ((memoDraft || "").trim() === ((dailyMemos || {})[dailyDate] || "").trim()) return;
+                setDailyMemo(dailyDate, memoDraft);
+              }}
               placeholder={`오늘 ${dailyDate}의 메모 — 칩 클릭 또는 자유 입력 (자동 저장)`}
               style={{
                 width: "100%",
@@ -19363,7 +19760,7 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
                           <div style={{ fontSize: 10.5, fontWeight: 700, color: "#4a7316", marginBottom: 4 }}>{shortDomain(domain) || domain}</div>
                           {mGoals.map(g => {
                             const list2 = (g.tasks || []).filter(t => (t.listGroup || "1") === "2");
-                            const taskDates = list2.map(t => t.masteredAt).filter(Boolean).sort();
+                            const taskDates = list2.map(t => t.completedAt || t.masteredAt).filter(Boolean).sort();   // ★ [완료 날짜] 완료를 누른 날 기준
                             const completedAt = (taskDates.length > 0 ? taskDates[taskDates.length - 1] : null) || g.masteredAt;
                             let publishedAt = null;
                             if (completedAt && archiveList && archiveList.length > 0) {
@@ -20762,10 +21159,14 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, selStrat
   //    기존엔 언어 영역 하나만 다뤘어 "종합 현황"이라기에 부족했다.
   //    낮은 구간은 숫자 대신 상태로 적어 "0%" 같은 표기를 피한다.
   if (total > 0) {
-    sec1Parts.push(`${fn}${jEunNeun(fn)} 본 보고 기간에 ${total}개 단기 목표를 진행했고, 그중 ${done.length}개에서 준거를 달성했습니다.`);
+    // ★ [숫자 맞추기] 표지 요약과 같이 중단 과제까지 센다 — 예전엔 표지 "21개 STO 중 5개", 바로 아래 여기 "20개 …"가 함께 인쇄됐다.
+    const _pausedNote = paused.length > 0 ? ` (이와 별도로 ${paused.length}개는 중단)` : "";
+    sec1Parts.push(`${fn}${jEunNeun(fn)} 본 보고 기간에 ${stos.length}개 단기 목표를 진행했고, 그중 ${done.length}개에서 준거를 달성했습니다${_pausedNote}.`);
   }
   if (Array.isArray(domAvgs) && domAvgs.length > 0) {
-    const sorted = [...domAvgs].sort((a, b) => b.avg - a.avg);
+    // ★ [시작 단계 제외] 측정이 3회기 안 된 영역은 막대에서 회색 '시작 단계'로 빼 두었다 — 문장에서도 뺀다.
+    //    예전엔 '자기관리'를 1회기만 해서 0%면 막대는 회색인데 "집중 지도가 필요한 영역"이라고 적혔다.
+    const sorted = [...domAvgs].filter(d => d.sessions == null || d.sessions >= COMPARE_EDGE_N).sort((a, b) => b.avg - a.avg);
     const named = sorted.filter(d => d.avg >= 40).map(d => `${cleanDomainKey(d.domain)} ${d.avg}%`);
     const lowNames = sorted.filter(d => d.avg < 40).map(d => `'${cleanDomainKey(d.domain)}'`);
     const parts = [];
@@ -20981,7 +21382,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, selStrat
       : d2 === "up" ? `'${g2.domainLabel}' 영역${cnt(g2)}${also} +${g2.diff}%p 올랐습니다`
       : d2 === "down" ? `'${g2.domainLabel}' 영역${cnt(g2)}${also} ${Math.abs(g2.diff)}%p 낮아졌습니다`
       : `'${g2.domainLabel}' 영역${cnt(g2)}${also} 비슷한 수준을 유지했습니다`;
-    const doneText = done.length > 0 ? ` 전체 ${total}개 STO 중 ${done.length}개에서 준거를 달성했습니다.` : "";
+    const doneText = done.length > 0 ? ` 전체 ${stos.length}개 STO 중 ${done.length}개에서 준거를 달성했습니다.` : "";
     const accelText = acceleratingTrend ? " 최근 회기에서 더 빠르게 올라가고 있습니다." : "";
     const masteredTail = masteredDomains.length > 0
       ? ` ${masteredDomains.map(d => `'${cleanDomainKey(d.domain)}'`).join(", ")} 영역은 숙달 수준이라 일반화 단계로 넘어갈 차례입니다.`
@@ -21007,7 +21408,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, selStrat
       return !isNaN(gap) && gap <= 42;
     })();
     const rmLead = rmRecent ? "최근 " : "";
-    sec2Parts.push(`${rmLead}${isValidTaskName(rmName) ? `'${rmName}'에서` : "핵심 목표에서"} 준거를 달성했습니다. 전체 ${total}개 STO 중 ${done.length}개가 완료되었습니다.`);
+    sec2Parts.push(`${rmLead}${isValidTaskName(rmName) ? `'${rmName}'에서` : "핵심 목표에서"} 준거를 달성했습니다. 전체 ${stos.length}개 STO 중 ${done.length}개가 완료되었습니다.`);
   } else if (total > 0) {
     sec2Parts.push(`현재 ${total}개 단기 목표 중 ${prog.length}개가 진행 중입니다.`);
   } else {
@@ -21111,6 +21512,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, selStrat
   //    여기서 '자기관리 0%'로 그대로 찍어 한 보고서 안에서 표기가 어긋났다.
   const lowDomains = (domAvgs || [])
     .filter(d => d.avg < 60 && (d.count == null || d.count > 0))
+    .filter(d => d.sessions == null || d.sessions >= COMPARE_EDGE_N)   // ★ [시작 단계 제외] 위 종합 현황과 같은 이유
     .sort((a, b) => a.avg - b.avg)
     .slice(0, 3);
   if (lowDomains.length > 0) {
@@ -21184,7 +21586,7 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, selStrat
   return r;
 }
 
-function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, balanceBarRows = [], reportSectionsStamp = "", baselineAvgs, domainLevelOverrides, getTimeline, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, awaitingNewData, askConfirm, reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportReinfType, reportPromptStart, reportPromptNow, reportNextPlans, reportBehaviors, reportSections, dailyMemos, setReportField, setReportPatch, setInfo, archiveList, cutoffDisabled, setCutoffDisabled, reportMode, setReportMode, onArchiveSave, onArchiveDelete, onArchiveView, onPrev, onPreview, onPrint }) {
+function ReportTab({ lateNotes = null, iepGoalCount = 0, childId = null, currentUser, info, goals, currentAvgs, balanceBarRows = [], reportSectionsStamp = "", baselineAvgs, domainLevelOverrides, getTimeline, stosForReport, goalsForReport, firstDataDate, lastDataDate, reportPeriodStart, reportPeriodEnd, awaitingNewData, askConfirm, reportFields, reportSelStrats, reportSelStratsCustom, reportSelPrein, reportSelSrein, reportReinfSchedule, reportReinfType, reportPromptStart, reportPromptNow, reportNextPlans, reportBehaviors, reportSections, dailyMemos, setReportField, setReportPatch, setInfo, archiveList, cutoffDisabled, setCutoffDisabled, reportMode, setReportMode, onArchiveSave, onArchiveDelete, onArchiveView, onPrev, onPreview, onPrint }) {
   const [showReportHelp, setShowReportHelp] = useState(false); // ★ 인쇄 안내 박스 접기 (기본 접힘)
   const visibleArchiveList = useMemo(() => {
     if (!archiveList || archiveList.length === 0) return [];
@@ -21240,7 +21642,9 @@ function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, bala
     );
   };
 
-  const effectiveArchiveList = (cutoffDisabled || isFinalMode) ? [] : (visibleArchiveList || []).filter(item => !item.isFinal && !item.isIep);
+  // ★ [그래프 복원 = 직전 보관본 하나만 풀기] 위 App의 effectiveArchiveList와 같은 규칙
+  const effectiveArchiveList = isFinalMode ? []
+    : (visibleArchiveList || []).filter(item => !item.isFinal && !item.isIep).slice(cutoffDisabled ? 1 : 0);
   const allDates = useMemo(() => {
     let cutoffDate = null;
     if (effectiveArchiveList && effectiveArchiveList.length > 0 && effectiveArchiveList[0].savedAt) {
@@ -21302,6 +21706,31 @@ function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, bala
     return { recorded: recorded.length, total: goals.length, avg, mastered, improving, sessions: allDates.length };
   }, [goalsWithStats, goals.length, allDates.length]);
 
+  // ★ [시트 다 끔] 보고서는 '시트'를 켠 목표로 만든다. IEP 목표는 있는데 시트가 모두 꺼진 아동은
+  //    예전엔 "보고할 IEP 목표가 없습니다"만 떠서 이유를 알기 어려웠고, 보관된 이전 보고서도 열 수 없었다.
+  if (goals.length === 0 && iepGoalCount > 0) {
+    return (
+      <div>
+        <div style={{ ...CS, textAlign: "center", padding: 48 }}>
+          <div style={{ fontSize: 44, marginBottom: 10, opacity: 0.6 }}>📄</div>
+          <div style={{ fontSize: 15, color: "#888", marginBottom: 6, fontWeight: 500 }}>데이터 시트에 올린 목표가 없습니다</div>
+          <div style={{ fontSize: 12, color: "#bbb", lineHeight: 1.7 }}>
+            보고서는 '시트'를 켠 목표로 만듭니다. IEP 목표 {iepGoalCount}개 중 '시트'를 켠 목표가 없습니다.<br/>
+            [② IEP 설정]에서 목표 카드 오른쪽 '시트'를 켜면 보고서를 만들 수 있습니다.
+          </div>
+        </div>
+        <ArchiveListCard
+          list={(visibleArchiveList || []).filter(a => !a.isIep && (isFinalMode ? a.isFinal : !a.isFinal))}
+          isFinalMode={isFinalMode}
+          onSave={null}
+          onDelete={onArchiveDelete}
+          onView={onArchiveView}
+          cutoffDisabled={cutoffDisabled}
+          setCutoffDisabled={setCutoffDisabled}
+        />
+      </div>
+    );
+  }
   if (goals.length === 0) {
     return (
       <div style={{ ...CS, textAlign: "center", padding: 48 }}>
@@ -21717,10 +22146,23 @@ function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, bala
               ※ 회기당 1회만 시도하는 목표는 O(성공) · X(실패)로 표시됩니다.
             </div>
             {/* ★ 컷오프 알림 — 이전 보고서 보관 후 그래프 새로 그리는 중 */}
-            {effectiveArchiveList && effectiveArchiveList.length > 0 && effectiveArchiveList[0].savedAt && (
+            {!cutoffDisabled && effectiveArchiveList && effectiveArchiveList.length > 0 && effectiveArchiveList[0].savedAt && (
               <div style={{ fontSize: 11, color: "#1d4d80", lineHeight: 1.6, padding: "8px 12px", background: "#e8f4ff", borderLeft: "3px solid #2a6cb2", borderRadius: 4, marginBottom: 12 }}>
                 {/* ★ [안내 정정] 예전엔 "보관함에서 해당 보고서를 삭제하세요"라고 안내해, 따라 하면 보관본이 영구 삭제됐다 */}
                 💡 <b>그래프 컷오프 적용 중</b> — 직전 보관 보고서의 마지막 데이터({cutoffOf(effectiveArchiveList[0])}) 이후 데이터만 표시되고 있습니다. 이전 데이터를 다시 보려면 아래 보관함에서 <b>[↩ 그래프 복원]</b>을 누르세요(보관본은 지워지지 않습니다).
+              </div>
+            )}
+            {/* ★ [보고서 안내 두 가지] 지난 기간 도달·이번 기간 완료 과제 / 지난 기간 날짜에 늦게 넣은 기록 */}
+            {lateNotes && ((lateNotes.confirmed || []).length > 0 || (lateNotes.entries || []).length > 0) && (
+              <div style={{ fontSize: 11, color: "#7a5a12", lineHeight: 1.7, padding: "8px 12px", background: "#fff8ec", borderLeft: "3px solid #e0a83a", borderRadius: 4, marginBottom: 12 }}>
+                {(lateNotes.confirmed || []).length > 0 && (
+                  <div>✓ <b>지난 기간 기준 도달, 이번 기간 완료 확인</b> — {lateNotes.confirmed.map(n => `'${n}'`).join(", ")} (이번 보고서 완료 수에 포함, 인쇄본에도 적힙니다)</div>
+                )}
+                {(lateNotes.entries || []).length > 0 && (
+                  <div>📝 <b>지난 기간 추가 기록</b> — 지난 보고서를 낸 뒤 지난 기간 날짜에 넣은 기록 {lateNotes.entries.length}회기
+                    ({lateNotes.entries.slice(0, 3).map(e => `${e.date.slice(5).replace("-", "/")} '${e.name}'`).join(", ")}{lateNotes.entries.length > 3 ? " 외" : ""}).
+                    지난 기간 기록이라 이번 그래프·평균에는 넣지 않았습니다.</div>
+                )}
               </div>
             )}
             <GoalDashboard stos={goalsForReport} therapistChanges={info?.therapistChanges} goalHandovers={info?.goalHandovers} />
@@ -22898,7 +23340,9 @@ function archiveDisplayTitle(item, list) {
   return `중간보고서 (${period})` + (ord ? ` · ${ord}차` : "");
 }
 
-function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCutoffDisabled, isFinalMode }) {
+// ★ [IEP 보관함] kind="iep"면 IEP 계획안 보관함 — 중간보고서용 비교 칸·컷오프 설명·'위 버튼' 안내를 뺀다
+function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCutoffDisabled, isFinalMode, kind = "report" }) {
+  const isIepBox = kind === "iep";
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -22942,13 +23386,14 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
           onClick={() => setOpen(!open)}
           style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 600, color: PKD, padding: 0, display: "flex", alignItems: "center", gap: 8 }}
         >
-          <span>📁 보관된 이전 보고서</span>
+          <span>{isIepBox ? "📁 보관된 IEP 계획안" : "📁 보관된 이전 보고서"}</span>
           <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: PKL, color: PKD, fontWeight: 500 }}>{count}개</span>
           <span style={{ fontSize: 12, color: "#999" }}>{open ? "▼" : "▶"}</span>
         </button>
         {/* ★ [종결 보관] 종결 화면에서는 이 버튼을 숨긴다 — 종결 보관본은 종결보고서를 인쇄할 때 저장되며,
              여기서 또 누르면 같은 종결 보관본이 둘 생기고 중간보고서용 안내가 떴다. */}
-        {isFinalMode ? null : confirmSave ? (
+        {/* ★ [시트 다 끔] onSave가 없으면(보고서를 만들 목표가 없을 때) 빈 보관본을 만들지 않게 버튼을 숨긴다 */}
+        {(isFinalMode || !onSave) ? null : confirmSave ? (
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <span style={{ fontSize: 10.5, color: "#a85020", fontWeight: 600 }}>보관 후 그래프가 새로 그려집니다.</span>
             <button onClick={handleSave} disabled={saving}
@@ -22975,8 +23420,10 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
         <>
           {count === 0 ? (
             <div style={{ padding: "16px 14px", textAlign: "center", color: "#999", fontSize: 12, background: "#fafafa", borderRadius: 8, border: "1px dashed #e0e0e0" }}>
-              아직 보관된 보고서가 없습니다.<br />
-              <span style={{ fontSize: 10 }}>인쇄 시 자동 보관되거나, 위 버튼으로 직접 보관할 수 있습니다.</span>
+              {isIepBox ? "아직 보관된 IEP 계획안이 없습니다." : "아직 보관된 보고서가 없습니다."}<br />
+              <span style={{ fontSize: 10 }}>{isIepBox ? "IEP 계획안을 인쇄하면 자동으로 보관됩니다."
+                : isFinalMode ? "종결보고서를 인쇄하면 자동으로 보관됩니다."
+                : "인쇄 시 자동 보관되거나, 위 버튼으로 직접 보관할 수 있습니다."}</span>
             </div>
           ) : (() => {
             const q = search.trim().toLowerCase();
@@ -23035,7 +23482,7 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
 
                 {/* W-36: 차수별 비교 차트 (중간보고서 보관본 2개 이상일 때만) */}
                 {/* ★ [종결제외] 종결보관본은 차수 비교에 포함 안 함 */}
-                {(list || []).filter(item => !item.isFinal).length >= 2 && (
+                {!isIepBox && (list || []).filter(item => !item.isFinal).length >= 2 && (
                   <GrowthHistoryChart list={list} />
                 )}
                 {filtered.length === 0 ? (
@@ -23112,6 +23559,7 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
           })()}
           {/* ★ [수정] 안내 6줄이 항상 펼쳐져 있어 읽히지 않았다.
                핵심 한 문장만 남기고 나머지는 접는다. '컷오프'가 뭘 뜻하는지도 먼저 설명한다. */}
+          {!isIepBox && (
           <div style={{ marginTop: 8, padding: "8px 12px", background: "#fafafa", borderRadius: 6, fontSize: 10.5, color: "#777", lineHeight: 1.7 }}>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
               <span style={{ flex: 1 }}>
@@ -23145,6 +23593,7 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
               </div>
             )}
           </div>
+          )}
         </>
       )}
     </div>
@@ -23452,8 +23901,8 @@ function ReportGeneratorSection({
         <td style="padding: 5px 8px; border: 1px solid #e8d0d6;">${s.domain || "—"}</td>
         <td style="padding: 5px 8px; border: 1px solid #e8d0d6;">${s.name || "—"}</td>
         <td style="padding: 5px 8px; border: 1px solid #e8d0d6; text-align: center; background: ${s.status === "완료" ? "#eaf3de" : "#e6f1fb"};">${s.status}</td>
-        <td style="padding: 5px 8px; border: 1px solid #e8d0d6; text-align: center;">${s.rate || 0}%</td>
-        <td style="padding: 5px 8px; border: 1px solid #e8d0d6; text-align: center; font-size: 10px; color: #888;">${s.masteryDate || "—"}</td>
+        <td style="padding: 5px 8px; border: 1px solid #e8d0d6; text-align: center;">${(s.lateConfirm || !(s.points && s.points.length)) ? "—" : (s.rate || 0) + "%"}</td>
+        <td style="padding: 5px 8px; border: 1px solid #e8d0d6; text-align: center; font-size: 10px; color: #888;">${(s.status === "완료" && s.masteryDate) || "—"}</td>
       </tr>
     `).join("");
 
