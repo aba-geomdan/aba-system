@@ -334,7 +334,9 @@ window.storage = {
     try {
       const headers = await _authHeaders();
       const url = `${SUPABASE_URL}/rest/v1/aba_data?user_id=eq.${ABA_OWNER_ID}&key=eq.${encodeURIComponent(key)}`;
-      await fetch(url, { method: "DELETE", headers });
+      const r = await fetch(url, { method: "DELETE", headers });
+      // ★ [삭제 확인] 예전엔 서버가 거절해도 '지웠다'고 돌려줬다
+      if (!r.ok) { console.warn("[aba delete]", key, r.status); return null; }
       return { deleted: true };
     } catch (e) { console.warn("[aba delete 예외]", e); return null; }
   },
@@ -518,13 +520,23 @@ function softenPauseReason(raw) {
   const text = raw.trim();
   if (!text) return "";
   if (PAUSE_REASON_MAP[text]) return PAUSE_REASON_MAP[text];
+  // ★ [중단 사유 여러 개] 빠른 사유를 여러 개 고르면 "일반화 어려움, 우선순위 조정"처럼 쉼표로 이어진다.
+  //    예전엔 이어진 글 전체를 아래 규칙에 넣어서 '어려움'에 걸려 "난이도 재조정…"으로 바뀌었다.
+  //    하나씩 나눠 바꾼 뒤 잇는다.
+  const parts = text.split(/\s*[,，]\s*/).map(x => x.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    const out = [];
+    parts.forEach(p => { const s = softenPauseReason(p); if (s && !out.includes(s)) out.push(s); });
+    return out.map(s => /[.다]$/.test(s) ? s : s + ".").join(" ");
+  }
   const NEG_PATTERNS = [
+    // ★ [보호자 사유 먼저] "부모 거부"가 아래 '거부'(아동 정서) 규칙에 먼저 걸려 아이 탓처럼 바뀌었다
+    { re: /부모\s*거부|보호자\s*거부|부모\s*반대|보호자\s*반대|가정\s*반대/, soft: "가정과의 충분한 소통을 거쳐 협의된 방향으로 재개 예정" },
     { re: /너무\s*어렵|너무\s*힘들|어려워|어려움|난이도\s*높/, soft: "난이도 재조정 및 세부 단계 분석(Task Analysis) 후 재개 예정" },
     { re: /못\s*함|못함|못해|불가능|안\s*됨|안됨|실패/, soft: "충분한 선행 기술을 다진 후 단계적으로 재개 예정" },
     { re: /거부|싫어함|싫어|짜증|울음|문제행동/, soft: "아동의 정서적 안정과 학습 동기를 우선 고려하여 적절한 시점에 재개 예정" },
     { re: /지루|흥미\s*없|관심\s*없|동기\s*없|재미\s*없/, soft: "강화제 재평가 및 흥미 유발 요소 보완 후 재개 예정" },
-    { re: /시간\s*부족|시간\s*없|일정/, soft: "회기 일정 조정을 통해 충분한 연습 시간 확보 후 재개 예정" },
-    { re: /부모\s*거부|보호자\s*반대|가정\s*반대/, soft: "가정과의 충분한 소통을 거쳐 협의된 방향으로 재개 예정" }
+    { re: /시간\s*부족|시간\s*없|일정/, soft: "회기 일정 조정을 통해 충분한 연습 시간 확보 후 재개 예정" }
   ];
   for (const p of NEG_PATTERNS) {
     if (p.re.test(text)) return p.soft;
@@ -1427,60 +1439,101 @@ const ELCAR_VBMAPP_MAP = [
 ];
 
 const ELCAR_ESDM_MAP = [
-  { k: "손 씻기", v: "자조: 식사", lv: "레벨2(19-24개월)" },
-  { k: "화장실", v: "자조: 식사", lv: "레벨3(25-36개월)" },
-  { k: "점심 먹기", v: "자조: 식사", lv: "레벨2(19-24개월)" },
-  { k: "인사에 반응", v: "사회기술: 어른/친구", lv: "레벨2(19-24개월)" },
-  { k: "인사 개시", v: "사회기술: 어른/친구", lv: "레벨3(25-36개월)" },
-  { k: "눈 맞춤", v: "사회기술: 어른/친구", lv: "레벨2(19-24개월)" }, { k: "눈 맞추기", v: "사회기술: 어른/친구", lv: "레벨2(19-24개월)" }, { k: "눈맞춤", v: "사회기술: 어른/친구", lv: "레벨2(19-24개월)" },
-  { k: "차례", v: "사회기술: 어른/친구", lv: "레벨3(25-36개월)" },
-  { k: "공유", v: "사회기술: 어른/친구", lv: "레벨3(25-36개월)" },
-  { k: "호명 반응", v: "수용 언어", lv: "레벨1(12-18개월)" },
-  { k: "지시 따르", v: "수용 언어", lv: "레벨2(19-24개월)" },
-  { k: "평행놀이", v: "놀이", lv: "레벨2(19-24개월)" },
-  { k: "협동 놀이", v: "놀이", lv: "레벨3(25-36개월)" },
-  { k: "놀이 참여", v: "놀이", lv: "레벨2(19-24개월)" },
-  { k: "도움", v: "표현 언어", lv: "레벨2(19-24개월)" },
-  { k: "요청", v: "표현 언어", lv: "레벨1(12-18개월)" },
-  { k: "착석", v: "수용 언어", lv: "레벨2(19-24개월)" },
-  { k: "줄 서기", v: "수용 언어", lv: "레벨2(19-24개월)" },
-  { k: "잠재적 강화제", v: "놀이", lv: "레벨1(12-18개월)" },
-  { k: "자유 놀이 관찰", v: "놀이", lv: "레벨1(12-18개월)" },
-  { k: "공동주의", v: "합동 주시 행동", lv: "레벨2(19-24개월)" },
-  { k: "교수 준비도", v: "수용 언어", lv: "레벨1(12-18개월)" },
-  { k: "학교 자조", v: "자조: 식사", lv: "레벨2(19-24개월)" },
-  { k: "학교 상호작용", v: "사회기술: 어른/친구", lv: "레벨2(19-24개월)" },
-  { k: "화자 기초", v: "표현 언어", lv: "레벨1(12-18개월)" },
-  { k: "시각 자극 통제", v: "인지", lv: "레벨1(12-18개월)" },
-  { k: "음성 지시", v: "수용 언어", lv: "레벨2(19-24개월)" },
-  { k: "초기 화자", v: "표현 언어", lv: "레벨2(19-24개월)" },
-  { k: "맨드", v: "표현 언어", lv: "레벨2(19-24개월)" },
-  { k: "택트", v: "표현 언어", lv: "레벨3(25-36개월)" },
-  { k: "인트라버벌", v: "표현 언어", lv: "레벨3(25-36개월)" },
-  { k: "모방", v: "모방", lv: "레벨1(12-18개월)" },
-  { k: "매칭", v: "인지", lv: "레벨2(19-24개월)" },
-  { k: "일반 지식", v: "인지", lv: "레벨3(25-36개월)" }, { k: "일반지식", v: "인지", lv: "레벨3(25-36개월)" },
-  { k: "개념", v: "인지", lv: "레벨3(25-36개월)" },
-  { k: "읽기", v: "인지", lv: "레벨4(37-48개월)" },
-  { k: "수학", v: "인지", lv: "레벨4(37-48개월)" },
-  { k: "쓰기", v: "소근육 운동", lv: "레벨3(25-36개월)" },
-  { k: "쓰는 근육", v: "소근육 운동", lv: "레벨2(19-24개월)" },
-  { k: "학급 조작물", v: "소근육 운동", lv: "레벨3(25-36개월)" },
-  { k: "대근육", v: "대근육 운동", lv: "레벨2(19-24개월)" }
+  // ★ [ESDM 연결 정정 · 2026-11 원장 결정] 손 씻기 → 자조기술: 위생, 화장실 → 개인적 독립: 위생
+  { k: "손 씻기", v: "자조기술: 위생", lv: "레벨 2 (19~24개월)" },
+  { k: "화장실", v: "개인적 독립: 위생", lv: "레벨 3 (25~36개월)" },
+  { k: "점심 먹기", v: "자조기술: 식사", lv: "레벨 2 (19~24개월)" },
+  { k: "인사에 반응", v: "사회기술: 어른 혹은 친구", lv: "레벨 2 (19~24개월)" },
+  { k: "인사 개시", v: "사회기술: 어른과 동료", lv: "레벨 3 (25~36개월)" },
+  { k: "눈 맞춤", v: "사회기술: 어른 혹은 친구", lv: "레벨 2 (19~24개월)" }, { k: "눈 맞추기", v: "사회기술: 어른 혹은 친구", lv: "레벨 2 (19~24개월)" }, { k: "눈맞춤", v: "사회기술: 어른 혹은 친구", lv: "레벨 2 (19~24개월)" },
+  { k: "차례", v: "사회기술: 어른과 동료", lv: "레벨 3 (25~36개월)" },
+  { k: "공유", v: "사회기술: 어른과 동료", lv: "레벨 3 (25~36개월)" },
+  { k: "호명 반응", v: "수용 언어", lv: "레벨 1 (12~18개월)" },
+  { k: "지시 따르", v: "수용 언어", lv: "레벨 2 (19~24개월)" },
+  // ★ [ESDM 연결 정정 · 2026-11 원장 결정] 레벨 2 놀이는 '놀이: 독립적 놀이'로
+  { k: "평행놀이", v: "놀이: 독립적 놀이", lv: "레벨 2 (19~24개월)" },
+  { k: "협동 놀이", v: "놀이", lv: "레벨 3 (25~36개월)" },
+  { k: "놀이 참여", v: "놀이: 독립적 놀이", lv: "레벨 2 (19~24개월)" },
+  { k: "도움", v: "표현 언어", lv: "레벨 2 (19~24개월)" },
+  { k: "요청", v: "표현 언어", lv: "레벨 1 (12~18개월)" },
+  { k: "착석", v: "수용 언어", lv: "레벨 2 (19~24개월)" },
+  { k: "줄 서기", v: "수용 언어", lv: "레벨 2 (19~24개월)" },
+  { k: "잠재적 강화제", v: "놀이", lv: "레벨 1 (12~18개월)" },
+  { k: "자유 놀이 관찰", v: "놀이", lv: "레벨 1 (12~18개월)" },
+  { k: "공동주의", v: "합동 주시 행동", lv: "레벨 2 (19~24개월)" },
+  { k: "교수 준비도", v: "수용 언어", lv: "레벨 1 (12~18개월)" },
+  { k: "학교 자조", v: "자조기술: 식사", lv: "레벨 2 (19~24개월)" },
+  { k: "학교 상호작용", v: "사회기술: 어른 혹은 친구", lv: "레벨 2 (19~24개월)" },
+  { k: "화자 기초", v: "표현 언어", lv: "레벨 1 (12~18개월)" },
+  { k: "시각 자극 통제", v: "인지", lv: "레벨 1 (12~18개월)" },
+  { k: "음성 지시", v: "수용 언어", lv: "레벨 2 (19~24개월)" },
+  { k: "초기 화자", v: "표현 언어", lv: "레벨 2 (19~24개월)" },
+  { k: "맨드", v: "표현 언어", lv: "레벨 2 (19~24개월)" },
+  { k: "택트", v: "표현 언어", lv: "레벨 3 (25~36개월)" },
+  { k: "인트라버벌", v: "표현 언어", lv: "레벨 3 (25~36개월)" },
+  { k: "모방", v: "모방", lv: "레벨 1 (12~18개월)" },
+  { k: "매칭", v: "인지", lv: "레벨 2 (19~24개월)" },
+  { k: "일반 지식", v: "인지", lv: "레벨 3 (25~36개월)" }, { k: "일반지식", v: "인지", lv: "레벨 3 (25~36개월)" },
+  { k: "개념", v: "인지", lv: "레벨 3 (25~36개월)" },
+  { k: "읽기", v: "인지", lv: "레벨 4 (37~48개월)" },
+  { k: "수학", v: "인지", lv: "레벨 4 (37~48개월)" },
+  { k: "쓰기", v: "소근육", lv: "레벨 3 (25~36개월)" },
+  { k: "쓰는 근육", v: "소근육 운동", lv: "레벨 2 (19~24개월)" },
+  { k: "학급 조작물", v: "소근육", lv: "레벨 3 (25~36개월)" },
+  { k: "대근육", v: "대근육 운동", lv: "레벨 2 (19~24개월)" }
 ];
 
 const ESDM_GOALS = {
   "수용 언어": ["이름 부르면 쳐다보기", "고개 돌려 말하는 사람 바라보기", "간단한 일상적 지시 따르기", "기초적인 공간개념 이해", "2단계 지시 따르기"],
   "표현 언어": ["요청 의미로 손 뻗기", "의도적으로 소리 내기", "명사+동사 2단어 조합", "다양한 자음 소리 자발적", "WH질문에 대답"],
   "합동 주시 행동": ["'이거 봐' 물건 제시 반응", "'저기 봐' 멀리 가리키면 반응", "교사 눈 쳐다보며 물건 주고받기", "자발적으로 물건 보여주기"],
-  "사회기술: 어른/친구": ["인사에 반응하기", "눈맞춤 유지", "상대방 요구 시 물건 공유", "놀이시 차례 지키기"],
+  "사회기술: 어른 혹은 친구": ["인사에 반응하기", "눈맞춤 유지", "상대방 요구 시 물건 공유", "놀이시 차례 지키기"],
+  "사회기술: 어른과 동료": ["인사에 반응하기", "눈맞춤 유지", "상대방 요구 시 물건 공유", "놀이시 차례 지키기"],
   "모방": ["물체 활동 8~10가지 모방", "볼 수 있는 동작 10가지 모방", "구강-얼굴 동작 모방", "여러 단계 연쇄 모방"],
   "인지": ["같은 사물끼리 짝 맞추기", "색깔·도형 분류", "범주에 따라 분류", "반대어 이해", "크기·양 개념"],
   "놀이": ["장난감 기능에 맞게 놀기", "놀이 끝내고 치우기", "독립적 놀이 10분", "놀이 주제 따라 행동"],
+  // 레벨 2 놀이 연결을 '놀이: 독립적 놀이'로 옮기면서, 그동안 보이던 놀이 예시 목록을 그대로 보이게 둔다
+  "놀이: 독립적 놀이": ["장난감 기능에 맞게 놀기", "놀이 끝내고 치우기", "독립적 놀이 10분", "놀이 주제 따라 행동"],
   "소근육 운동": ["크레파스로 낙서·선·마크", "가위로 종이 자르기", "퍼즐 혼자 맞추기", "블록·레고 따라 만들기"],
+  "소근육": ["크레파스로 낙서·선·마크", "가위로 종이 자르기", "퍼즐 혼자 맞추기", "블록·레고 따라 만들기"],
   "대근육 운동": ["공 던지기·받기", "한 발로 서기", "점프하기", "목표 지점으로 공차기"],
-  "자조: 식사": ["스스로 컵·숟가락 사용", "다양한 음식 먹기", "식사 독립적으로"]
+  "자조기술: 식사": ["스스로 컵·숟가락 사용", "다양한 음식 먹기", "식사 독립적으로"]
 };
+
+// ★ [ESDM 이름 맞추기] ELCAR→ESDM 추천표의 영역·레벨 이름이 실제 ESDM 목록과 달랐다
+//    ("자조: 식사" ↔ "자조기술: 식사", "레벨2(19-24개월)" ↔ "레벨 2 (19~24개월)").
+//    추천표는 실제 이름으로 바꿨고, 이미 저장된 목표에 남아 있는 옛 이름은 화면·인쇄에서 아래로 바꿔 보여 준다.
+//    (같은 레벨에 그 이름의 영역이 하나뿐일 때만 바꾼다 — 둘 이상이면 임상 판단이라 그대로 둔다)
+const ESDM_OLD_NAME_BY_LEVEL = {
+  "사회기술: 어른/친구": { 2: "사회기술: 어른 혹은 친구", 3: "사회기술: 어른과 동료" },
+  "소근육 운동": { 3: "소근육" },
+  "자조: 식사": { 2: "자조기술: 식사" }
+};
+// 원장 결정으로 연결 영역을 옮긴 항목 — 이미 저장된 목표도 같은 이름으로 보이게 한다 (k = 연결 낱말)
+const ESDM_MOVED_BY_KEY = {
+  "손 씻기": "자조기술: 위생",
+  "화장실": "개인적 독립: 위생",
+  "평행놀이": "놀이: 독립적 놀이",
+  "놀이 참여": "놀이: 독립적 놀이"
+};
+function normEsdm(e) {
+  if (!e || typeof e !== "object") return e;
+  if (e.k && ESDM_MOVED_BY_KEY[e.k]) {
+    const moved = ESDM_MOVED_BY_KEY[e.k];
+    const lm = String(e.lv || "").match(/^레벨\s*(\d)\s*\((\d+)\s*[-~]\s*(\d+)\s*개월\)$/);
+    const lv2 = lm ? `레벨 ${lm[1]} (${lm[2]}~${lm[3]}개월)` : e.lv;
+    if (moved === e.v && lv2 === e.lv) return e;
+    return { ...e, v: moved, lv: lv2 };
+  }
+  const lvStr = String(e.lv || "");
+  const m = lvStr.match(/^레벨\s*(\d)\s*\((\d+)\s*[-~]\s*(\d+)\s*개월\)$/);
+  const lvNum = m ? parseInt(m[1], 10) : null;
+  const lv = m ? `레벨 ${m[1]} (${m[2]}~${m[3]}개월)` : e.lv;
+  const ren = ESDM_OLD_NAME_BY_LEVEL[e.v];
+  const v = (ren && lvNum && ren[lvNum]) ? ren[lvNum] : e.v;
+  if (v === e.v && lv === e.lv) return e;
+  return { ...e, v, lv };
+}
 
 function findMapping(elcarText) {
   const t = elcarText || "";
@@ -1672,6 +1725,11 @@ function buildSummary(stosForReport, info) {
 
 function buildBehaviorChange(selected, info) {
   if (!selected || selected.length === 0) return "";
+  // ★ [없음+다른 칩] '특이 문제행동 없음'과 다른 변화를 같이 고르면 "없었습니다"와 "줄었습니다"가 함께 나갔다.
+  //    다른 변화가 하나라도 있으면 '없음'은 뺀다(화면에서도 둘을 같이 못 고르게 했다).
+  if (selected.includes("특이 문제행동 없음") && selected.length > 1) {
+    selected = selected.filter(x => x !== "특이 문제행동 없음");
+  }
   const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
 
   const has받침 = (word) => {
@@ -2447,7 +2505,9 @@ function buildIepReferralReason(selected, info) {
     "또래 상호작용 어려움":   { cat: "social", desc: "또래와의 상호작용 및 협동 놀이의 어려움" },
     "눈맞춤·공동주의 부족":  { cat: "social", desc: "눈맞춤 교환이나 공동주의 행동의 부족" },
     "사회적 단서 이해 부족":  { cat: "social", desc: "표정·몸짓 등 사회적 신호 변별의 어려움" },
-    "도전 행동":               { cat: "behav",  desc: "감정 표현이나 좌절 상황에서의 떼쓰기, 자해, 공격적 행동" },
+    // ★ [도전 행동 예시 제거] "떼쓰기, 자해, 공격적 행동"을 고정으로 적어, 자해·공격이 없던 아동에게도 찍혔다
+    //    (중간보고서에서는 같은 이유로 이미 뺐다). 실제 행동명은 도전적 행동 입력란에 적는다.
+    "도전 행동":               { cat: "behav",  desc: "감정 표현이나 좌절 상황에서 나타나는 도전적 행동" },
     "자기자극·상동 행동":    { cat: "behav",  desc: "활동 참여를 방해하는 반복적인 자기자극 행동" },
     "변화·전환 어려움":      { cat: "behav",  desc: "환경이나 일과 변화 시 전환 적응의 어려움" },
     "자조 기술 부족":          { cat: "adapt",  desc: "식사, 옷 입기, 화장실 사용 등 일상생활 기술이 또래 수준에 미달한 상태" },
@@ -2646,7 +2706,9 @@ function buildReferralReason(selected, info) {
     "또래 상호작용 어려움":   { cat: "social", desc: "또래와의 상호작용 및 협동 놀이의 어려움" },
     "눈맞춤·공동주의 부족":  { cat: "social", desc: "눈맞춤 교환이나 공동주의 행동의 부족" },
     "사회적 단서 이해 부족":  { cat: "social", desc: "표정·몸짓 등 사회적 신호 변별의 어려움" },
-    "도전 행동":               { cat: "behav",  desc: "감정 표현이나 좌절 상황에서의 떼쓰기, 자해, 공격적 행동" },
+    // ★ [도전 행동 예시 제거] "떼쓰기, 자해, 공격적 행동"을 고정으로 적어, 자해·공격이 없던 아동에게도 찍혔다
+    //    (중간보고서에서는 같은 이유로 이미 뺐다). 실제 행동명은 도전적 행동 입력란에 적는다.
+    "도전 행동":               { cat: "behav",  desc: "감정 표현이나 좌절 상황에서 나타나는 도전적 행동" },
     "자기자극·상동 행동":    { cat: "behav",  desc: "활동 참여를 방해하는 반복적인 자기자극 행동" },
     "변화·전환 어려움":      { cat: "behav",  desc: "환경이나 일과 변화 시 전환 적응의 어려움" },
     "자조 기술 부족":          { cat: "adapt",  desc: "식사, 옷 입기, 화장실 사용 등 일상생활 기술이 또래 수준에 미달한 상태" },
@@ -2815,7 +2877,11 @@ function buildEndReason(selected, info) {
     body = `${front}, 그리고 ${endStop(closeClause(descs[descs.length - 1]))} 이러한 진행에 따라 본 치료를 종결하게 되었습니다.`;
   }
 
-  const closing = `본 종결은 ${fn}의 다음 발달 단계로의 이행 시점에 해당하며, 본 치료 기간 동안의 협력에 감사드립니다.`;
+  // ★ [종결 사유 마무리] 예전엔 사유가 '가족 사정(이사)'이어도 늘 "다음 발달 단계로의 이행 시점에 해당하며"로 끝났다.
+  //    '다음 단계 이행'을 고른 경우에만 그 말을 쓴다.
+  const closing = selected.includes("다음 단계 이행")
+    ? `본 종결은 ${fn}의 다음 발달 단계로의 이행 시점에 해당하며, 본 치료 기간 동안의 협력에 감사드립니다.`
+    : `본 치료 기간 동안의 협력에 감사드립니다.`;
 
   return `${intro} ${body} ${closing}`;
 }
@@ -2992,7 +3058,7 @@ function buildFinalSummary(goals, info, periodEnd, stos) {
       para2Parts.push(`이는 ${fn}의 학습 환경 적응과 단계적 과제 수행이 효과적으로 이루어졌음을 나타내는 결과입니다.`);
     } else if (masterPct >= 60) {
       para2Parts.push(`치료 기간 동안 다수의 학습 과제를 안정적으로 습득하였으며, 단계적 학습 진행이 확인되었습니다.`);
-      para2Parts.push(`습득된 기술은 회기 내 수행에 그치지 않고 ${fn}의 일상 환경에서도 발현되어 일반화 양상이 관찰되었습니다.`);
+      // ★ [근거 없는 문장 제거] "일상 환경에서도 발현되어 일반화 양상이 관찰" — 앱에 일상 환경 관찰 기록이 없다.
     } else if (masterPct >= 30) {
       para2Parts.push(`치료 기간 동안 일부 과제에서 목표 수준에 도달하였으며, 나머지 과제도 단계적 진전을 보였습니다.`);
       para2Parts.push(`영역별 단계적 성취가 누적되어 학습 진행이 확인되었습니다.`);
@@ -3029,13 +3095,13 @@ function buildFinalSummary(goals, info, periodEnd, stos) {
             `이러한 결과는 ${para3pre1}`;
   } else if (topDomains.length === 2) {
     const [t1, t2] = topDomains;
-    para3 = `${t1.domain} 영역에서는 ${t1.firstAvg}%에서 ${t1.lastAvg}%로 ${t1.change}%p의 향상이 확인되었으며, ${t2.domain} 영역에서도 ${t2.change}%p의 향상이 동반되어 ${fn}의 강점 영역으로 확인되었습니다. ` +
-            `이 영역의 변화는 정확도 향상에 그치지 않고 학습 참여도에도 영향을 미친 것으로 관찰되었습니다.`;
+    // ★ [근거 없는 문장 제거] "학습 참여도에도 영향을 미친 것으로 관찰" — 참여도는 기록하지 않는다.
+    para3 = `${t1.domain} 영역에서는 ${t1.firstAvg}%에서 ${t1.lastAvg}%로 ${t1.change}%p의 향상이 확인되었으며, ${t2.domain} 영역에서도 ${t2.change}%p의 향상이 동반되어 ${fn}의 강점 영역으로 확인되었습니다.`;
   } else if (topDomains.length === 1) {
     const t1 = topDomains[0];
     if (t1.change >= 20) {
-      para3 = `${t1.domain} 영역에서는 ${t1.firstAvg}%에서 ${t1.lastAvg}%로 ${t1.change}%p의 유의한 향상이 확인되어, ${fn}의 강점 영역으로 확인되었습니다. ` +
-              `해당 영역의 안정적 진행이 다른 영역의 학습에도 기반으로 작용하였습니다.`;
+      // ★ [근거 없는 문장 제거] "다른 영역의 학습에도 기반으로 작용" — 영역 사이의 영향은 측정하지 않는다.
+      para3 = `${t1.domain} 영역에서는 ${t1.firstAvg}%에서 ${t1.lastAvg}%로 ${t1.change}%p의 유의한 향상이 확인되어, ${fn}의 강점 영역으로 확인되었습니다.`;
     } else {
       para3 = `${t1.domain} 영역에서는 시작 시점 대비 ${t1.change}%p 향상이 확인되었으며, 다른 영역도 단계적인 진전을 보였습니다.`;
     }
@@ -3045,8 +3111,8 @@ function buildFinalSummary(goals, info, periodEnd, stos) {
     para4 = `${totalPaused}개 과제는 ${fn}의 발달 흐름과 학습 동기를 고려하여 우선순위를 조정하거나 일시 중단하였습니다. 이는 단순 미달성이 아닌, ${fn}의 현재 발달 시점에 적합한 학습 경로 설정에 따른 임상적 판단이며, 향후 적절한 시기에 재구성하여 도입할 것을 권고드립니다.`;
   }
 
-  let para5 = `${fn}의 본 치료 기간 동안의 학습 결과가 누적되어 발달적 진전이 확인되었으며, ` +
-              `보호자의 일관된 가정 협력이 학습 안정성 유지에 기여하였습니다. ` +
+  // ★ [근거 없는 문장 제거] "보호자의 일관된 가정 협력이 기여" — 모든 아동에게 늘 들어가던 문장이다.
+  let para5 = `${fn}의 본 치료 기간 동안의 학습 결과가 누적되어 발달적 진전이 확인되었습니다. ` +
               `본 종결 시점까지 형성된 학습 기반과 적응 능력은 ${fn}${josa이가(fn)} 향후 마주할 새로운 환경에서도 활용 가능한 자원이 될 것으로 판단됩니다.`;
 
   return [para1, para2, para3, para4, para5].filter(Boolean).join("\n\n");
@@ -3107,12 +3173,8 @@ function buildFinalGrowth(goals, info, stos) {
 
   const paragraphs = [];
 
-  if (firstSessionDate) {
-    const intro = `치료 초기에 ${fn}${josa은는(fn)} 새로운 환경과 평가 상황에 적응하는 과정에 있었습니다. ` +
-                  `낯선 공간, 새로운 치료사, 신규 학습 도구 사이에서 ${fn}${josa은는(fn)} 단계적으로 환경을 탐색하였으며, ` +
-                  `초기 회기의 신중한 양상은 학습 시작 전의 적응 단계로 확인됩니다.`;
-    paragraphs.push(intro);
-  }
+  // ★ [근거 없는 문장 제거] 첫 문단 "낯선 공간, 새로운 치료사 … 단계적으로 환경을 탐색" — 기록이 있는 모든 아동에게
+  //    같은 문장이 들어갔다. 초기 적응 과정은 앱이 기록하지 않으므로 뺀다.
 
   // ★ [57-13] 학습 곡선의 세 값을 목표(goal) 단위로 낸다.
   //    기존엔 전 목표의 모든 점을 한 통에 넣고 3등분해서, 목표를 많이 추가한 시기의
@@ -3179,14 +3241,15 @@ function buildFinalGrowth(goals, info, stos) {
     //    이미 각자 '새 목표가 낮은 값에서 출발' 설명을 갖고 있어 중복이라 뺀다.
     const graphNote = `회기별 전체 목표 평균을 그린 '성장 추이' 그래프는 새 목표·새 단계가 투입될 때마다 낮은 값에서 다시 출발하므로, 위 수치와 흐름이 다르게 보일 수 있습니다.`;
     if (rise >= 25 && dip < 10) {
+      // ★ [근거 없는 문장 제거] "학습 동기 유지와 능동적 참여의 결과로 해석" — 동기·참여는 기록하지 않는다.
       timeline = `학습 곡선 분석 결과(${unit}), 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 향상이 확인되었습니다. ` +
-                 `이는 단기적 향상이 아닌 치료 기간 전반에 걸친 학습 동기 유지와 능동적 참여의 결과로 해석됩니다. ` +
                  graphNote;
     } else if (rise >= 5 && dip < 10) {
       // ★ [57-16] 기준을 10 → 5로 내린다. 9%p일 때 표지는 "올랐습니다",
       //    종합 평가는 "9%p 향상되어"인데 곡선만 "큰 기복 없이"라고 적어 톤이 어긋났다.
+      // ★ [근거 없는 문장 제거] "보호자의 지속적 지원이 기여" — 늘 들어가던 문장
       timeline = `학습 곡선 분석 결과(${unit}), 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%까지 안정적인 향상이 확인되었습니다. ` +
-                 `회기 누적에 따른 점진적 변화 양상으로, 보호자의 지속적 지원이 학습 진행에 기여하였습니다. ` +
+                 `회기 누적에 따른 점진적 변화 양상입니다. ` +
                  graphNote;
     } else if (dip >= 10 && rise > 0) {
       // 중반이 정점, 종결이 그보다 낮음 — 전체로는 올랐지만 "일관된 향상"은 아니다.
@@ -3196,8 +3259,8 @@ function buildFinalGrowth(goals, info, stos) {
       timeline = `학습 곡선 분석 결과(${unit}), 초기 ${earlyAvg}% 수준에서 중반 ${midAvg}%, 종결 시점 ${lateAvg}%로 나타났습니다. ` +
                  `종결 시점 평균이 초기보다 낮으므로, 보고 기간 후반에 추가된 목표의 난이도와 목표별 개별 추이를 함께 확인해 주시기 바랍니다.`;
     } else if (lateAvg >= 75) {
+      // ★ [근거 없는 문장 제거] "학습 환경 적응이 신속히 이루어지고" — 적응 속도는 기록하지 않는다.
       timeline = `${fn}${josa은는(fn)} 초기 ${earlyAvg}% 수준에서 종결 시점 ${lateAvg}%로(${unit}), 치료 기간 전반에 걸쳐 안정적인 학습 수행을 유지하였습니다. ` +
-                 `이는 학습 환경 적응이 신속히 이루어지고 안정적인 학습 수행 양상이 형성되었음을 나타냅니다. ` +
                  graphNote;
     } else {
       // ★ [57-14] 기존 문구는 종결 시점 값을 "치료 기간 동안 평균"이라고 불렀다.
@@ -3230,22 +3293,13 @@ function buildFinalGrowth(goals, info, stos) {
     paragraphs.push(milestone.replace(/\(가\)/g, i_ga));
   }
 
-  const attitudeText = `정량 지표 외에 다음의 비계량적 변화도 관찰되었습니다. ` +
-                       `${fn}${josa은는(fn)} 회기 누적에 따라 신규 과제 시도 빈도가 증가하였고, 오류 발생 시 재시도 양상이 안정적으로 관찰되었습니다. ` +
-                       `치료사·또래와의 상호작용에서 표정 변화와 자기 표현 빈도의 증가도 확인되었습니다. ` +
-                       `이러한 비계량적 변화는 ${fn}의 학습 환경 적응과 자기 효능감 형성을 나타내는 지표로 확인됩니다.`;
-  paragraphs.push(attitudeText.replace(/\(가\)/g, i_ga));
-
-  if (totalMastered > 0) {
-    const homeText = `회기 내 변화는 가정과 일상 환경으로도 일반화되었습니다. ` +
-                     `습득 기술 중 일부는 보호자의 관찰을 통해 가정에서도 발현이 확인되었으며, ` +
-                     `이는 ${fn}의 학습이 회기 내 수행에 그치지 않고 일상 환경 내에서도 유지·확장되고 있음을 나타냅니다. ` +
-                     `보호자의 일관된 가정 협력이 일반화 형성에 기여하였습니다.`;
-    paragraphs.push(homeText.replace(/\(가\)/g, i_ga));
-  }
+  // ★ [근거 없는 문장 제거] 아래 두 문단은 데이터와 상관없이 모든 아동에게 들어갔다.
+  //    · '비계량적 변화' 문단 — 시도 빈도·재시도·표정·자기 표현·또래 상호작용은 앱이 기록하지 않는다
+  //      (중간보고서에서는 같은 이유로 또래 문장을 이미 지웠다).
+  //    · '가정 일반화' 문단 — 습득 과제가 하나라도 있으면 "보호자 관찰로 가정에서도 발현 확인"이 나갔다.
+  //    가정·일상 변화를 쓰시려면 '도전적 행동 변화'·'가정에서의 유지 방안' 칸에 직접 적으시면 된다.
 
   const closing = `이상의 결과는 ${fn}의 본 치료 기간 동안의 단계적 학습 진행을 종합한 내용입니다. ` +
-                  `정량 지표 외에 회기별 시도와 보호자의 지원이 학습 안정성 유지에 기여하였습니다. ` +
                   `본 종결 시점까지 형성된 학습 경험과 적응 능력은 향후 ${fn}${josa이가(fn)} 마주할 새로운 환경에서도 활용 가능한 자원으로 작용할 것으로 판단됩니다.`;
   paragraphs.push(closing);
 
@@ -3375,7 +3429,15 @@ const DOMAIN_CONTEXT = {
 // 영역명에서 로마숫자·번호 접두어 제거 (DOMAIN_CONTEXT 매칭용)
 function cleanDomainKey(domain) {
   if (!domain) return "";
-  return domain.replace(/^[Ⅰ-Ⅺ\dIVX]+\s*[·.]?\s*/, "").trim();
+  // ★ [영역 이름 앞글자] 예전엔 맨 앞의 영문 I·V·X와 숫자를 무조건 로마숫자로 보고 떼어
+  //    "VB-MAPP 맨드" → "B-MAPP 맨드", "2단어 조합" → "단어 조합"이 됐다.
+  //    로마숫자 글자(Ⅰ·Ⅱ…)는 그대로 떼고, 영문 I·V·X나 숫자는 뒤에 점·괄호가 붙은 번호일 때만
+  //    ("I. ", "2) ") 또는 영문 로마숫자 뒤에 띄어쓰고 한글이 올 때만("IV 언어") 뗀다.
+  return String(domain)
+    .replace(/^[Ⅰ-Ⅻ]+\s*[·.)]?\s*/, "")
+    .replace(/^(?:[IVX]+|\d+)\s*[·.)]\s*/, "")
+    .replace(/^[IVX]+\s+(?=[가-힣])/, "")
+    .trim();
 }
 
 // ★ [58-1] 영역명 유사 알림 — '기타 영역 추가' 창 전용.
@@ -3706,7 +3768,9 @@ function buildStartEndCompare(stos, goals) {
 
   // ② 마스터 진척 — 과제(STO) 개수. O·X 목표도 "달성했는가"는 셀 수 있으므로 여기선 제외하지 않는다.
   (goals || []).forEach(g => {
-    if (!g.includeInIep) return;
+    // ★ [숫자 맞추기] 보고서의 다른 칸(표지·영역별 균형)은 데이터시트에 올린 목표만 센다.
+    //    여기만 IEP 목표 전부를 세서 "3개 중 1개" / "5개 중 2개"처럼 한 보고서 안에서 숫자가 갈렸다.
+    if (!g.includeInIep || !g.showInDaily) return;
     const b = bucket(reportDomainOf(g));
     (g.tasks || []).forEach(t => {
       const lg = t.listGroup || "1";
@@ -4231,7 +4295,8 @@ function goalQuotableForAvg(goal) {
 }
 
 function generateCurrentLevel(goal) {
-  const { domain, subDomain, item, note, vbmapp, esdm, source } = goal;
+  const { domain, subDomain, item, note, vbmapp, source } = goal;
+  const esdm = normEsdm(goal.esdm);   // ★ [ESDM 이름 맞추기]
 
   const rated = getCombinedDailySeries(goal);
   const sessions = rated.length;
@@ -4298,7 +4363,8 @@ function getCurrentLevel(goal) {
 }
 
 function generateRationale(goal) {
-  const { domain, item, vbmapp, esdm } = goal;
+  const { domain, item, vbmapp } = goal;
+  const esdm = normEsdm(goal.esdm);   // ★ [ESDM 이름 맞추기]
   let rationale = `'${item}'${withParticle(item, "은", "는")} ${domain} 영역의 핵심 선행 기술로, 후속 학습 목표의 기반이 되는 능력입니다. `;
   rationale += `사전 평가에서 본 아동의 현 단계에 적합한 출발점으로 도출되어 IEP 목표로 선정되었으며, `;
   if (vbmapp) rationale += `VB-MAPP의 ${vbmapp.v} 영역(레벨 ${vbmapp.lv})과 연계하여 `;
@@ -4368,7 +4434,7 @@ function generateCurriculumDescription(source, items, allGoals) {
   }
 
   if (source === "ESDM") {
-    const esdmDomains = [...new Set(items.filter(g => g.esdm).map(g => g.esdm.v))];
+    const esdmDomains = [...new Set(items.filter(g => g.esdm).map(g => normEsdm(g.esdm).v))];
     const esdmList = esdmDomains.slice(0, 5).join("·");
     if (!esdmList) {
       return `ESDM 발달 평가 기반으로 ${goalCount}개 목표가 본 아동의 현 단계에 적합한 학습 목표로 도출되었습니다. 놀이 중심의 자연주의 교수법으로 일상 속 일반화를 강조하여 지도합니다.`;
@@ -4388,7 +4454,8 @@ function generateCurriculumDescription(source, items, allGoals) {
     const topNames = topDomains.map(([n, c]) => `${n}(${c}개)`).join("·");
     s += `특히 ${topNames} 영역의 목표가 많으며, `;
   }
-  s += `표준 커리큘럼 외에도 개별 아동의 필요에 부합하는 영역에 대해 체계적인 중재를 진행합니다.`;
+  // ★ [이름 바꾸기] "개별 아동의 필요"는 인쇄할 때 '아동'이 아이 이름으로 바뀌어 "개별 하나의 필요"가 됐다
+  s += `표준 커리큘럼 외에도 개별적인 필요에 부합하는 영역에 대해 체계적인 중재를 진행합니다.`;
   return s;
 }
 
@@ -4491,7 +4558,7 @@ function generateDomainLevel(domain, goalsInDomain) {
   const recentAvg = recentRates.length > 0 ? Math.round(recentRates.reduce((a, b) => a + b, 0) / recentRates.length) : null;
 
   const vbmappDomains = [...new Set(goalsInDomain.filter(g => g.vbmapp).map(g => `${g.vbmapp.v}(L${g.vbmapp.lv})`))];
-  const esdmDomains = [...new Set(goalsInDomain.filter(g => g.esdm).map(g => g.esdm.v))];
+  const esdmDomains = [...new Set(goalsInDomain.filter(g => g.esdm).map(g => normEsdm(g.esdm).v))];
 
   const lines = [];
 
@@ -4549,7 +4616,7 @@ function generatePLPText(domain, goalsInDomain) {
   const esdmList = goalsInDomain.filter(g => g.esdm && g.source === "ESDM");
   const recommended = goalsInDomain.filter(g => g.isRecommended && (g.source === "VB-MAPP" || g.source === "ESDM"));
   const vbmappDomains = [...new Set(vbmappList.map(g => `${g.vbmapp.v}(L${g.vbmapp.lv})`))];
-  const esdmDomains = [...new Set(esdmList.map(g => g.esdm.v))];
+  const esdmDomains = [...new Set(esdmList.map(g => normEsdm(g.esdm).v))];
   const vbLevels = vbmappList.map(g => g.vbmapp.lv);
   const minLv = vbLevels.length > 0 ? Math.min(...vbLevels) : null;
   const maxLv = vbLevels.length > 0 ? Math.max(...vbLevels) : null;
@@ -4703,7 +4770,9 @@ function shortDomain(d) {
     "Ⅸ 강화제군": "강화군", "Ⅹ 학습능력": "학습",
     "Ⅺ 신체발달": "신체"
   };
-  return map[d] || d.replace(/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪ]\s*/, "").slice(0, 20);
+  // ★ [짧은 이름] 새 ELCAR 영역 이름은 뒤에 영문 괄호가 붙어 있어("선호물/강화제 스크리닝 (PREFERENCE/…)")
+  //    20글자에서 자르면 "… (PREFER"처럼 영어 반쪽이 찍혔다. 끝의 영문 괄호를 먼저 떼고 자른다.
+  return map[d] || d.replace(/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪ]\s*/, "").replace(/\s*\([^()]*[A-Za-z][^()]*\)\s*$/, "").slice(0, 20);
 }
 
 const CURRICULUM_ORDER = { "ELCAR": 1, "VB-MAPP": 2, "ESDM": 3, "기타": 4 };
@@ -4954,8 +5023,16 @@ function writeLocalArchiveIndex(childId, list) {
   } catch (e) {}
 }
 
+// ★ [컷오프 기준] 맨 앞 보관본이 다음 보고서의 기준일(컷오프)이 된다.
+//    예전엔 '가장 최근에 저장한 것'이 맨 앞이라, 지난 기간 보고서를 다시 인쇄해 보관하면
+//    기준일이 뒤로 돌아가 이미 보고한 회기가 다음 보고서에 다시 들어갔다.
+//    이제 '보고서가 다룬 마지막 날짜'가 늦은 것이 맨 앞이다. 같으면 나중에 저장한 것.
 function sortArchiveList(list) {
-  return [...list].sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
+  return [...list].sort((a, b) => {
+    const ca = cutoffOf(a) || "", cb = cutoffOf(b) || "";
+    if (ca !== cb) return cb.localeCompare(ca);
+    return (b.savedAt || "").localeCompare(a.savedAt || "");
+  });
 }
 
 async function loadArchiveList(childId) {
@@ -5028,24 +5105,30 @@ async function saveArchiveItem(snapshot, autoMode) {
         try {
           if (typeof localStorage !== "undefined") localStorage.setItem(ARCHIVE_ITEM_PREFIX + fullId, JSON.stringify(fullSnap));
         } catch (e) {}
+        // ★ [보관 실패 알림] 본문 클라우드 저장 실패를 삼키고 목록만 올리면,
+        //    다른 기기에서는 목록엔 보이는데 열면 내용이 없었다. 본문이 실패하면 목록도 올리지 않고 알린다.
+        let bodyOk = false;
         try {
           if (typeof window !== "undefined" && window.storage) {
-            await window.storage.set(ARCHIVE_ITEM_PREFIX + fullId, JSON.stringify(fullSnap)).catch(() => {});
+            await window.storage.set(ARCHIVE_ITEM_PREFIX + fullId, JSON.stringify(fullSnap));
+            bodyOk = true;
           }
-        } catch (e) {}
+        } catch (e) { console.warn("[보관] 본문 클라우드 저장 실패:", e); }
         list = list.map(item => item.id === fullId ? { ...item, savedAt: fullSnap.savedAt, cutoffDataDate: fullSnap.cutoffDataDate || item.cutoffDataDate || "" } : item);
         try {
           if (typeof localStorage !== "undefined") localStorage.setItem(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(list));
         } catch (e) {}
+        let indexOk = false;
         try {
           // 클라우드 목록을 못 읽었으면 올리지 않는다 — 덮어쓰면 남의 보고서가 지워진다.
-          if (cloudIndexOk && typeof window !== "undefined" && window.storage) {
-            await window.storage.set(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(list)).catch(() => {});
+          if (bodyOk && cloudIndexOk && typeof window !== "undefined" && window.storage) {
+            await window.storage.set(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(list));
+            indexOk = true;
           } else if (!cloudIndexOk) {
             console.warn("[보관] 클라우드 목록을 읽지 못해 이 기기에만 저장했습니다.", childId);
           }
-        } catch (e) {}
-        return { id: fullId, overwrite: true, savedAt: fullSnap.savedAt, cloudIndexSkipped: !cloudIndexOk };
+        } catch (e) { console.warn("[보관] 목록 클라우드 저장 실패:", e); }
+        return { id: fullId, overwrite: true, savedAt: fullSnap.savedAt, cloudIndexSkipped: !cloudIndexOk, cloudSaveFailed: !(bodyOk && indexOk) };
       }
     }
     const id = "rpt_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
@@ -5054,30 +5137,40 @@ async function saveArchiveItem(snapshot, autoMode) {
     try {
       if (typeof localStorage !== "undefined") localStorage.setItem(ARCHIVE_ITEM_PREFIX + id, JSON.stringify(fullSnap));
     } catch (e) {}
+    let bodyOk = false;   // ★ [보관 실패 알림] 위와 같은 이유
     try {
       if (typeof window !== "undefined" && window.storage) {
-        await window.storage.set(ARCHIVE_ITEM_PREFIX + id, JSON.stringify(fullSnap)).catch(() => {});
+        await window.storage.set(ARCHIVE_ITEM_PREFIX + id, JSON.stringify(fullSnap));
+        bodyOk = true;
       }
-    } catch (e) {}
+    } catch (e) { console.warn("[보관] 본문 클라우드 저장 실패:", e); }
     const indexEntry = { id, title: fullSnap.title, period: fullSnap.period, order, savedAt: fullSnap.savedAt, auto: fullSnap.auto, isFinal: fullSnap.isFinal || false, isIep: fullSnap.isIep || false, prevEvalStart: fullSnap.prevEvalStart || "", prevEvalEnd: fullSnap.prevEvalEnd || "", cutoffDataDate: fullSnap.cutoffDataDate || "" };
     const newList = [...list, indexEntry];
     try {
       if (typeof localStorage !== "undefined") localStorage.setItem(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(newList));
     } catch (e) {}
+    let indexOk = false;
     try {
       // 위와 같은 이유 — 클라우드 목록을 못 읽은 상태에서는 올리지 않는다.
-      if (cloudIndexOk && typeof window !== "undefined" && window.storage) {
-        await window.storage.set(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(newList)).catch(() => {});
+      if (bodyOk && cloudIndexOk && typeof window !== "undefined" && window.storage) {
+        await window.storage.set(ARCHIVE_INDEX_PREFIX + childId, JSON.stringify(newList));
+        indexOk = true;
       } else if (!cloudIndexOk) {
         console.warn("[보관] 클라우드 목록을 읽지 못해 이 기기에만 저장했습니다.", childId);
       }
-    } catch (e) {}
-    return { id, overwrite: false, savedAt: fullSnap.savedAt, cloudIndexSkipped: !cloudIndexOk };
+    } catch (e) { console.warn("[보관] 목록 클라우드 저장 실패:", e); }
+    return { id, overwrite: false, savedAt: fullSnap.savedAt, cloudIndexSkipped: !cloudIndexOk, cloudSaveFailed: !(bodyOk && indexOk) };
   } catch (e) {
     console.warn("[보관] 저장 실패:", e);
     return null;
   }
 }
+
+// ★ [보관 실패 알림] 보관본이 이 기기에만 남았을 때 띄우는 안내
+const ARCHIVE_CLOUD_FAIL_MSG =
+  "⚠ 보관본이 이 기기에만 저장되었습니다.\n" +
+  "인터넷 연결 문제로 서버에 올라가지 않아, 다른 기기에서는 이 보관본이 보이지 않습니다.\n\n" +
+  "인터넷 연결을 확인한 뒤 보관함의 [💾 현재 보고서 보관]으로 다시 보관해 주세요.";
 
 async function deleteArchiveItem(childId, archiveId) {
   if (!childId || !archiveId) return false;
@@ -5416,6 +5509,54 @@ function _stampPlain(before, patch) {
     if (!same(before && before[k], patch[k])) out[k] = now;
   }
   return out;
+}
+
+// ★ [상태 시각] 목표·과제의 칸이 바뀌었는데 고친 시각이 안 남은 칸에 시각을 찍는다.
+//    예전엔 이름 바꾸기·updateGoal만 시각을 남기고, 과제 완료/중단·목표횟수·측정 방식·
+//    데이터시트 표시·촉구단계 등은 안 남겨서, 두 기기에서 같은 아동을 만지면
+//    나중에 저장한 기기의 옛 값이 이겨 '완료'가 '진행 중'으로 되돌아갔다.
+//    모든 목표 수정이 지나가는 updateActiveChild에서 한 번에 찍는다.
+const _PLAIN_SKIP = { fieldTimes: 1, tasks: 1, daily: 1, deletedDays: 1, deletedTasks: 1 };
+function _stampChangedPlain(before, after, now) {
+  if (!before || !after || before === after) return null;
+  const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+  const bt = before.fieldTimes || {}, at = after.fieldTimes || {};
+  let out = null;
+  for (const k of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (_PLAIN_SKIP[k]) continue;
+    if (same(before[k], after[k])) continue;
+    if (at[k] && at[k] !== bt[k]) continue;   // 이미 이번 수정에서 시각을 찍었다
+    if (!out) out = { ...at };
+    out[k] = now;
+  }
+  return out;
+}
+function _autoStampGoals(prevGoals, nextGoals) {
+  if (!Array.isArray(nextGoals) || !Array.isArray(prevGoals)) return nextGoals;
+  const now = new Date().toISOString();
+  const prevById = new Map(prevGoals.filter(g => g && g.id != null).map(g => [g.id, g]));
+  return nextGoals.map(g => {
+    if (!g || g.id == null) return g;
+    const pg = prevById.get(g.id);
+    if (!pg || pg === g) return g;
+    let out = g;
+    const ft = _stampChangedPlain(pg, g, now);
+    if (ft) out = { ...out, fieldTimes: ft };
+    if (Array.isArray(g.tasks) && g.tasks !== pg.tasks) {
+      const pt = new Map((Array.isArray(pg.tasks) ? pg.tasks : []).filter(t => t && t.id != null).map(t => [t.id, t]));
+      let changed = false;
+      const tasks = g.tasks.map(t => {
+        const p = t && pt.get(t.id);
+        if (!p || p === t) return t;
+        const f = _stampChangedPlain(p, t, now);
+        if (!f) return t;
+        changed = true;
+        return { ...t, fieldTimes: f };
+      });
+      if (changed) out = { ...out, tasks };
+    }
+    return out;
+  });
 }
 
 // 평평한 객체를 칸 단위로 합친다 — 시각을 아는 칸은 나중 것, 모르면 이긴 쪽.
@@ -5778,8 +5919,7 @@ function ManualModal({ onClose }) {
         </div>
         {sec("1. 로그인", [
           "인터넷 주소창에 사이트 주소를 입력하면 로그인 화면이 나옵니다.",
-          "관리자(센터장): 이름 칸에 '관리자' 입력 + 비밀번호",
-          "선생님: 본인 이름 입력 + 비밀번호",
+          "관리자(센터장)·선생님 모두 본인 계정의 이메일과 비밀번호로 로그인합니다.",
           "PC·태블릿·핸드폰 어디서든 같은 주소로 로그인할 수 있습니다."
         ])}
         {sec("2. 아동 등록", [
@@ -5805,7 +5945,7 @@ function ManualModal({ onClose }) {
         ])}
         {sec("6. 보고서 자동 생성", [
           "IEP(개별화 교육 계획) / 중간보고서 / 종결보고서를 자동으로 생성합니다.",
-          "중간보고서는 1년 3구간으로 작성합니다: 1~4월 / 5~8월 / 9~12월. 보고 기간 칸에 해당 구간을 입력하면 그 기간의 기록만 모아 보고서가 만들어집니다.",
+          "중간보고서는 1년 3구간으로 작성합니다: 1~4월 / 5~8월 / 9~12월. 보고 시작일은 직전 보고서 다음의 첫 기록 날짜로 자동으로 잡히고, 보고 종료일만 고르면 그 기간의 기록으로 보고서가 만들어집니다.",
           "종결보고서는 아동이 센터를 마칠 때 전체 기간으로 한 번 작성합니다.",
           "활동 사진은 중간보고서에만 들어갑니다(종결보고서 제외). 보고서 탭 하단에서 들어갈 사진을 고를 수 있습니다.",
           "각 영역 문장이 자동으로 채워지며, 필요하면 직접 수정할 수 있습니다.",
@@ -5901,7 +6041,7 @@ function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
               onChange={e => setName(e.target.value)}
               placeholder="이메일 입력"
               autoComplete="off"
-              onKeyDown={e => { if (e.key === "Enter") document.getElementById("auth-pw-input")?.focus(); }}
+              onKeyDown={e => { if (!(e.nativeEvent && e.nativeEvent.isComposing) && e.keyCode !== 229 && e.key === "Enter") document.getElementById("auth-pw-input")?.focus(); }}
               style={{
                 width: "100%", padding: "10px 12px",
                 border: `1px solid ${PK}`, borderRadius: 8,
@@ -5924,7 +6064,7 @@ function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
             placeholder="비밀번호 입력"
             autoComplete="new-password"
             onKeyDown={e => {
-              if (e.key === "Enter") {
+              if (!(e.nativeEvent && e.nativeEvent.isComposing) && e.keyCode !== 229 && e.key === "Enter") {
                 if (view === "setup") document.getElementById("auth-pw-confirm")?.focus();
                 else handleSubmit();
               }
@@ -5948,7 +6088,7 @@ function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
               onChange={e => setPwConfirm(e.target.value)}
               placeholder="비밀번호 다시 입력"
               autoComplete="new-password"
-              onKeyDown={e => { if (e.key === "Enter") handleSubmit(); }}
+              onKeyDown={e => { if (!(e.nativeEvent && e.nativeEvent.isComposing) && e.keyCode !== 229 && e.key === "Enter") handleSubmit(); }}
               style={{
                 width: "100%", padding: "10px 12px",
                 border: `1px solid ${PK}`, borderRadius: 8,
@@ -5987,7 +6127,7 @@ function AuthScreen({ view, message, onSetupAdmin, onLogin }) {
         }}>
           {view === "setup"
             ? "이 비밀번호는 클라우드에 안전하게 저장되며, 어느 기기에서든 로그인할 수 있습니다."
-            : "관리자(센터장)는 이름 '관리자', 선생님은 본인 이름으로 로그인."}
+            : "관리자(센터장)·선생님 모두 본인 계정의 이메일과 비밀번호로 로그인."}
         </div>
         <div style={{ marginTop: 14, textAlign: "center" }}>
           <button onClick={() => setShowManual(true)} style={{
@@ -6213,7 +6353,7 @@ function AdminPanel({ onClose }) {
               onChange={e => setNewPw(e.target.value)}
               placeholder="초기 비밀번호 (6자 이상)"
               autoComplete="new-password"
-              onKeyDown={e => { if (e.key === "Enter") handleAdd(); }}
+              onKeyDown={e => { if (!(e.nativeEvent && e.nativeEvent.isComposing) && e.keyCode !== 229 && e.key === "Enter") handleAdd(); }}
               style={{ padding: "8px 10px", border: `1px solid ${PK}`, borderRadius: 6, fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }}
             />
             <button
@@ -6260,7 +6400,7 @@ function AdminPanel({ onClose }) {
                           value={editPw}
                           onChange={e => setEditPw(e.target.value)}
                           placeholder="새 비밀번호"
-                          onKeyDown={e => { if (e.key === "Enter") handleChangePw(u.user_id); }}
+                          onKeyDown={e => { if (!(e.nativeEvent && e.nativeEvent.isComposing) && e.keyCode !== 229 && e.key === "Enter") handleChangePw(u.user_id); }}
                           style={{ padding: "5px 8px", border: `1px solid ${PK}`, borderRadius: 5, fontSize: 11, fontFamily: "inherit", width: 130 }}
                         />
                         <button
@@ -6917,6 +7057,9 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState("");
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);  // ★ [v19.3] 선생님 첫 로그인 환영 모달
+  // ★ [로그인 후 불러오기] 저장된 로그인을 확인하는 동안에는 '불러오는 중' 화면을 보인다
+  //    (기록은 이제 로그인 뒤에 읽으므로, 확인 전에 로그인 화면이 잠깐 번쩍이지 않게)
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -6943,6 +7086,7 @@ export default function App() {
         console.error("[AUTH 로드 실패]", e);
         setAuthView("login");
       }
+      setAuthChecked(true);   // ★ [로그인 후 불러오기] 저장된 로그인 확인이 끝났다
     })();
   }, []);
 
@@ -7030,6 +7174,7 @@ export default function App() {
   const esdmLoadedRef = useRef(false);
   const esdmOpenedLoadedRef = useRef(false);
   useEffect(() => {
+    if (!currentUser) return;   // ★ [로그인 후 불러오기] 로그인 열쇠 없이 읽으면 빈 목록이 왔다
     (async () => {
       try {
         const res = await window.storage.get(ESDM_ITEMS_KEY, true);
@@ -7037,7 +7182,8 @@ export default function App() {
         esdmLoadedRef.current = true;
       } catch (e) { /* 없으면 빈 상태로 시작 */ }
     })();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!currentUser]);
   const esdmCatalog = useMemo(() => mergeEsdmItems(esdmUserItems), [esdmUserItems]);
   const saveEsdmItems = async (draft, opts = {}) => {
     // ★ [ESDM-덮어쓰기] 입력 창에서 저장할 때만 — 창을 열 때 저장된 항목을 못 불러온 상태였으면 저장 전에 한 번 더 확인한다.
@@ -7113,9 +7259,11 @@ export default function App() {
         setTeachers([]);
       }
     };
+    if (!currentUser) return;   // ★ [로그인 후 불러오기]
     loadTeachers();
     // 관리자 패널이 닫힌 후에도 최신 목록을 반영하도록, 관리자 패널 닫힘 감지 시 재로드
-  }, [showAdminPanel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAdminPanel, !!currentUser]);
 
   const [pauseReasonDialog, setPauseReasonDialog] = useState(null);
   const askPauseReason = (taskName, onSubmit) => {
@@ -7314,7 +7462,9 @@ export default function App() {
       for (const newC of newChildren) {
         const oldC = oldById.get(newC.id);
         // 새로 추가된 아동이거나 내용이 바뀐 아동만 검사 대상
-        const changed = !oldC || JSON.stringify(newC) !== JSON.stringify(oldC);
+        // ★ [속도] 바뀌지 않은 아동은 같은 객체 그대로라 글자로 바꿔 비교할 필요가 없다
+        //    (예전엔 클릭마다 전체 아동을 두 번씩 글자로 바꿔 느려졌다)
+        const changed = !oldC || (newC !== oldC && JSON.stringify(newC) !== JSON.stringify(oldC));
         if (changed && newC.info.ownerName !== currentUser.name) {
           console.warn(`⚠️ [권한 오류] 선생님 '${currentUser.name}'이 다른 선생님 아동을 수정하려 함:`, newC.info.name, newC.info.ownerName);
           alert("❌ 다른 선생님의 아동은 수정할 수 없습니다. 변경사항이 저장되지 않았습니다.");
@@ -7349,7 +7499,9 @@ export default function App() {
       const now = new Date().toISOString();
       const newChildren = prev.map(c => {
         if (c.id !== targetId) return c;
-        const p = typeof patch === "function" ? patch(c) : patch;
+        let p = typeof patch === "function" ? patch(c) : patch;
+        // ★ [상태 시각] 목표·과제 칸에 고친 시각을 찍는다 (위 _autoStampGoals 설명)
+        if (p && Array.isArray(p.goals)) p = { ...p, goals: _autoStampGoals(c.goals, p.goals) };
         // ★ [100-1] 어떤 칸을 고쳤는지 시각을 남긴다.
         //    예전엔 병합이 아동을 통째로 바꿔치기해서, 폰에서 소견을 쓰고
         //    컴퓨터에서 평가기간만 고쳐도 소견이 통째로 밀렸다.
@@ -7423,9 +7575,28 @@ export default function App() {
       timestamp: new Date().toISOString(),
       description  // 사람이 읽을 텍스트
     };
-    updateActiveChild(c => ({
-      history: [...(c.history || []), record]
-    }));
+    // ★ [이력 줄이기] 이름·소속반 칸은 글자 하나 칠 때마다 이력이 한 줄씩 쌓였다("조"→"조으"→"조은"…).
+    //    같은 사람이 같은 칸을 2분 안에 이어서 고치면 한 줄로 합친다(처음 값 → 마지막 값).
+    //    또 오래된 이력은 최근 300줄만 남긴다 — 공용 저장 파일이 끝없이 커지지 않게.
+    updateActiveChild(c => {
+      const hist = Array.isArray(c.history) ? c.history : [];
+      const last = hist[hist.length - 1];
+      let next;
+      if (last && targetName && last.targetName === targetName && last.action === action &&
+          last.userName === record.userName && last.childId === record.childId &&
+          (Date.parse(record.timestamp) - Date.parse(last.timestamp || 0)) < 120000 &&
+          action === "info_update") {
+        const merged = { ...record, before: last.before };
+        if (typeof last.before === "string" && typeof after === "string" && typeof description === "string") {
+          merged.description = description.replace(/"[^"]*" →/, `"${last.before}" →`);
+        }
+        next = [...hist.slice(0, -1), merged];
+      } else {
+        next = [...hist, record];
+      }
+      if (next.length > 300) next = next.slice(next.length - 300);
+      return { history: next };
+    });
   };
 
   const setInfo = (updater) => {
@@ -7612,12 +7783,15 @@ export default function App() {
   const saveDeleteRequests = async (list) => {
     const json = JSON.stringify(list);
     try { localStorage.setItem(DELETE_REQUEST_KEY, json); } catch (e) {}
+    let cloudOk = false;   // ★ [삭제 요청 실패 알림] 서버에 못 올리면 관리자 화면에 안 보인다
     try {
       if (typeof window !== "undefined" && window.storage) {
         await window.storage.set(DELETE_REQUEST_KEY, json, true);
+        cloudOk = true;
       }
-    } catch (e) {}
+    } catch (e) { console.warn("[삭제 요청 저장 실패]", e); }
     setDeleteRequests(list);
+    return cloudOk;
   };
   // 삭제 요청 올리기 — 아동은 일단 보관 처리해 목록에서 치우고, 실제 삭제는 관리자가 한다.
   const requestChildDelete = async (id, reason) => {
@@ -7639,7 +7813,12 @@ export default function App() {
       reason: (reason || "").trim(),
       status: "pending"
     };
-    await saveDeleteRequests([req, ...list]);
+    const sent = await saveDeleteRequests([req, ...list]);
+    if (!sent) {
+      // ★ [삭제 요청 실패 알림] 예전엔 실패해도 "보냈습니다"가 떠서, 관리자에게 요청이 안 갔는데 아동만 보관됐다.
+      alert("⚠ 삭제 요청을 보내지 못했습니다.\n인터넷 연결을 확인한 뒤 다시 요청해 주세요.\n(아동은 그대로 두었습니다)");
+      return;
+    }
     archiveChild(id);   // 요청 중에는 보관 상태로 두어 목록에서 보이지 않게
     alert("✅ 삭제 요청을 보냈습니다.\n관리자가 확인할 때까지 이 아동은 보관함에 있습니다.");
   };
@@ -7696,16 +7875,18 @@ export default function App() {
     if (!target) return;
     const now = new Date();
     const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    const newChildren = children.map(c =>
-      c.id === id
-        // ★ [칸별 시각] 칸별 수정 시각도 찍는다 — 없으면 다른 기기의 옛 사본이 보관을 되돌렸다
-        ? (() => { const now = new Date().toISOString(); const patch = { info: { ...c.info, archivedAt: stamp } }; return { ...c, ...patch, fieldTimes: _stampFields(c, patch, now), updatedAt: now }; })()
-        : c
-    );
+    const mark = (c) => {
+      // ★ [칸별 시각] 칸별 수정 시각도 찍는다 — 없으면 다른 기기의 옛 사본이 보관을 되돌렸다
+      const now = new Date().toISOString(); const patch = { info: { ...c.info, archivedAt: stamp } };
+      return { ...c, ...patch, fieldTimes: _stampFields(c, patch, now), updatedAt: now };
+    };
+    const newChildren = children.map(c => c.id === id ? mark(c) : c);
     if (validateChildrenBeforeSave(newChildren)) {
-      setChildren(newChildren);
+      // ★ [최신 목록 기준] 삭제 요청처럼 서버를 기다린 뒤 부르면 children은 기다리기 전 목록이라,
+      //    그사이 들어온 변경을 덮었다. 바꾸는 순간의 최신 목록에서 이 아동만 바꾼다.
+      setChildren(prev => prev.map(c => c.id === id ? mark(c) : c));
       // 현재 보고 있던 아동이 아카이브되면 다른 활성 아동으로 전환
-      if (id === activeChildId) {
+      if (id === activeChildIdRef.current) {
         const remainingActive = newChildren.filter(c =>
           !c.info?.archivedAt &&
           (currentUser?.role === "admin" || (c.info?.ownerName || "") === currentUser?.name)
@@ -8139,6 +8320,69 @@ export default function App() {
   }, [loaded, currentUser]);
 
   const [tab, setTab] = useState("dashboard"); // ★ [v19 신규] dashboard | info | iep | daily | report
+  // ★ [즐겨찾기 사람별] 별을 아동 기록에 넣으면 원장님이 누른 별이 담당 선생님 화면에도 생기고,
+  //    '보기 전용' 잠금도 거치지 않아 남의 아동 기록이 '최신'으로 바뀌었다.
+  //    이제 별은 로그인한 사람마다 따로, 아동 기록과 떨어진 서버 칸("gd-aba-pins::이름")에 저장한다.
+  //    같은 사람이 패드에서 누른 별은 컴퓨터에서도 보인다(로그인할 때, 화면으로 돌아올 때 다시 읽음).
+  //    처음 한 번은 예전 별(아동 기록에 있던 것) 중 내가 볼 수 있는 아동 것을 그대로 가져온다.
+  const [pinnedIds, setPinnedIds] = useState(() => new Set());
+  const pinKey = "gd-aba-pins::" + (currentUser?.name || "");
+  const readCloudPins = async () => {
+    try {
+      const res = await window.storage.get(pinKey, true);
+      if (res && res.value) { const arr = JSON.parse(res.value); if (Array.isArray(arr)) return arr; }
+      return null;   // 서버에 아직 없음
+    } catch (e) { return undefined; }   // 못 읽음
+  };
+  useEffect(() => {
+    if (!currentUser || !loaded) return;
+    let cancelled = false;
+    const load = async () => {
+      let local = null;
+      try { const raw = localStorage.getItem(pinKey); if (raw) local = JSON.parse(raw); } catch (e) {}
+      if (Array.isArray(local) && !cancelled) setPinnedIds(new Set(local));   // 이 기기 사본으로 먼저 보여 준다
+      const cloud = await readCloudPins();
+      if (cancelled) return;
+      if (Array.isArray(cloud)) {
+        setPinnedIds(new Set(cloud));
+        try { localStorage.setItem(pinKey, JSON.stringify(cloud)); } catch (e) {}
+      } else if (cloud === null) {
+        // 서버에 아직 없으면: 이 기기 사본 → 없으면 예전 별을 가져와 서버에 올린다
+        const seed = Array.isArray(local) ? local : liveChildren(children)
+          .filter(c => c.info?.isPinned && (currentUser.role === "admin" || (c.info?.ownerName || "") === currentUser.name))
+          .map(c => c.id);
+        setPinnedIds(new Set(seed));
+        try { localStorage.setItem(pinKey, JSON.stringify(seed)); } catch (e) {}
+        try { await window.storage.set(pinKey, JSON.stringify(seed), true); } catch (e) {}
+      }
+    };
+    load();
+    const onVis = () => { if (!document.hidden) load(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { cancelled = true; document.removeEventListener("visibilitychange", onVis); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.name, loaded]);
+  const isChildPinned = (c) => !!c && pinnedIds.has(c.id);
+  const toggleChildPin = async (id) => {
+    const turnOn = !pinnedIds.has(id);
+    const apply = (arr) => { const s = new Set(arr); if (turnOn) s.add(id); else s.delete(id); return [...s]; };
+    const optimistic = apply([...pinnedIds]);
+    setPinnedIds(new Set(optimistic));
+    try { localStorage.setItem(pinKey, JSON.stringify(optimistic)); } catch (e) {}
+    // 다른 기기에서 그사이 누른 별을 지우지 않게, 서버 것을 다시 읽어 이 별만 바꿔 올린다
+    const cloud = await readCloudPins();
+    const merged = Array.isArray(cloud) ? apply(cloud) : optimistic;
+    try {
+      await window.storage.set(pinKey, JSON.stringify(merged), true);
+      setPinnedIds(new Set(merged));
+      try { localStorage.setItem(pinKey, JSON.stringify(merged)); } catch (e) {}
+    } catch (e) { console.warn("[즐겨찾기 서버 저장 실패]", e); }
+  };
+  // ★ [선생님 첫 화면] 처음 탭이 '센터 대시보드'인데 대시보드는 관리자 전용이라,
+  //    선생님은 로그인 직후 아무 탭도 안 고른 빈 화면을 봤다. 선생님은 ③ 데일리 데이터에서 시작한다.
+  useEffect(() => {
+    if (currentUser && currentUser.role !== "admin" && tab === "dashboard") setTab("daily");
+  }, [currentUser, tab]);
   const [reportMode, setReportMode] = useState("interim");
   // ★ [버그수정] 종결일(finalEndDate)이 설정된 아동은 보고서 종류를 자동으로 '종결'로 전환.
   //    (사용자가 종결일만 입력하고 종결 토글을 안 눌러서, 인쇄 시 "중간보고서 저장"으로 뜨던 문제 해결)
@@ -8188,7 +8432,14 @@ export default function App() {
   // (방금 저장한 보고서가 자기 자신의 데이터를 컷오프하는 것을 막기 위함)
   const [printingSuppressArchiveId, setPrintingSuppressArchiveId] = useState("");
 
+  // ★ [로그인 후 불러오기] 예전엔 화면이 뜨자마자(로그인 확인 전) 기록을 읽었다.
+  //    로그인 열쇠 없이 읽게 되어, 서버가 막으면 빈 결과로 끝나 이 기기의 옛 사본이 열렸다.
+  //    로그인이 확인된 뒤 한 번만 읽는다.
+  const initialLoadStartedRef = useRef(false);
   useEffect(() => {
+    if (!currentUser) return;
+    if (initialLoadStartedRef.current) return;
+    initialLoadStartedRef.current = true;
     (async () => {
       try {
 
@@ -8320,7 +8571,7 @@ export default function App() {
       } catch (e) { /* 무시 */ }
       setLoaded(true);
     })();
-  }, []);
+  }, [currentUser]);
 
   const saveTimerRef = useRef(null);
   // ★ [59-7] 원격 변경을 조용히 받아올 때 쓰는 표식.
@@ -8329,13 +8580,16 @@ export default function App() {
   //    lastLocalEditRef: 마지막 로컬 편집 시각 → 편집 중엔 자동 반영을 미룬다
   const remoteAppliedRef = useRef(null);
   const lastLocalEditRef = useRef(0);
+  const savePendingRef = useRef(false);   // ★ [창 닫기 경고] 저장 대기 중인 수정이 있는가
   const saveSeqRef = useRef(0);   // ★ [끊김-복구] 저장 순번
   useEffect(() => {
     if (!loaded) return;  // 로드 완료 전에는 저장하지 않음
     const fromRemote = remoteAppliedRef.current === children;
     if (!fromRemote) lastLocalEditRef.current = Date.now();
+    if (!fromRemote) savePendingRef.current = true;   // ★ [창 닫기 경고] 0.5초 저장 대기 중
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
+      savePendingRef.current = false;   // 이제부터는 '못 올라감' 표식(UNSYNCED_KEY)이 대신 지킨다
       let pendingMark = null;   // ★ [끊김-복구] 이번 저장이 단 '못 올라감' 표식
       try {
         if (typeof localStorage !== "undefined") {
@@ -8746,17 +9000,23 @@ export default function App() {
     return () => clearInterval(checkInterval);
   }, [loaded, currentUser]);
 
+  // ★ [창 닫기 경고] 예전엔 '💾 전체 백업'(지금은 숨긴 기능) 기준이라, 아무것도 안 고쳐도
+  //    창을 닫을 때마다 경고가 떴다(불러오기만 해도 '변경'으로 셌다).
+  //    이제 정말로 서버에 아직 안 올라간 수정이 있을 때만 묻는다.
+  //    (저장 대기 중 0.5초 · 올리는 중 · 올리기 실패 표식이 남아 있는 경우)
   useEffect(() => {
-    const needsBackup = lastChangeAt !== null && (lastBackupAt === null || lastBackupAt < lastChangeAt);
-    if (!needsBackup) return;
     const handler = (e) => {
+      let pending = false;
+      try { pending = !!localStorage.getItem(UNSYNCED_KEY); } catch (err) {}
+      if (!pending && savePendingRef.current) pending = true;
+      if (!pending) return;
       e.preventDefault();
-      e.returnValue = "백업하지 않은 변경사항이 있습니다. 정말 나가시겠습니까?";
+      e.returnValue = "아직 서버에 저장되지 않은 수정이 있습니다. 정말 나가시겠습니까?";
       return e.returnValue;
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [lastBackupAt, lastChangeAt]);
+  }, []);
 
   useEffect(() => {
     setActiveGoalId(null);
@@ -9248,6 +9508,9 @@ export default function App() {
   );
   useEffect(() => {
     if (!loaded) return;
+    // ★ [보기 전용] 관리자가 남의 아동을 보기만 할 때는 판정 결과를 저장하지 않는다.
+    //    예전엔 열기만 해도 판정이 바뀌면 '고칠 수 없음' 안내가 떴다. 판정은 담당 선생님 기기에서 저장된다.
+    if (adminReadOnlyBlocked()) return;
     const calcDayRateForMastery = (day, plannedTrials) => {
       if (!day) return null;
       if (Array.isArray(day.trials)) {
@@ -9808,6 +10071,7 @@ export default function App() {
     };
     const _cid = activeChildId;
     const result = await saveArchiveItem(snapshot, autoMode);
+    if (result && result.cloudSaveFailed) alert(ARCHIVE_CLOUD_FAIL_MSG);   // ★ [보관 실패 알림]
     const newList = await loadArchiveList(_cid);
     if (activeChildIdRef.current === _cid) setArchiveList(newList);   // ★ [아동 바꿈] 그사이 아동을 바꿨으면 목록을 넣지 않는다
     return result;
@@ -9876,6 +10140,7 @@ export default function App() {
     };
     const _cid = activeChildId;
     const result = await saveArchiveItem(snapshot, autoMode);
+    if (result && result.cloudSaveFailed) alert(ARCHIVE_CLOUD_FAIL_MSG);   // ★ [보관 실패 알림]
     const newList = await loadArchiveList(_cid);
     // 보관 목록은 즉시 반영한다(상태 불일치 방지). ★ [아동 바꿈] 단, 그사이 아동을 바꿨으면 넣지 않는다.
     // "방금 저장한 아카이브가 자기 보고서를 컷오프하는" 문제는, 인쇄 중에만
@@ -10227,7 +10492,7 @@ export default function App() {
       mode={reportMode === "final" ? "final" : "report"} onBack={() => { setAutoPrintAction(""); if (printingSuppressArchiveId) { setPrintingSuppressArchiveId(""); applyCutoff(); } setView("edit"); }} />;
   }
 
-  if (!loaded) {
+  if (!authChecked || (currentUser && !loaded)) {
     return (
       <div style={{ fontFamily: "'Pretendard','Noto Sans KR','Malgun Gothic',sans-serif", background: "linear-gradient(135deg,#fdf8f9 0%,#fff 50%,#fdf8f9 100%)", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: PKD }}>
         <div style={{ textAlign: "center" }}>
@@ -11259,8 +11524,8 @@ export default function App() {
                 filtered = [...filtered].sort((a, b) => {
                   const ra = inactiveRank(a), rb = inactiveRank(b);
                   if (ra !== rb) return ra - rb;
-                  if (a.info?.isPinned && !b.info?.isPinned) return -1;
-                  if (!a.info?.isPinned && b.info?.isPinned) return 1;
+                  if (isChildPinned(a) && !isChildPinned(b)) return -1;
+                  if (!isChildPinned(a) && isChildPinned(b)) return 1;
                   return 0;
                 });
                 
@@ -11523,7 +11788,7 @@ export default function App() {
                                   setEditingChildNameId(null);
                                 }}
                                 onKeyDown={e => {
-                                  if (e.key === "Enter") {
+                                  if (!(e.nativeEvent && e.nativeEvent.isComposing) && e.keyCode !== 229 && e.key === "Enter") {
                                     if (editingChildName.trim()) renameChild(c.id, editingChildName);
                                     setEditingChildNameId(null);
                                   } else if (e.key === "Escape") {
@@ -11539,24 +11804,19 @@ export default function App() {
                                 <button
                                   onClick={e => {
                                     e.stopPropagation();
-                                    setChildren(prev => prev.map(child => 
-                                      child.id === c.id 
-                                        // ★ [즐겨찾기] 고친 시각을 남긴다 — 없으면 다른 기기와 맞출 때 별이 풀렸다
-                                        ? (() => { const now = new Date().toISOString(); return { ...child, info: { ...child.info, isPinned: !child.info?.isPinned }, fieldTimes: { ...(child.fieldTimes || {}), "info.isPinned": now }, updatedAt: now }; })()
-                                        : child
-                                    ));
+                                    toggleChildPin(c.id);   // ★ [즐겨찾기 사람별]
                                   }}
-                                  title={c.info?.isPinned ? "핀 해제" : "즐겨찾기에 추가"}
+                                  title={isChildPinned(c) ? "핀 해제" : "즐겨찾기에 추가"}
                                   style={{ 
                                     background: "none", 
                                     border: "none", 
                                     cursor: "pointer", 
                                     fontSize: 14, 
                                     padding: "2px 4px",
-                                    color: c.info?.isPinned ? "#f59e0b" : "#ccc",
+                                    color: isChildPinned(c) ? "#f59e0b" : "#ccc",
                                     transition: "color 0.2s"
                                   }}>
-                                  {c.info?.isPinned ? "⭐" : "☆"}
+                                  {isChildPinned(c) ? "⭐" : "☆"}
                                 </button>
                                 {isActive && <span style={{ fontSize: 11, color: PKD, fontWeight: 700 }}>✓</span>}
                                 <div style={{ flex: 1, marginLeft: isActive ? 0 : 4, display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
@@ -12342,7 +12602,12 @@ export default function App() {
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={{ fontWeight: 600, color: "#333", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                                     <span
-                                      onClick={() => { setActiveChildId(child.id); setTab("info"); }}
+                                      onClick={() => {
+                                        // ★ [보관 아동 열기] 보관 아동은 '종결·보관 아동 보기'가 꺼져 있으면 목록에 없어서
+                                        //    곧바로 첫 번째 아동으로 바뀌었다(다른 아이 정보가 열림). 보기를 켜고 연다.
+                                        if (child.info?.archivedAt) setShowArchived(true);
+                                        setActiveChildId(child.id); setTab("info");
+                                      }}
                                       title="이 아동의 시트로 이동"
                                       style={{ cursor: "pointer", textDecoration: "underline", textDecorationColor: "#f0c0cc", textUnderlineOffset: 2 }}
                                       onMouseEnter={e => { e.currentTarget.style.color = PKD; }}
@@ -13442,13 +13707,7 @@ export default function App() {
                               <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${included ? PK : "#d8c0c8"}`, background: included ? PK : "#fff", color: "#fff", fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 1 }}>{included && "✓"}</span>
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: 12, color: included ? PKD : "#444", lineHeight: 1.4, fontWeight: included ? 500 : 400, wordBreak: "keep-all", overflowWrap: "break-word" }}>{item}</div>
-                                {/* ELCAR 매핑 뱃지 */}
-                                {curriculum === "ELCAR" && (mapping.vbmapp || mapping.esdm) && (
-                                  <div style={{ marginTop: 3, display: "flex", gap: 4, flexWrap: "wrap" }}>
-                                    {mapping.vbmapp && <span style={{ fontSize: 8.5, padding: "1px 5px", background: "#e6f1fb", color: "#2a6cb2", borderRadius: 6, fontWeight: 700 }}>VB: {mapping.vbmapp.v} L{mapping.vbmapp.lv}</span>}
-                                    {mapping.esdm && <span style={{ fontSize: 8.5, padding: "1px 5px", background: "#eaf3de", color: "#4a7316", borderRadius: 6, fontWeight: 700 }}>ESDM: {mapping.esdm.v}</span>}
-                                  </div>
-                                )}
+                                {/* ★ [짝 표시 제거 · 2026-11 원장 결정] 엘카 항목 옆 "VB: … / ESDM: …" 표시는 낱말 짝 맞추기라 정확하지 않아 뺐다 */}
                                 {/* VB-MAPP 모드 뱃지 */}
                                 {curriculum === "VB-MAPP" && (
                                   <div style={{ marginTop: 3, display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -14048,7 +14307,7 @@ export default function App() {
                       console.warn("[종결보관 건너뜀] activeChildId/info.name 없음");
                     } else {
                       const result = await archiveCurrentReport(false, true);
-                      if (result && result.id) {
+                      if (result && result.id && !result.cloudSaveFailed) {
                         alert("✅ 종결보고서가 보관함에 저장되었습니다.");
                       }
                     }
@@ -14072,7 +14331,8 @@ export default function App() {
                       // 방금 저장한 아카이브는 인쇄가 끝날 때까지 컷오프 계산에서 제외한다.
                       // (자기 자신을 컷오프해 그래프가 사라지는 것을 방지)
                       if (result.justSavedArchiveId) setPrintingSuppressArchiveId(result.justSavedArchiveId);
-                      if (result.overwrite) {
+                      if (result.overwrite || result.cloudSaveFailed) {
+                        // 덮어쓰기는 조용히, 서버 저장 실패는 위에서 이미 알렸다
                       } else {
                         alert("✅ 보고서가 보관함에 저장되었습니다.");
                       }
@@ -14484,7 +14744,7 @@ function AddChildModal({ name, setName, onClose, onSubmit }) {
             style={{ ...IS, padding: "10px 14px", fontSize: 14 }}
             value={name}
             onChange={e => setName(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && canSubmit) onSubmit(); }}
+            onKeyDown={e => { if (!(e.nativeEvent && e.nativeEvent.isComposing) && e.keyCode !== 229 && e.key === "Enter" && canSubmit) onSubmit(); }}
             placeholder="예: 조은우, 김민준"
             autoFocus />
           <div style={{ fontSize: 10, color: "#aaa", marginTop: 6, lineHeight: 1.6 }}>
@@ -14834,7 +15094,7 @@ function ExternalGoalModal({ extForm, setExtForm, onClose, onSubmit, onSubmitAnd
               value={extForm.item}
               onChange={e => setExtForm(f => ({ ...f, item: e.target.value }))}
               onKeyDown={e => {
-                if (e.key === "Enter" && canSubmit) {
+                if (!(e.nativeEvent && e.nativeEvent.isComposing) && e.keyCode !== 229 && e.key === "Enter" && canSubmit) {
                   if (e.shiftKey) { onSubmit(); } else { onSubmitAndClose(); }
                 }
               }}
@@ -15277,7 +15537,7 @@ function AddTaskInline({ goalId, onAdd }) {
       <input
         value={name}
         onChange={e => setName(e.target.value)}
-        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleAdd(); } }}
+        onKeyDown={e => { if (!(e.nativeEvent && e.nativeEvent.isComposing) && e.keyCode !== 229 && e.key === "Enter") { e.preventDefault(); handleAdd(); } }}
         placeholder="새 세부 과제 입력 (예: 사과)"
         style={{ flex: 1, padding: "6px 10px", border: `1px dashed ${PK}`, borderRadius: 6, fontSize: 11.5, fontFamily: "inherit", outline: "none", background: "#fff" }}
       />
@@ -15292,11 +15552,21 @@ function AddTaskInline({ goalId, onAdd }) {
 }
 
 function GoalCard({ goal, active, onToggle, onRemove, onUpdate, onToggleStatus, onSaveCurrentLevel, onResetCurrentLevel, onSavePromptLevel, onSavePromptFadingPlan, onSaveGeneralizationPlan, onAddTask, onToggleTaskActive, onToggleShowInDaily, archiveList }) {
-  const { vbmapp, esdm, source } = goal;
+  const { vbmapp, source } = goal;
+  const esdm = normEsdm(goal.esdm);   // ★ [ESDM 이름 맞추기]
 
   const recommendedVbList = useMemo(() => {
     if (!vbmapp) return [];
-    const recs = VBMAPP_RECOMMEND[vbmapp.v];
+    // ★ [VB-MAPP 추천] 목록에서 고른 VB-MAPP 목표는 영역 이름이 한글("맨드")이라
+    //    영문 이름표(Mand)로 된 추천표를 못 찾아 늘 '추천 항목 없음'이 떴다. 같은 영역의 영문 이름으로도 찾는다.
+    const VB_KO_EN = {
+      "맨드": "Mand", "택트": "Tact", "청자반응": "Listener Responding", "시지각 기술과 샘플매칭": "VP/MTS",
+      "독립놀이": "Play", "사회성 행동과 사회적 놀이": "Social", "동작 모방": "Motor Imitation", "에코익": "Echoic",
+      "LRFFC": "LRFFC", "인트라버벌": "Intraverbal", "읽기": "Reading", "쓰기": "Writing", "수학": "Math",
+      // 목표를 만들 때 영역 이름의 첫 낱말만 남은 경우("동작 모방" → "동작")
+      "시지각": "VP/MTS", "사회성": "Social", "동작": "Motor Imitation"
+    };
+    const recs = VBMAPP_RECOMMEND[vbmapp.v] || VBMAPP_RECOMMEND[VB_KO_EN[vbmapp.v]];
     if (!recs) return [];
     return recs[vbmapp.lv] || recs[1] || recs[2] || recs[3] || [];
   }, [vbmapp]);
@@ -15481,8 +15751,10 @@ function GoalCard({ goal, active, onToggle, onRemove, onUpdate, onToggleStatus, 
               {goal.subDomain}
               {goal.listName && <span style={{ marginLeft: 6, color: PKD, fontWeight: 500 }}>· {goal.listName}</span>}
             </span>
-            {vbmapp && <span style={{ fontSize: 9, padding: "2px 6px", background: "#e6f1fb", color: "#2a6cb2", borderRadius: 8, fontWeight: 500, whiteSpace: "nowrap" }}>VB: {vbmapp.v} L{vbmapp.lv}</span>}
-            {esdm && <span style={{ fontSize: 9, padding: "2px 6px", background: "#eaf3de", color: "#4a7316", borderRadius: 8, fontWeight: 500, whiteSpace: "nowrap" }}>ESDM: {esdm.v}</span>}
+            {/* ★ [짝 표시 제거 · 2026-11 원장 결정] 엘카 목표에 붙던 "VB: … / ESDM: …"는 낱말 짝 맞추기라 정확하지 않아 숨긴다.
+                VB-MAPP·ESDM 목록에서 직접 고른 목표의 표시(실제로 고른 영역)는 그대로 둔다. */}
+            {vbmapp && source !== "ELCAR" && <span style={{ fontSize: 9, padding: "2px 6px", background: "#e6f1fb", color: "#2a6cb2", borderRadius: 8, fontWeight: 500, whiteSpace: "nowrap" }}>VB: {vbmapp.v} L{vbmapp.lv}</span>}
+            {esdm && source !== "ELCAR" && <span style={{ fontSize: 9, padding: "2px 6px", background: "#eaf3de", color: "#4a7316", borderRadius: 8, fontWeight: 500, whiteSpace: "nowrap" }}>ESDM: {esdm.v}</span>}
           </div>
           {/* 중단 사유 표시 — paused task가 있으면 사유 콤마로 나열 */}
           {goal.status !== "mastered" && (() => {
@@ -15538,34 +15810,8 @@ function GoalCard({ goal, active, onToggle, onRemove, onUpdate, onToggleStatus, 
 
           {/* "현행 수준 문장" 박스 — 제거 (IEP 인쇄에 사용되지 않음 — currentLevelOverride 데이터 필드는 호환성 위해 남겨둠) */}
 
-          {/* 추천 영역 — VB-MAPP/ESDM 매핑이 있을 때만 렌더 (둘 다 없으면 영역 통째 안 뜸) */}
-          {(vbmapp || esdm) && (
-            <div style={{ display: "grid", gridTemplateColumns: vbmapp && esdm ? "1fr 1fr" : "1fr", gap: 12, marginBottom: 14 }}>
-              {/* VB-MAPP 추천 (매핑 있을 때만) */}
-              {vbmapp && (
-                <div style={{ background: "#f5f9fc", border: "1px solid #d8e4ef", borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "#2a6cb2", marginBottom: 6 }}>🧠 VB-MAPP 추천 마일스톤</div>
-                  <div style={{ fontSize: 10, color: "#666", marginBottom: 6 }}>영역: <b>{vbmapp.v}</b> · 레벨 <b>{vbmapp.lv}</b></div>
-                  {recommendedVbList.length === 0 ? <div style={{ fontSize: 11, color: "#aaa" }}>추천 항목 없음</div>
-                    : <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11, color: "#555", lineHeight: 1.7 }}>
-                        {recommendedVbList.map((r, i) => <li key={i}>{r}</li>)}
-                      </ul>}
-                </div>
-              )}
-
-              {/* ESDM 추천 (매핑 있을 때만) */}
-              {esdm && (
-                <div style={{ background: "#f7faf1", border: "1px solid #d9e5c4", borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "#4a7316", marginBottom: 6 }}>🌱 ESDM 추천 발달 목표</div>
-                  <div style={{ fontSize: 10, color: "#666", marginBottom: 6 }}>발달 영역: <b>{esdm.v}</b> · {esdm.lv}</div>
-                  {recommendedEsdmList.length === 0 ? <div style={{ fontSize: 11, color: "#aaa" }}>추천 항목 없음</div>
-                    : <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11, color: "#555", lineHeight: 1.7 }}>
-                        {recommendedEsdmList.map((r, i) => <li key={i}>{r}</li>)}
-                      </ul>}
-                </div>
-              )}
-            </div>
-          )}
+          {/* ★ [추천 상자 제거 · 2026-11 원장 결정] 엘카 목표 이름의 낱말로 VB-MAPP·ESDM 영역을 짝지어
+              코드에 적어 둔 짧은 예시를 보여 주던 상자 — 짝도 목록도 정확하지 않아 뺐다 */}
 
           {/* (교수방법 / 숙달기준 / 일반화 전략 UI는 Step 2에서 제거됨 — 데이터 필드는 기본값 유지, 인쇄물엔 기본값으로 계속 표시. 교수방법 선택은 [④ 중간보고서]의 전략 체크로 일원화) */}
 
@@ -15815,11 +16061,21 @@ function buildVbmappFilled(goals) {
         if (domClean.includes(dn)) { directMatch = dn; break; }
       }
       if (directMatch && filled[directMatch]) {
-        let lv = 1;
-        const nm = t.name || "";
-        if (/L1|레벨\s*1|Level\s*1/i.test(nm) || /\(0-18/.test(nm)) lv = 1;
-        else if (/L2|레벨\s*2|Level\s*2/i.test(nm) || /\(18-30/.test(nm)) lv = 2;
-        else if (/L3|레벨\s*3|Level\s*3/i.test(nm) || /\(30-48/.test(nm)) lv = 3;
+        // ★ [마일스톤 레벨] 예전엔 레벨을 '과제 이름'에 L2·L3 글자가 있는지로만 정해서,
+        //    맨드 L3 목표의 과제("왜 질문하기")가 Level 1 칸에 찍혔다.
+        //    목표가 속한 레벨(세부 영역 "L3 (30~48개월)" 또는 저장된 레벨)을 먼저 쓰고,
+        //    그게 없을 때만 예전처럼 과제 이름을 본다.
+        let lv = 0;
+        const sdLv = String(g.subDomain || "").match(/^\s*L([123])\b/);
+        if (sdLv) lv = parseInt(sdLv[1], 10);
+        else if (g.vbmapp && [1, 2, 3].includes(Number(g.vbmapp.lv)) && g.source === "VB-MAPP") lv = Number(g.vbmapp.lv);
+        if (!lv) {
+          lv = 1;
+          const nm = t.name || "";
+          if (/L1|레벨\s*1|Level\s*1/i.test(nm) || /\(0-18/.test(nm)) lv = 1;
+          else if (/L2|레벨\s*2|Level\s*2/i.test(nm) || /\(18-30/.test(nm)) lv = 2;
+          else if (/L3|레벨\s*3|Level\s*3/i.test(nm) || /\(30-48/.test(nm)) lv = 3;
+        }
         const slots = filled[directMatch][lv];
         const base = (lv - 1) * 5;
         for (let n = base + 1; n <= base + 5; n++) {
@@ -16910,25 +17166,8 @@ cleanedHTML + '\n' +
 
         {!isIepMode && (
           <>
-            {/* PDF-10: 본문 4섹션 다음 → VB-MAPP 마일스톤 (PDF 4페이지) */}
-            {(() => {
-              const hasVbmapp = (goals || []).some(g =>
-                g.source === "VB-MAPP" || (g.source !== "기타" && g.source !== "ESDM" && classifyCurriculum(g.domain || "") === "vbmapp")
-              );
-              if (!hasVbmapp) return null;
-              // ★ [58-6] 커리큘럼에서 몇 개만 고른 아동은 표가 거의 비어 나간다.
-              //    빈 표는 정보가 아니라 오해를 만들어, 채워진 동그라미가 적으면 섹션째 생략한다.
-              if (countVbmappDots(goals) < VBMAPP_MIN_DOTS) return null;
-              return (
-                <PrintSection num={nextSn()} title="VB-MAPP 마일스톤 현황">
-                  <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 10 }}>
-                    ※ VB-MAPP은 자폐 아동의 언어/사회성 발달을 16개 영역, 3단계(Level 1~3)로 평가하는 표준 도구입니다.<br />
-                    ※ 각 영역의 색깔이 채워진 동그라미(●)는 해당 마일스톤이 달성되었음을 의미합니다.
-                  </div>
-                  <VbmappGrid goals={goals} />
-                </PrintSection>
-              );
-            })()}
+            {/* ★ [마일스톤 표 제거 · 2026-11 원장 결정] 동그라미가 "마일스톤 통과"가 아니라 그 영역·레벨에서 완료한 과제 수를
+                앞 칸부터 채운 것이었는데, 표 위에는 "마일스톤이 달성되었음"이라고 적혀 있었다. 표를 뺀다. */}
 
             {/* PDF-10: 영역별 균형 분석 (= 레이더 + 막대) (PDF 5페이지) */}
             {balanceBarRows.length > 0 && (
@@ -17069,14 +17308,20 @@ cleanedHTML + '\n' +
             {!isFinalMode && (() => {
               const pausedItems = [];
               const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
-              (goals || []).forEach(g => {
+              // ★ [중단 목록 기준] 예전엔 IEP 목표의 중단 과제를 전부 실어서, 지난 보고서 전에 중단해
+              //    이미 보고한 것과 데이터시트에 안 올린 목표의 것까지 보고서마다 반복해서 나갔다.
+              //    보고서의 다른 칸(stosForReport)과 같은 기준 — 데이터시트에 올린 목표만,
+              //    직전 보관본 기준일 이후에 중단한 것만 싣는다.
+              const _pauseCutArch = (archiveList || []).filter(a => !a.isFinal && !a.isIep)[0];
+              const _pauseCut = _pauseCutArch ? cutoffOf(_pauseCutArch) : null;
+              (goals || []).filter(g => g.showInDaily).forEach(g => {
                 // ★ [49-4] 목표 중단과 단계 중단을 구분한다.
                 //    기존엔 단계 하나만 중단해도 "중단된 목표"에 올라가서, 배지가 '진행중'이고
                 //    다음 단계가 돌아가고 있는 목표(공간/장소 M/T/IV — L1만 중단, L2 진행 중)까지
                 //    중단 목록에 실렸다.
                 const stillActive = (g.tasks || []).some(t => (t.listGroup || "1") !== "paused");
                 (g.tasks || []).forEach(t => {
-                  if (t.listGroup === "paused") {
+                  if (t.listGroup === "paused" && !(_pauseCut && t.pausedAt && t.pausedAt <= _pauseCut)) {
                     pausedItems.push({
                       // ★ [49-4] 목록에 단계 내용(t.name)만 찍어서 어떤 목표인지 알 수 없었다.
                       //    ('왼쪽-오른쪽 / 있다-없다 / …' 는 '반대어 이해' L2의 학습 내용이다)
@@ -17483,7 +17728,7 @@ cleanedHTML + '\n' +
             if (!d) return false;
             if (m.type !== "image") return false;
             if (m.excludeFromReport) return false;
-            if (cutoffDate && d < cutoffDate) return false;
+            if (cutoffDate && d <= cutoffDate) return false;   // ★ [사진 기준일] 기록과 같이 기준일 당일은 지난 보고서 몫
             if (periodStart && d < periodStart) return false;
             if (periodEnd && d > periodEnd) return false;
             return true;
@@ -18113,7 +18358,7 @@ function PrintGoalTaskTable({ goals, listGroup, color, emptyMsg }) {
                             )}
                             {g.esdm && (
                               <span style={{ fontSize: 8.5, padding: "1px 6px", background: "#eaf3de", color: "#4a7316", borderRadius: 4, fontWeight: 700, border: "1px solid #cde0b2" }}>
-                                ESDM · {g.esdm.v}
+                                ESDM · {normEsdm(g.esdm).v}
                               </span>
                             )}
                             {g.source && g.source !== "ELCAR" && !g.vbmapp && !g.esdm && (
@@ -18443,13 +18688,24 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
           <div style={{ marginBottom: 16 }}>
             <input 
               type="file" 
-              accept="image/*,video/*"
+              accept="image/*"
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                
-                if (file.size > 2 * 1024 * 1024) {
-                  alert("❌ 파일 크기는 2MB 이하여야 합니다.");
+                // ★ [사진 크기] 사진·영상은 모든 아동이 함께 쓰는 저장 파일 하나에 글자로 바뀌어 들어간다.
+                //    예전엔 줄이지 않고 그대로 넣어 2MB 사진 1장이 파일을 약 2.7MB 키웠다(한 파일 한도 약 5MB) —
+                //    큰 사진 1~2장이면 센터 전체 저장이 막히고, 올릴 때마다 모든 기기가 그 큰 파일을 다시 받았다.
+                //    · 사진: 긴 쪽 1024픽셀로 줄여 넣는다(보고서 인쇄에 충분, 보통 100KB 안팎). 원본 크기 제한은 20MB로 둔다.
+                //    · 영상: 줄일 방법이 없어 공용 파일에 넣지 않는다(지금 구조에서는 받지 않음).
+                const isImageFile = (file.type || "").startsWith("image");
+                if (!isImageFile) {
+                  alert("❌ 영상은 첨부할 수 없습니다.\n영상은 크기를 줄일 수 없어, 센터 전체가 함께 쓰는 저장 파일이 가득 차 저장이 막힐 수 있습니다.\n사진만 올려 주세요.");
+                  e.target.value = "";
+                  return;
+                }
+                if (file.size > 20 * 1024 * 1024) {
+                  alert("❌ 사진 파일이 너무 큽니다(20MB 이하만 가능).");
+                  e.target.value = "";
                   return;
                 }
                 // ★ [사진-옛날짜] 사진은 4개월이 지나면 자동 정리된다. 기록 날짜가 4개월보다 전이면
@@ -18469,14 +18725,42 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
                   }
                 }
                 
+                // ★ [사진 크기] 사진을 줄여서 넣는다. 줄이기에 실패하면 넣지 않고 알린다(원본 그대로 넣지 않는다).
+                const shrinkImage = (dataUrl) => new Promise((resolve) => {
+                  const img = new Image();
+                  img.onload = () => {
+                    try {
+                      const tryAt = (maxSide, q) => {
+                        const scale = Math.min(1, maxSide / Math.max(img.width || 1, img.height || 1));
+                        const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+                        const cv = document.createElement("canvas");
+                        cv.width = w; cv.height = h;
+                        const ctx = cv.getContext("2d");
+                        ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
+                        ctx.drawImage(img, 0, 0, w, h);
+                        return cv.toDataURL("image/jpeg", q);
+                      };
+                      let out = tryAt(1024, 0.72);
+                      if (out.length > 300 * 1024) out = tryAt(800, 0.6);
+                      resolve(out && out.startsWith("data:image") ? out : null);
+                    } catch (err) { resolve(null); }
+                  };
+                  img.onerror = () => resolve(null);
+                  img.src = dataUrl;
+                });
                 const reader = new FileReader();
-                reader.onload = (ev) => {
-                  const base64 = ev.target?.result;
+                reader.onload = async (ev) => {
+                  const base64 = await shrinkImage(ev.target?.result);
+                  if (!base64) {
+                    alert("❌ 사진을 줄이는 중 문제가 생겨 올리지 못했습니다.\n다른 사진(JPG·PNG)으로 다시 시도해 주세요.");
+                    e.target.value = "";
+                    return;
+                  }
                   const list = mediaList || [];
                   const newMedia = {
                     id: "m_" + Date.now(),
                     name: file.name,
-                    type: file.type.startsWith("image") ? "image" : "video",
+                    type: "image",
                     base64: base64,
                     uploadedAt: dailyDate  // ★ 데일리 탭의 현재 날짜로 저장!
                   };
@@ -18504,7 +18788,7 @@ function DailyTab({ goals, activeChildId, dailyDate, setDailyDate, calcDayRate, 
               style={{ width: "100%", padding: "10px", fontSize: 12, border: `1px solid ${PKL}`, borderRadius: 6, background: "#fff" }}
             />
             <div style={{ fontSize: 10, color: "#888", marginTop: 6 }}>
-              💡 회기 사진/영상 첨부 (최대 2MB, 최근 20개, 4개월 후 자동 삭제) · 첨부 날짜: <b style={{ color: PKD }}>{dailyDate}</b>
+              💡 회기 사진 첨부 (자동으로 작게 줄여 저장, 최근 20개, 4개월 후 자동 삭제) · 첨부 날짜: <b style={{ color: PKD }}>{dailyDate}</b>
             </div>
           </div>
 
@@ -19299,7 +19583,7 @@ function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask
                 <input
                   value={pendingInput}
                   onChange={e => setPendingInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleAddNext(); } }}
+                  onKeyDown={e => { if (!(e.nativeEvent && e.nativeEvent.isComposing) && e.keyCode !== 229 && e.key === "Enter") { e.preventDefault(); handleAddNext(); } }}
                   placeholder={`L${(goal.tasks || []).length + (goal.startListNum || 1)}의 과제 이름 (예: 배 요구하기)`}
                   autoFocus
                   style={{
@@ -19469,7 +19753,7 @@ function GoalTaskCard({ goal, date, calcDayRate, addTask, removeTask, renameTask
           <input
             value={newTaskName}
             onChange={e => setNewTaskName(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") handleAdd(); }}
+            onKeyDown={e => { if (!(e.nativeEvent && e.nativeEvent.isComposing) && e.keyCode !== 229 && e.key === "Enter") handleAdd(); }}
             placeholder={(goal.tasks || []).length === 0
               ? `+ 첫 과제 (L${goal.startListNum || 1}) 입력`
               : "+ 새 과제 추가 (예: 사과, 배, 포도)"}
@@ -19541,11 +19825,13 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, setTaskDayOX, resetT
     const daily = task.daily || {};
     const dates = Object.keys(daily).sort();
     const rates = dates.map(d => calcDayRate(daily[d], task.plannedTrials)).filter(r => r !== null);
-    let count = 0, max = 0;
+    // ★ [🔥 배지] 예전엔 '지금까지 가장 길었던 연속'을 셌다 — 예전에 하루 80%를 찍고
+    //    그 뒤로 계속 낮아도 '1일 80%+'가 떠 있었다. 지금 이어지고 있는 연속만 센다.
+    let count = 0;
     for (const r of rates) {
-      if (r >= 80) { count++; max = Math.max(max, count); } else { count = 0; }
+      if (r >= 80) { count++; } else { count = 0; }
     }
-    return max;
+    return count;
   }, [task.daily, task.plannedTrials, calcDayRate]);
 
   const handleSaveName = () => {
@@ -19622,7 +19908,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, setTaskDayOX, resetT
             value={editName}
             onChange={e => setEditName(e.target.value)}
             onBlur={handleSaveName}
-            onKeyDown={e => { if (e.key === "Enter") handleSaveName(); if (e.key === "Escape") { setEditName(task.name); setEditing(false); } }}
+            onKeyDown={e => { if (!(e.nativeEvent && e.nativeEvent.isComposing) && e.keyCode !== 229 && e.key === "Enter") handleSaveName(); if (e.key === "Escape") { setEditName(task.name); setEditing(false); } }}
             style={{ width: "100%", padding: "3px 8px", border: `1px solid ${PK}`, borderRadius: 5, fontSize: 12, fontFamily: "inherit", outline: "none" }}
           />
         ) : (
@@ -19630,8 +19916,8 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, setTaskDayOX, resetT
             <span
               role="button"
               tabIndex={0}
-              onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditing(true); } }}
-              onClick={() => setEditing(true)}
+              onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditName(task.name); setEditing(true); } }}
+              onClick={() => { setEditName(task.name); setEditing(true); }}
               style={{ fontSize: 12.5, fontWeight: 500, color: isMastered ? "#5a7330" : "#333", cursor: "pointer", textDecoration: isMastered ? "line-through" : "none", textDecorationColor: GREEN, wordBreak: "keep-all", overflowWrap: "break-word" }}
               title="클릭하여 수정">
               {task.name}
@@ -20134,7 +20420,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, setTaskDayOX, resetT
   );
 }
 
-function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, bInter, domAvgs, reinfSchedule, reinfType, promptStart, promptNow, nextPlans, behaviors, dailyMemos, archiveList, finalMode = false }) {
+function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, selStratsCustom = "", bName, bInter, domAvgs, reinfSchedule, reinfType, promptStart, promptNow, nextPlans, behaviors, dailyMemos, archiveList, finalMode = false }) {
   const fn = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
   const jEunNeun = (n) => josa은는(n);
   const jIGa = (n) => josa이가(n);
@@ -20281,7 +20567,12 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
   const worst = domAvgs.length > 0 ? domAvgs.reduce((a,b) => a.avg < b.avg ? a : b, { domain: "—", avg: 999 }) : { domain: "—", avg: 0 };
   const funcs = selFuncs || [];
   const funcTxt = REPORT_FUNCS.filter(f => funcs.includes(f.k)).map(f => f.l).join(", ");
-  const stratTxt = (selStrats || []).slice(0, 3).join(", ") || "DTT, NET";
+  // ★ [중재 전략 문장] 예전엔 하나도 안 골라도 "DTT, NET 등을 통해"가 들어갔고,
+  //    직접 입력한 전략(PRT 등)은 이 문장에 안 들어갔다. 고른 것과 직접 입력한 것을 합쳐 쓰고,
+  //    아무것도 없으면 전략 이름을 쓰지 않는다.
+  const stratTxt = [...(selStrats || []), ...String(selStratsCustom || "").split(/[,，、]/).map(x => x.trim()).filter(Boolean)]
+    .filter((x, i, arr) => arr.indexOf(x) === i).slice(0, 3).join(", ");
+  const stratLead = stratTxt ? `${stratTxt} 등을 통해 ` : "";
 
   // ★ [수정] 표지 요약(buildSummary)과 같은 계산으로 통일 — O·X 제외, 0% 포함.
   //    기존 `lastV > 0` 조건은 0%로 기록된 목표(예: 8회 전부 0%)를 통째로 빼서 평균을 부풀렸다.
@@ -20549,7 +20840,10 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
       : (bName && bName.trim() ? [{ name: bName, funcs: selFuncs, intervention: bInter }] : []);
     bList.filter(b => b && (b.name || "").trim()).forEach(b => {
       const nm = b.name.trim();
-      const fTxt = REPORT_FUNCS.filter(f => (b.funcs || []).includes(f.k)).map(f => f.l).join(", ");
+      // ★ [기타 기능] '기타'를 고르고 직접 쓴 내용(funcOther)이 있으면 "기타" 대신 그 내용을 쓴다.
+      //    예전엔 직접 쓴 내용이 어디에도 안 나가고 "행동 기능은 기타로 확인되었고"로만 나갔다.
+      const fTxt = REPORT_FUNCS.filter(f => (b.funcs || []).includes(f.k))
+        .map(f => (f.k === "other" && String(b.funcOther || "").trim()) ? String(b.funcOther).trim() : f.l).join(", ");
       const iv = b.intervention === "__custom__" ? (b.interventionCustom || "") : (b.intervention || "");
       // ★ [수정] 기능·중재기법·강도를 짧은 문장 세 개로 끊지 않고 한 문장으로 잇는다.
       //    마지막 조각만 종결형으로 만들고 앞은 연결형으로 둔다.
@@ -20598,9 +20892,9 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
       sec1Parts.push(`진행 중인 목표의 평균 정반응률은 ${lastAvg}%입니다.`);
     } else {
       if (finalMode) {
-        sec1Parts.push(`${fn}의 학습 출발점과 기초 수준을 확인하는 과정을 거쳐, ${stratTxt} 등을 통해 단계적으로 중재를 진행하였습니다.`);
+        sec1Parts.push(`${fn}의 학습 출발점과 기초 수준을 확인하는 과정을 거쳐, ${stratLead}단계적으로 중재를 진행하였습니다.`);
       } else {
-        sec1Parts.push(`지금은 ${fn}의 학습 출발점을 확인하고 기초선을 잡는 단계입니다. ${stratTxt} 등을 통해 단계적으로 진행하고 있습니다.`);
+        sec1Parts.push(`지금은 ${fn}의 학습 출발점을 확인하고 기초선을 잡는 단계입니다. ${stratLead}단계적으로 진행하고 있습니다.`);
       }
     }
   } else {
@@ -20668,7 +20962,8 @@ function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, bName, b
     const masteredText = masteredDomains.length > 0
       ? ` 특히 ${masteredDomains.slice(0, 2).map(d => `'${cleanDomainKey(d.domain)}'`).join(", ")} 영역이 숙달 수준입니다.`
       : (best.domain !== "—" ? ` '${cleanDomainKey(best.domain)}' 영역은 평균 ${best.avg}%로 숙달 수준입니다.` : "");
-    sec2Parts.push(`${fn}${jEunNeun(fn)} 이번 기간에 설정된 ${total}개 단기 목표(STO) 전체에서 '2회 연속 80% 이상' 준거를 달성했습니다. 학습한 기술이 안정적으로 유지되고 있습니다.${masteredText} 일반화 단계로 넘어갈 차례입니다.`);
+    // ★ [근거 없는 문장 제거] "학습한 기술이 안정적으로 유지되고 있습니다" — 준거 달성 뒤 유지 여부는 따로 재지 않는다.
+    sec2Parts.push(`${fn}${jEunNeun(fn)} 이번 기간에 설정된 ${total}개 단기 목표(STO) 전체에서 '2회 연속 80% 이상' 준거를 달성했습니다.${masteredText} 일반화 단계로 넘어갈 차례입니다.`);
   } else if (domGrowth.length >= 2) {
     const g1 = domGrowth[0], g2 = domGrowth[1];
     // ★ [수정] 목표가 1개뿐인 영역을 그냥 "영역"이라 부르면 규모가 과장돼 보인다 — 목표 수를 밝힌다.
@@ -21385,23 +21680,7 @@ function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, bala
       )}
 
 
-      {/* W-34: VB-MAPP 마일스톤 격자 (보고서 탭에도 표시 — 인쇄에는 별도 섹션) */}
-      {(() => {
-        const hasVbmapp = (goals || []).some(g =>
-          g.source === "VB-MAPP" || (g.source !== "기타" && g.source !== "ESDM" && classifyCurriculum(g.domain || "") === "vbmapp")
-        );
-        if (!hasVbmapp) return null;
-        return (
-          <div style={CS}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, marginBottom: 12, color: PKD }}>VB-MAPP 마일스톤 현황</h3>
-            <div style={{ fontSize: 11, color: "#666", lineHeight: 1.7, padding: "8px 12px", background: "#FEFAF6", borderLeft: "2px solid #FBDBC6", borderRadius: 4, marginBottom: 12 }}>
-              ※ VB-MAPP은 자폐 아동의 언어/사회성 발달을 16개 영역, 3단계(Level 1~3)로 평가하는 표준 도구입니다.<br />
-              ※ 색깔 동그라미(●)는 해당 마일스톤이 달성(리스트 2 이동)되었음을 의미합니다.
-            </div>
-            <VbmappGrid goals={goals} />
-          </div>
-        );
-      })()}
+      {/* ★ [마일스톤 표 제거 · 2026-11 원장 결정] 인쇄와 같은 이유로 보고서 탭 화면에서도 뺀다 */}
 
       {/* 성장 추이 (시계열) */}
       {allDates.length > 1 && (
@@ -21440,7 +21719,8 @@ function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, bala
             {/* ★ 컷오프 알림 — 이전 보고서 보관 후 그래프 새로 그리는 중 */}
             {effectiveArchiveList && effectiveArchiveList.length > 0 && effectiveArchiveList[0].savedAt && (
               <div style={{ fontSize: 11, color: "#1d4d80", lineHeight: 1.6, padding: "8px 12px", background: "#e8f4ff", borderLeft: "3px solid #2a6cb2", borderRadius: 4, marginBottom: 12 }}>
-                💡 <b>그래프 컷오프 적용 중</b> — 직전 보관 보고서의 마지막 데이터({cutoffOf(effectiveArchiveList[0])}) 이후 데이터만 표시되고 있습니다. 이전 데이터를 다시 보려면 아래 보관함에서 해당 보고서를 삭제하세요.
+                {/* ★ [안내 정정] 예전엔 "보관함에서 해당 보고서를 삭제하세요"라고 안내해, 따라 하면 보관본이 영구 삭제됐다 */}
+                💡 <b>그래프 컷오프 적용 중</b> — 직전 보관 보고서의 마지막 데이터({cutoffOf(effectiveArchiveList[0])}) 이후 데이터만 표시되고 있습니다. 이전 데이터를 다시 보려면 아래 보관함에서 <b>[↩ 그래프 복원]</b>을 누르세요(보관본은 지워지지 않습니다).
               </div>
             )}
             <GoalDashboard stos={goalsForReport} therapistChanges={info?.therapistChanges} goalHandovers={info?.goalHandovers} />
@@ -21573,15 +21853,25 @@ function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, bala
               };
 
               const generate = () => {
-                const arr = Array.from(selectedSet);
-                if (arr.length === 0) return;
-                const para = buildReferralReason(arr, info);
-                const marker = `\n\n<!--SELECTED:${arr.join("|")}-->`;
-                setInfo(prev => ({ ...prev, finalReferralReason: para + marker }));
+                // ★ [지우기 전 확인] 직접 고친 글이 확인 없이 지워지던 것 — 칸에 글이 있으면 먼저 묻는다
+                const run = () => {
+                  const arr = Array.from(selectedSet);
+                  if (arr.length === 0) return;
+                  const para = buildReferralReason(arr, info);
+                  const marker = `\n\n<!--SELECTED:${arr.join("|")}-->`;
+                  setInfo(prev => ({ ...prev, finalReferralReason: para + marker }));
+                };
+                if (String(visibleText || "").trim() && askConfirm) askConfirm("지금 칸의 글을 새로 만든 문장으로 바꿉니다.\n직접 고친 내용은 사라지고 되돌릴 수 없습니다.\n\n계속하시겠습니까?", run);
+                else run();
               };
 
               const clear = () => {
-                setInfo(prev => ({ ...prev, finalReferralReason: "" }));
+                // ★ [지우기 전 확인] 직접 고친 글이 확인 없이 지워지던 것 — 칸에 글이 있으면 먼저 묻는다
+                const run = () => {
+                  setInfo(prev => ({ ...prev, finalReferralReason: "" }));
+                };
+                if (String(visibleText || "").trim() && askConfirm) askConfirm("이 칸의 글과 고른 키워드를 모두 지웁니다.\n되돌릴 수 없습니다.\n\n계속하시겠습니까?", run);
+                else run();
               };
 
               // ★ [57-1] 같은 아동 IEP의 의뢰 사유 — 안내 배너 + 수동 다시 불러오기.
@@ -21710,15 +22000,25 @@ function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, bala
               };
 
               const generateEnd = () => {
-                const arr = Array.from(selectedSetEnd);
-                if (arr.length === 0) return;
-                const para = buildEndReason(arr, info);
-                const marker = `\n\n<!--SELECTED:${arr.join("|")}-->`;
-                setInfo(prev => ({ ...prev, finalEndReason: para + marker }));
+                // ★ [지우기 전 확인] 직접 고친 글이 확인 없이 지워지던 것 — 칸에 글이 있으면 먼저 묻는다
+                const run = () => {
+                  const arr = Array.from(selectedSetEnd);
+                  if (arr.length === 0) return;
+                  const para = buildEndReason(arr, info);
+                  const marker = `\n\n<!--SELECTED:${arr.join("|")}-->`;
+                  setInfo(prev => ({ ...prev, finalEndReason: para + marker }));
+                };
+                if (String(visibleTextEnd || "").trim() && askConfirm) askConfirm("지금 칸의 글을 새로 만든 문장으로 바꿉니다.\n직접 고친 내용은 사라지고 되돌릴 수 없습니다.\n\n계속하시겠습니까?", run);
+                else run();
               };
 
               const clearEnd = () => {
-                setInfo(prev => ({ ...prev, finalEndReason: "" }));
+                // ★ [지우기 전 확인] 직접 고친 글이 확인 없이 지워지던 것 — 칸에 글이 있으면 먼저 묻는다
+                const run = () => {
+                  setInfo(prev => ({ ...prev, finalEndReason: "" }));
+                };
+                if (String(visibleTextEnd || "").trim() && askConfirm) askConfirm("이 칸의 글과 고른 키워드를 모두 지웁니다.\n되돌릴 수 없습니다.\n\n계속하시겠습니까?", run);
+                else run();
               };
 
               return (
@@ -21834,8 +22134,13 @@ function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, bala
             </h3>
             <button
               onClick={() => {
-                const auto = buildFinalSummary(goals, info, reportPeriodEnd, stosForReport);
-                setInfo(prev => ({ ...prev, finalSummary: auto, finalSummaryStamp: currentTextStamp }));
+                // ★ [덮어쓰기 전 확인] 직접 고친 글이 확인 없이 덮어써지던 것
+                const run = () => {
+                  const auto = buildFinalSummary(goals, info, reportPeriodEnd, stosForReport);
+                  setInfo(prev => ({ ...prev, finalSummary: auto, finalSummaryStamp: currentTextStamp }));
+                };
+                if (String(info.finalSummary || "").trim() && askConfirm) askConfirm("지금 칸의 글을 새로 만든 문장으로 바꿉니다.\n직접 고친 내용은 사라지고 되돌릴 수 없습니다.\n\n계속하시겠습니까?", run);
+                else run();
               }}
               style={{ padding: "5px 12px", fontSize: 10.5, border: "1px solid #5a8c1f", borderRadius: 6, background: "#f5f7f0", color: "#3d6014", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
               title="현재 데이터로 자동 생성된 문장으로 덮어씁니다 (수동 편집 내용 사라짐)">
@@ -21866,8 +22171,13 @@ function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, bala
             </h3>
             <button
               onClick={() => {
-                const auto = buildFinalGrowth(goals, info, stosForReport);
-                setInfo(prev => ({ ...prev, finalGrowth: auto, finalGrowthStamp: currentTextStamp }));
+                // ★ [덮어쓰기 전 확인] 직접 고친 글이 확인 없이 덮어써지던 것
+                const run = () => {
+                  const auto = buildFinalGrowth(goals, info, stosForReport);
+                  setInfo(prev => ({ ...prev, finalGrowth: auto, finalGrowthStamp: currentTextStamp }));
+                };
+                if (String(info.finalGrowth || "").trim() && askConfirm) askConfirm("지금 칸의 글을 새로 만든 문장으로 바꿉니다.\n직접 고친 내용은 사라지고 되돌릴 수 없습니다.\n\n계속하시겠습니까?", run);
+                else run();
               }}
               style={{ padding: "5px 12px", fontSize: 10.5, border: "1px solid #5a8c1f", borderRadius: 6, background: "#f5f7f0", color: "#3d6014", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
               title="현재 데이터로 자동 생성된 문장으로 덮어씁니다 (수동 편집 내용 사라짐)">
@@ -21915,23 +22225,38 @@ function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, bala
 
             const toggle = (label) => {
               const newSel = new Set(selectedSet);
+              const NONE = "특이 문제행동 없음";
               if (newSel.has(label)) newSel.delete(label);
-              else newSel.add(label);
+              else {
+                // ★ [없음+다른 칩] '없음'을 고르면 다른 칩을 풀고, 다른 칩을 고르면 '없음'을 푼다
+                if (label === NONE) newSel.clear(); else newSel.delete(NONE);
+                newSel.add(label);
+              }
               const arr = Array.from(newSel);
               const marker = arr.length > 0 ? `\n\n<!--SELECTED:${arr.join("|")}-->` : "";
               setInfo(prev => ({ ...prev, finalBehaviorChange: visibleText + marker }));
             };
 
             const generate = () => {
-              const arr = Array.from(selectedSet);
-              if (arr.length === 0) return;
-              const para = buildBehaviorChange(arr, info);
-              const marker = `\n\n<!--SELECTED:${arr.join("|")}-->`;
-              setInfo(prev => ({ ...prev, finalBehaviorChange: para + marker }));
+              // ★ [지우기 전 확인] 직접 고친 글이 확인 없이 지워지던 것 — 칸에 글이 있으면 먼저 묻는다
+              const run = () => {
+                const arr = Array.from(selectedSet);
+                if (arr.length === 0) return;
+                const para = buildBehaviorChange(arr, info);
+                const marker = `\n\n<!--SELECTED:${arr.join("|")}-->`;
+                setInfo(prev => ({ ...prev, finalBehaviorChange: para + marker }));
+              };
+              if (String(visibleText || "").trim() && askConfirm) askConfirm("지금 칸의 글을 새로 만든 문장으로 바꿉니다.\n직접 고친 내용은 사라지고 되돌릴 수 없습니다.\n\n계속하시겠습니까?", run);
+              else run();
             };
 
             const clear = () => {
-              setInfo(prev => ({ ...prev, finalBehaviorChange: "" }));
+              // ★ [지우기 전 확인] 직접 고친 글이 확인 없이 지워지던 것 — 칸에 글이 있으면 먼저 묻는다
+              const run = () => {
+                setInfo(prev => ({ ...prev, finalBehaviorChange: "" }));
+              };
+              if (String(visibleText || "").trim() && askConfirm) askConfirm("이 칸의 글과 고른 키워드를 모두 지웁니다.\n되돌릴 수 없습니다.\n\n계속하시겠습니까?", run);
+              else run();
             };
 
             return (
@@ -22043,15 +22368,25 @@ function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, bala
             };
 
             const generate = () => {
-              const arr = Array.from(selectedSet);
-              if (arr.length === 0) return;
-              const para = buildHomeMaintenance(arr, info);
-              const marker = `\n\n<!--SELECTED:${arr.join("|")}-->`;
-              setInfo(prev => ({ ...prev, finalHomeMaintenance: para + marker }));
+              // ★ [지우기 전 확인] 직접 고친 글이 확인 없이 지워지던 것 — 칸에 글이 있으면 먼저 묻는다
+              const run = () => {
+                const arr = Array.from(selectedSet);
+                if (arr.length === 0) return;
+                const para = buildHomeMaintenance(arr, info);
+                const marker = `\n\n<!--SELECTED:${arr.join("|")}-->`;
+                setInfo(prev => ({ ...prev, finalHomeMaintenance: para + marker }));
+              };
+              if (String(visibleText || "").trim() && askConfirm) askConfirm("지금 칸의 글을 새로 만든 문장으로 바꿉니다.\n직접 고친 내용은 사라지고 되돌릴 수 없습니다.\n\n계속하시겠습니까?", run);
+              else run();
             };
 
             const clear = () => {
-              setInfo(prev => ({ ...prev, finalHomeMaintenance: "" }));
+              // ★ [지우기 전 확인] 직접 고친 글이 확인 없이 지워지던 것 — 칸에 글이 있으면 먼저 묻는다
+              const run = () => {
+                setInfo(prev => ({ ...prev, finalHomeMaintenance: "" }));
+              };
+              if (String(visibleText || "").trim() && askConfirm) askConfirm("이 칸의 글과 고른 키워드를 모두 지웁니다.\n되돌릴 수 없습니다.\n\n계속하시겠습니까?", run);
+              else run();
             };
 
             return (
@@ -22162,15 +22497,25 @@ function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, bala
             };
 
             const generate = () => {
-              const arr = Array.from(selectedSet);
-              if (arr.length === 0) return;
-              const para = buildHandover(arr, info);
-              const marker = `\n\n<!--SELECTED:${arr.join("|")}-->`;
-              setInfo(prev => ({ ...prev, finalHandover: para + marker }));
+              // ★ [지우기 전 확인] 직접 고친 글이 확인 없이 지워지던 것 — 칸에 글이 있으면 먼저 묻는다
+              const run = () => {
+                const arr = Array.from(selectedSet);
+                if (arr.length === 0) return;
+                const para = buildHandover(arr, info);
+                const marker = `\n\n<!--SELECTED:${arr.join("|")}-->`;
+                setInfo(prev => ({ ...prev, finalHandover: para + marker }));
+              };
+              if (String(visibleText || "").trim() && askConfirm) askConfirm("지금 칸의 글을 새로 만든 문장으로 바꿉니다.\n직접 고친 내용은 사라지고 되돌릴 수 없습니다.\n\n계속하시겠습니까?", run);
+              else run();
             };
 
             const clear = () => {
-              setInfo(prev => ({ ...prev, finalHandover: "" }));
+              // ★ [지우기 전 확인] 직접 고친 글이 확인 없이 지워지던 것 — 칸에 글이 있으면 먼저 묻는다
+              const run = () => {
+                setInfo(prev => ({ ...prev, finalHandover: "" }));
+              };
+              if (String(visibleText || "").trim() && askConfirm) askConfirm("이 칸의 글과 고른 키워드를 모두 지웁니다.\n되돌릴 수 없습니다.\n\n계속하시겠습니까?", run);
+              else run();
             };
 
             return (
@@ -22277,15 +22622,25 @@ function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, bala
             };
 
             const generate = () => {
-              const arr = Array.from(selectedSet);
-              if (arr.length === 0) return;
-              const para = buildRecommendations(arr, info);
-              const marker = `\n\n<!--SELECTED:${arr.join("|")}-->`;
-              setInfo(prev => ({ ...prev, finalRecommendations: para + marker }));
+              // ★ [지우기 전 확인] 직접 고친 글이 확인 없이 지워지던 것 — 칸에 글이 있으면 먼저 묻는다
+              const run = () => {
+                const arr = Array.from(selectedSet);
+                if (arr.length === 0) return;
+                const para = buildRecommendations(arr, info);
+                const marker = `\n\n<!--SELECTED:${arr.join("|")}-->`;
+                setInfo(prev => ({ ...prev, finalRecommendations: para + marker }));
+              };
+              if (String(visibleText || "").trim() && askConfirm) askConfirm("지금 칸의 글을 새로 만든 문장으로 바꿉니다.\n직접 고친 내용은 사라지고 되돌릴 수 없습니다.\n\n계속하시겠습니까?", run);
+              else run();
             };
 
             const clear = () => {
-              setInfo(prev => ({ ...prev, finalRecommendations: "" }));
+              // ★ [지우기 전 확인] 직접 고친 글이 확인 없이 지워지던 것 — 칸에 글이 있으면 먼저 묻는다
+              const run = () => {
+                setInfo(prev => ({ ...prev, finalRecommendations: "" }));
+              };
+              if (String(visibleText || "").trim() && askConfirm) askConfirm("이 칸의 글과 고른 키워드를 모두 지웁니다.\n되돌릴 수 없습니다.\n\n계속하시겠습니까?", run);
+              else run();
             };
 
             // ★ [57-6] 비워두면 인쇄 시 기본 권고가 대신 나간다는 걸 알리고, 미리 채울 수단을 준다.
@@ -22433,7 +22788,7 @@ function ReportTab({ childId = null, currentUser, info, goals, currentAvgs, bala
         const photos = all.filter(m => {
           const d = m.uploadedAt || "";
           if (!d || m.type !== "image") return false;
-          if (cutoffDate && d < cutoffDate) return false;
+          if (cutoffDate && d <= cutoffDate) return false;   // ★ [사진 기준일] 기록과 같이 기준일 당일은 지난 보고서 몫
           if (pStart && d < pStart) return false;
           if (pEnd && d > pEnd) return false;
           return true;
@@ -22564,7 +22919,7 @@ function ArchiveListCard({ list, onSave, onDelete, onView, cutoffDisabled, setCu
       const res = await onSave();
       if (res?.skipped && res.reason === "empty") {
         alert("보관할 보고서 내용이 없습니다. 먼저 [보고서 생성]을 눌러 본문을 작성해 주세요.");
-      } else if (res) {
+      } else if (res && !res.cloudSaveFailed) {   // ★ [보관 실패 알림] 실패는 이미 따로 알렸다
         alert(res.overwrite ? "✅ 같은 기간의 자동 보관본을 업데이트했습니다." : "✅ 현재 보고서를 보관함에 저장했습니다.\n\n다음 보고서부터는 보관 시점 이후 데이터만 그래프에 표시됩니다.");
       }
     } catch (e) {
@@ -22878,7 +23233,8 @@ function GrowthHistoryChart({ list }) {
                   return (
                     <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 10, background: c, color: "#555" }}>
                       <span style={{ width: 8, height: 8, borderRadius: 2, background: "#fff", border: "1px solid #00000020" }} />
-                      <b>{s._indexEntry?.title || `${s.period} ${s._indexEntry?.order}차`}</b>
+                      {/* ★ [차수 표시] 저장 당시 제목 대신, 보관함 목록과 같은 방식(지금 목록에서 다시 센 차수)으로 쓴다 */}
+                      <b>{archiveDisplayTitle(s._indexEntry, list) || s._indexEntry?.title || `${s.period}`}</b>
                     </div>
                   );
                 })}
@@ -22986,6 +23342,7 @@ function ReportGeneratorSection({
         curFields: reportFields,
         selFuncs: firstB.funcs || [],
         selStrats: reportSelStrats,
+        selStratsCustom: reportSelStratsCustom,   // ★ [중재 전략 문장] 직접 입력한 전략도 문장에
         bName: firstB.name || "",
         bInter: firstBInter,
         domAvgs: domAvgs || [],
@@ -23008,6 +23365,30 @@ function ReportGeneratorSection({
       //    그 안에 직접 쓰신 칸(MYNOTE)이 들어 있으면 같이 날아가므로,
       //    새 문장에 옛 MYNOTE를 다시 붙여 넣는다. 자동 문장만 바뀌고 직접 쓴 글은 남는다.
       const MYNOTE_KEEP = /\n{0,2}<!--MYNOTE:([\s\S]*?)-->/;
+      // ★ [다시 생성 · 칩 유지] 예전엔 다시 생성하면 각 칸에서 고른 키워드 칩과 ✨로 덧붙인 문단이 사라졌다.
+      //    인쇄 직전 '낡은 문장' 경고를 보고 다시 생성하면 바로 그 순간 칩 문단이 빠졌다.
+      //    고른 칩이 있던 칸은 새 데이터 문단 뒤에 같은 칩 문단을 다시 붙이고 선택도 그대로 둔다.
+      const CHIP_BUILDERS = {
+        "종합 현황": buildInterimSummary,
+        "이번 기간의 성장과 변화": buildInterimGrowth,
+        "가정에서 함께 하기": buildInterimHomeCoop,
+        "다음 목표": buildInterimNextGoal
+      };
+      const SELECTED_KEEP = /\n{0,2}<!--SELECTED:([^>]*)-->\s*$/;
+      const _guardNote = (t) => String(t).replace(/-->/g, "--​>");
+      Object.keys(CHIP_BUILDERS).forEach(k => {
+        const prevRaw = String((reportSections || {})[k] || "");
+        const selM = prevRaw.match(SELECTED_KEEP);
+        const chips = selM ? selM[1].split("|").filter(Boolean) : [];
+        if (chips.length === 0 || sectionsOnly[k] == null) return;
+        const base = String(sectionsOnly[k] || "").trim();
+        let para = "";
+        try { para = CHIP_BUILDERS[k](chips, info) || ""; } catch (e) { para = ""; }
+        const merged = para ? (base ? `${base}\n\n${para}` : para) : base;
+        sectionsOnly[k] = merged
+          + (base ? `\n\n<!--AUTOBASE:${_guardNote(base)}-->` : "")
+          + `\n\n<!--SELECTED:${chips.join("|")}-->`;
+      });
       Object.keys(sectionsOnly).forEach(k => {
         const prevNote = String((reportSections || {})[k] || "").match(MYNOTE_KEEP);
         if (!prevNote) return;
@@ -23023,9 +23404,9 @@ function ReportGeneratorSection({
       //    과제가 늘어도 다시 누르지 않으면 옛 숫자가 그대로 인쇄됐다 — 표지는 매번 새로
       //    계산하므로 한 보고서 안에서 숫자가 갈렸다(표지 20개 / 종합 현황 14개).
       setReportPatch({ reportSections: sectionsOnly, reportSectionsStamp: currentTextStamp });
-      if (meta && meta.totalMemoCount > 0) {
-        setMemoAlert(meta);
-      }
+      // ★ [안내 정정] 예전엔 "회기 메모 N개가 분석되었습니다 … 메모는 분석에 참조되었습니다"가 떴지만,
+      //    메모는 보고서 문장에 전혀 쓰지 않는다(내부 기록용, 개수만 셌다). 사실과 다른 안내라 띄우지 않는다.
+      void meta;
       setLoading(false);
       setExpanded(true);
       if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
@@ -23181,7 +23562,7 @@ function ReportGeneratorSection({
         <span style={{ fontSize: 11, color: "#888", marginLeft: "auto" }}>데이터 시트 · IEP 정보와 실시간 미러링</span>
       </div>
       <div style={{ fontSize: 11.5, color: "#666", lineHeight: 1.7, marginBottom: 14, padding: "9px 13px", background: PKL, borderRadius: 8 }}>
-        💡 아래 정보를 입력하거나 비워두세요. <b>[보고서 자동 생성]</b>을 누르면 [③ 데일리 데이터]의 task 기록과 성장 추이를 분석해 총 8개 섹션의 보고서 본문이 자동으로 작성됩니다. 생성 후 각 섹션을 수정·편집할 수 있습니다.
+        💡 아래 정보를 입력하거나 비워두세요. <b>[보고서 자동 생성]</b>을 누르면 [③ 데일리 데이터]의 task 기록과 성장 추이를 분석해 총 4개 섹션의 보고서 본문이 자동으로 작성됩니다. 생성 후 각 섹션을 수정·편집할 수 있습니다.
       </div>
 
       {/* ═ 치료 강도 · 보고 기간 ═ */}
@@ -23813,10 +24194,13 @@ function ReportGeneratorSection({
               const visibleText = rawValue.replace(MARKER_RE, "").replace(AUTOBASE_RE, "").replace(MYNOTE_RE, "");
               const selectedSet = new Set(selected);
 
+              // ★ [화살표 보호] 직접 쓴 글에 "-->"가 있으면 숨은 표식이 거기서 끝난 것으로 읽혀
+              //    글이 둘로 쪼개졌다(뒷부분이 위 자동 문장 칸으로 넘어감). 눈에 안 보이는 글자를 끼워 막는다.
+              const _guard = (t) => String(t).replace(/-->/g, "--​>");
               const packStored = (text, arr, base, note = myNote) =>
                 text
-                + (note ? `\n\n<!--MYNOTE:${note}-->` : "")
-                + (base ? `\n\n<!--AUTOBASE:${base}-->` : "")
+                + (note ? `\n\n<!--MYNOTE:${_guard(note)}-->` : "")
+                + (base ? `\n\n<!--AUTOBASE:${_guard(base)}-->` : "")
                 + (arr.length > 0 ? `\n\n<!--SELECTED:${arr.join("|")}-->` : "");
 
               const toggle = (label) => {
@@ -24060,7 +24444,7 @@ function TaskProgressTable({ goals, calcDayRate, listGroup, title, color, archiv
                         <div style={{ fontSize: 9, color: "#aaa", marginTop: 2 }}>{shortDomain(goal.domain)}{goal.subDomain ? ` · ${goal.subDomain}` : ""}</div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 4 }}>
                           {goal.vbmapp && <span style={{ fontSize: 8.5, padding: "1px 5px", background: "#e6f1fb", color: "#2a6cb2", borderRadius: 5, fontWeight: 600 }}>VB: {goal.vbmapp.v} L{goal.vbmapp.lv}</span>}
-                          {goal.esdm && <span style={{ fontSize: 8.5, padding: "1px 5px", background: "#eaf3de", color: "#4a7316", borderRadius: 5, fontWeight: 600 }}>ESDM: {goal.esdm.v}</span>}
+                          {goal.esdm && <span style={{ fontSize: 8.5, padding: "1px 5px", background: "#eaf3de", color: "#4a7316", borderRadius: 5, fontWeight: 600 }}>ESDM: {normEsdm(goal.esdm).v}</span>}
                           {goal.listName && <span style={{ fontSize: 8.5, padding: "1px 5px", background: "#fff5d6", color: "#a87108", borderRadius: 5, fontWeight: 600 }}>{goal.listName}</span>}
                         </div>
                       </td>
@@ -24137,7 +24521,7 @@ function MasteredTable({ goals }) {
                   <div style={{ textDecoration: "line-through", textDecorationColor: GREEN, textDecorationThickness: 1 }}>{itemLabel(g.item)}</div>
                   <div style={{ marginTop: 3, display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {g.vbmapp && <span style={{ fontSize: 9, padding: "1px 6px", background: "#e6f1fb", color: "#2a6cb2", borderRadius: 6, fontWeight: 600 }}>VB: {g.vbmapp.v} L{g.vbmapp.lv}</span>}
-                    {g.esdm && <span style={{ fontSize: 9, padding: "1px 6px", background: "#eaf3de", color: "#4a7316", borderRadius: 6, fontWeight: 600 }}>ESDM: {g.esdm.v}</span>}
+                    {g.esdm && <span style={{ fontSize: 9, padding: "1px 6px", background: "#eaf3de", color: "#4a7316", borderRadius: 6, fontWeight: 600 }}>ESDM: {normEsdm(g.esdm).v}</span>}
                     {g.source && g.source !== "ELCAR" && <span style={{ fontSize: 9, padding: "1px 6px", background: "#f0f0f0", color: "#666", borderRadius: 6, fontWeight: 600 }}>{g.source}</span>}
                   </div>
                 </td>
@@ -24205,7 +24589,7 @@ function GoalStatusTable({ goals, listGroup, title, color }) {
                     <div>{itemLabel(g.item)}</div>
                     <div style={{ marginTop: 3, display: "flex", gap: 4, flexWrap: "wrap" }}>
                       {g.vbmapp && <span style={{ fontSize: 9, padding: "1px 6px", background: "#e6f1fb", color: "#2a6cb2", borderRadius: 6, fontWeight: 600 }}>VB: {g.vbmapp.v} L{g.vbmapp.lv}</span>}
-                      {g.esdm && <span style={{ fontSize: 9, padding: "1px 6px", background: "#eaf3de", color: "#4a7316", borderRadius: 6, fontWeight: 600 }}>ESDM: {g.esdm.v}</span>}
+                      {g.esdm && <span style={{ fontSize: 9, padding: "1px 6px", background: "#eaf3de", color: "#4a7316", borderRadius: 6, fontWeight: 600 }}>ESDM: {normEsdm(g.esdm).v}</span>}
                       {g.source && g.source !== "ELCAR" && <span style={{ fontSize: 9, padding: "1px 6px", background: "#f0f0f0", color: "#666", borderRadius: 6, fontWeight: 600 }}>{g.source}</span>}
                     </div>
                   </td>
@@ -24996,7 +25380,8 @@ function DomainCompletionSection({ goals }) {
     || Object.keys(g.daily || {}).length > 0
   );
   goals.forEach(g => {
-    if (!g.includeInIep) return;
+    // ★ [숫자 맞추기] 표지 요약과 같은 기준 — 데이터시트에 올린 목표만 센다(위 buildStartEndCompare와 같은 이유)
+    if (!g.includeInIep || !g.showInDaily) return;
     // ★ [57-8 / 55-3 마무리] 여기만 원본 영역으로 묶고 라벨에서 로마숫자만 떼고 있었다.
     //    그래서 '시작 vs 종결 비교'·종합 평가는 '택트'라고 쓰는데
     //    이 표만 '화자'라고 써서 같은 보고서 안에서 영역 이름이 갈렸다.
