@@ -15570,8 +15570,12 @@ function ArchiveViewModal({ item, onClose, list }) {
                   <b style={{ color: PKD }}>아동:</b> {snapshot.info.name || "—"}{snapshot.info.birth ? ` (${snapshot.info.birth})` : ""}
                   {snapshot.info.therapist && <> · <b style={{ color: PKD }}>치료사:</b> {snapshot.info.therapist}</>}
                   {(() => {
-                    const ps = snapshot.info.evalStart || snapshot.info.pStart || "";
-                    const pe = snapshot.info.evalEnd || snapshot.info.pEnd || "";
+                    // ★ [보관본 기간] 중간·종결 보관본은 그 보고서의 보고 기간(prevEvalStart~End)을 보여 준다.
+                    //    예전엔 IEP 평가일(evalStart~End)을 먼저 써서, 2026.05~08 보고서에 "기간: 2023-06-01 ~ 2023-06-02"처럼 나왔다.
+                    //    IEP 계획안 보관본만 평가일을 쓴다.
+                    const _useReport = !snapshot.isIep && (snapshot.prevEvalStart || snapshot.prevEvalEnd);
+                    const ps = _useReport ? (snapshot.prevEvalStart || "") : (snapshot.info.evalStart || snapshot.info.pStart || "");
+                    const pe = _useReport ? (snapshot.prevEvalEnd || "") : (snapshot.info.evalEnd || snapshot.info.pEnd || "");
                     if (!ps && !pe) return null;
                     return <><br /><b style={{ color: PKD }}>기간:</b> {ps || "—"} ~ {pe || "—"}</>;
                   })()}
