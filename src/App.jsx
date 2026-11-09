@@ -10237,6 +10237,45 @@ export default function App() {
     alert("IEP 데이터가 JSON 파일로 내보내졌습니다.\n이 파일을 중간보고서 시스템(v9)의 '데이터 복구'로 불러올 수 있습니다.");
   };
 
+  // ★ [지운 아동 정리 · 2026-11-09 원장 결정] 🗑 삭제한 아동은 지운 표시(deletedAt)만 달고 기록이 통째로 남아 있었다.
+  //    센터 기록의 약 30%가 화면에 안 보이는 지운 아동 기록이라, 저장할 때마다 함께 오갔다.
+  //    원장님이 누르면 지운 아동의 내용만 비우고 지운 표시·이름·담당·복사 출처는 남긴다(다른 기기에서 되살아나지 않게 updatedAt을 지금으로).
+  //    보관 아동·종결 아동은 지운 아동이 아니므로 건드리지 않는다. 저장은 평소처럼 자동 저장이 한다.
+  //    아동 정보(info) 안의 사진(mediaList)·보고서 문장도 비운다 — 이름·담당·복사 출처만 남긴다.
+  const _DELETED_INFO_KEEP = { name: 1, ownerName: 1, copiedFrom: 1, copiedFromOwner: 1 };
+  const _deletedInfoHasContent = (info) => {
+    const blank = blankChild().info || {};   // 빈 아동의 기본값과 같으면 비울 내용이 없는 것
+    return Object.entries(info || {}).some(([k, v]) =>
+      !_DELETED_INFO_KEEP[k] && v != null && v !== "" && JSON.stringify(v) !== JSON.stringify(blank[k]));
+  };
+  const deletedWithContent = useMemo(
+    () => (children || []).filter(c => c && c.deletedAt && (
+      (Array.isArray(c.goals) && c.goals.length > 0) ||
+      (c.dailyMemos && Object.keys(c.dailyMemos).length > 0) ||
+      (Array.isArray(c.history) && c.history.length > 0) ||
+      _deletedInfoHasContent(c.info)
+    )),
+    [children]
+  );
+  const purgeDeletedChildren = () => {
+    const ids = new Set(deletedWithContent.map(c => c.id));
+    if (ids.size === 0) return;
+    askConfirm(
+      `지운 아동 ${ids.size}명의 기록 내용을 비웁니다.\n\n` +
+      `· 먼저 [💾 전체 백업]으로 파일을 받아 두세요. 비운 내용은 앱에서 되돌릴 수 없고, 백업 파일에만 남습니다.\n` +
+      `· 이미 🗑 삭제한 아동만 대상입니다. 보관 아동·종결 아동은 건드리지 않습니다.\n` +
+      `· 지운 표시는 남겨서 다른 기기에서 되살아나지 않습니다.`,
+      () => {
+        const now = new Date().toISOString();
+        setChildren(prev => prev.map(c => (c && ids.has(c.id) && c.deletedAt)
+          ? migrateChild({ id: c.id, deletedAt: c.deletedAt, updatedAt: now,
+              info: Object.fromEntries(Object.entries(c.info || {}).filter(([k]) => _DELETED_INFO_KEEP[k])) })
+          : c));
+        setTimeout(() => setConfirmDialog({ message: `✅ 지운 아동 ${ids.size}명의 기록을 비웠습니다.\n잠시 뒤 다른 기기에도 반영됩니다.`, onConfirm: null }), 50);
+      }
+    );
+  };
+
   const exportAllChildren = async (silent = false) => {
     try {
       const _live = liveChildren(children);
@@ -10906,6 +10945,14 @@ export default function App() {
                       title="클라우드에 자동 저장된 최근 7일치 기록으로, 사라진 기록을 되살립니다">
                       ☁️ 날짜별 기록 되살리기{snapshotIndex.length > 0 ? ` (${snapshotIndex.length})` : ""}
                     </button>
+                    {/* ★ [지운 아동 정리] 지운 아동에 기록이 남아 있을 때만 보인다 */}
+                    {deletedWithContent.length > 0 && (
+                      <button style={{ ...BS, borderColor: "#e88b8b", color: "#a03030", fontSize: 11, textAlign: "left" }}
+                        onClick={() => { setShowBackupMenu(false); purgeDeletedChildren(); }}
+                        title="🗑 삭제한 아동의 남은 기록 내용을 비워 센터 기록을 가볍게 합니다 (보관·종결 아동은 그대로)">
+                        🧹 지운 아동 기록 정리 ({deletedWithContent.length}명)
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
