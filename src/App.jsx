@@ -9789,7 +9789,7 @@ export default function App() {
         }
         // ★ [지난 기간 도달·이번 기간 완료] 기준 도달일은 지난 기간인데 [✓ 완료 처리]는 지난 보고서 종료일 뒤에 누른 과제.
         //    지난 보고서에는 '진행중'으로 나갔으므로, 이번 보고서 완료 수에 넣고 따로 적는다.
-        const lateConfirm = !!(cutoffDate && _lg === "2" && t.completedAt && t.masteredAt && t.masteredAt <= cutoffDate);
+        const lateConfirm = false;   // ★ 2026-11-09 원장 결정: 이번 기간 기록이 없는 완료 과제는 넣지 않는다(원래 방식, 목표 쪽과 같게)
         // 중단도 같은 방식 — 지난 보고서 종료일 뒤에 중단했으면, 이번 기간 기록이 없어도 이번 보고서에 '중단'으로 넣는다.
         const latePause = !!(cutoffDate && _lg === "paused" && t.pausedAt && t.pausedAt > cutoffDate);
         const points = Object.entries(t.daily || {}).map(([date, day]) => {
@@ -9955,13 +9955,11 @@ export default function App() {
         isOX: goalIsOX(g),
         vbmapp: g.vbmapp,
         esdm: g.esdm,
-        source: g.source,
-        // ★ [지난 기간 도달·이번 기간 완료] 이번 기간 기록이 없어도 지난 보고서 종료일 뒤에 완료를 눌렀으면 이번 보고서에 남긴다
-        doneThisPeriod: !!(cutoffDate && (g.tasks || []).some(t => (t.listGroup || "1") === "2" && taskDoneOn(t) > cutoffDate))
+        source: g.source
       };
     })
     .filter(g => {
-      if (g.status === "완료" && g.points.length === 0 && !g.doneThisPeriod) return false;
+      if (g.status === "완료" && g.points.length === 0) return false;
       return true;
     });
   }, [includedGoals, reportGoalsAsOf, effectiveArchiveList, needsReportCalc, reportMode, reportPeriodStart, reportPeriodEnd]);
