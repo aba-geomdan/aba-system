@@ -74,9 +74,48 @@ function _getStoredSession() {
 function _saveSession(session) {
   try {
     if (session) sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
-    else { sessionStorage.removeItem(AUTH_SESSION_KEY); sessionStorage.removeItem(SCHED_HANDOFF_KEY); }
+    else { sessionStorage.removeItem(AUTH_SESSION_KEY); sessionStorage.removeItem(SCHED_HANDOFF_KEY); authTrace("로그인 지움(로그아웃)"); }
+  } catch (e) { authTrace("로그인 보관 실패: " + ((e && (e.name || e.message)) || "?")); }   // ★ [끊김 흔적] 동작은 그대로, 실패만 적어 둔다
+}
+
+// ★ [끊김 흔적] 패드에서 로그인이 사라진 직전 상황을 적어 둔다 (화면에는 안 보임, 백업 파일에 같이 담김).
+//    서버 로그에는 패드 안에서 일어난 일이 남지 않아서, 다음에 생기면 이것으로 원인을 짚는다.
+const AUTH_TRACE_KEY = "aba-auth-trace";
+let _authTraceMem = [];
+function _authTraceStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function authTrace(msg) {
+  try {
+    try { const old = JSON.parse(localStorage.getItem(AUTH_TRACE_KEY) || "[]"); if (Array.isArray(old) && old.length >= _authTraceMem.length) _authTraceMem = old.slice(-80); } catch (e) {}
+    _authTraceMem.push(_authTraceStamp() + " " + msg);
+    if (_authTraceMem.length > 80) _authTraceMem = _authTraceMem.slice(-80);
+    try { localStorage.setItem(AUTH_TRACE_KEY, JSON.stringify(_authTraceMem)); } catch (e) {}
   } catch (e) {}
 }
+function authTraceRead() {
+  if (!_authTraceMem.length) {
+    try { const old = JSON.parse(localStorage.getItem(AUTH_TRACE_KEY) || "[]"); if (Array.isArray(old)) return old; } catch (e) {}
+  }
+  return _authTraceMem.slice();
+}
+function _hasLogin() {
+  try { return !!sessionStorage.getItem(AUTH_SESSION_KEY); } catch (e) { return false; }
+}
+try {
+  let nav = "";
+  try { nav = (performance.getEntriesByType("navigation")[0] || {}).type || ""; } catch (e) {}
+  authTrace(`앱 열림(${nav || "?"}) · 로그인 ${_hasLogin() ? "있음" : "없음"}`);
+  document.addEventListener("visibilitychange", () => {
+    authTrace(`${document.visibilityState === "visible" ? "돌아옴" : "다른 곳으로 감"} · 로그인 ${_hasLogin() ? "있음" : "없음"}`);
+  });
+  window.addEventListener("pagehide", (e) => authTrace(`탭 내려감(${e && e.persisted ? "보관" : "닫힘"}) · 로그인 ${_hasLogin() ? "있음" : "없음"}`));
+  window.addEventListener("pageshow", (e) => { if (e && e.persisted) authTrace(`탭 되살아남 · 로그인 ${_hasLogin() ? "있음" : "없음"}`); });
+  document.addEventListener("freeze", () => authTrace("탭 멈춤"));
+  document.addEventListener("resume", () => authTrace(`탭 다시 움직임 · 로그인 ${_hasLogin() ? "있음" : "없음"}`));
+} catch (e) {}
 
 // ★ [시간표 바로 열기] 통합본에서 [시간표 앱 열기]를 누르면 다시 로그인하지 않고 열리게
 //    - 로그인할 때 같은 계정으로 '시간표 앱 전용' 로그인을 하나 더 받아 이 창(탭)에만 둡니다.
@@ -114,11 +153,11 @@ async function _refreshSession(refreshToken) {
         headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
         body: JSON.stringify({ refresh_token: refreshToken }),
       });
-      if (!r.ok) return null;
+      if (!r.ok) { authTrace("로그인 갱신 실패: " + r.status); return null; }
       const data = await r.json();
-      if (data.access_token) { _saveSession(data); return data; }
+      if (data.access_token) { _saveSession(data); authTrace("로그인 갱신 · 보관 " + (_hasLogin() ? "됨" : "안 됨")); return data; }
       return null;
-    } catch (e) { return null; }
+    } catch (e) { authTrace("로그인 갱신 연결 실패"); return null; }
   })();
   try { return await _refreshInFlight; } finally { _refreshInFlight = null; }
 }
@@ -614,6 +653,7 @@ function _schedUserIn(w) {
   } catch (e) { return undefined; }
 }
 function openSchedApp() {
+  authTrace(`시간표 열기 누름 · 로그인 ${_hasLogin() ? "있음" : "없음"}`);
   let h = null;
   try { h = JSON.parse(sessionStorage.getItem(SCHED_HANDOFF_KEY) || "null"); } catch (e) { h = null; }
   // 넘겨줄 것이 없거나, 지금 통합본에 로그인된 사람 것이 아니면 → 예전처럼 링크로 열기(로그인 화면)
@@ -5911,6 +5951,51 @@ function isBlankPlaceholderChild(c) {
   return true;
 }
 
+// ★ [로그인 끊김 창] 수업 중에도 못 보고 지나치지 않게 화면 전체를 덮는다.
+function LoginLostOverlay({ defaultEmail, onRelogin, onBackup }) {
+  const [email, setEmail] = useState(defaultEmail || "");
+  const [pw, setPw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const submit = async () => {
+    if (busy) return;
+    if (!email.trim() || !pw) { setErr("이메일과 비밀번호를 넣어 주세요."); return; }
+    setBusy(true); setErr("");
+    try {
+      const msg = await onRelogin(email, pw);
+      if (msg) { setErr(msg); setPw(""); }
+    } catch (e) {
+      setErr("다시 로그인하지 못했습니다. 한 번 더 눌러 주세요.");
+    }
+    setBusy(false);
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 2147483000, background: "rgba(140,20,20,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: "#fff", border: "3px solid #E24B4A", borderRadius: 16, padding: "22px 22px 18px", width: "100%", maxWidth: 420, boxShadow: "0 10px 40px rgba(0,0,0,0.3)" }}>
+        <div style={{ fontSize: 21, fontWeight: 800, color: "#c62828", marginBottom: 10 }}>🔒 로그인이 끊겼습니다</div>
+        <div style={{ fontSize: 14, lineHeight: 1.7, color: "#333", marginBottom: 14 }}>
+          지금까지 넣은 기록은 이 화면에 그대로 있습니다.<br />
+          <b>새로고침하지 말고</b>, 여기서 비밀번호만 다시 넣어 주세요.
+        </div>
+        <input type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="username" placeholder="이메일"
+          style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", fontSize: 14, border: "1.5px solid #ddd", borderRadius: 8, marginBottom: 8, fontFamily: "inherit" }} />
+        <input type="password" value={pw} onChange={e => setPw(e.target.value)} autoComplete="current-password" placeholder="비밀번호" autoFocus
+          onKeyDown={e => { if (e.key === "Enter" && !e.nativeEvent.isComposing) submit(); }}
+          style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", fontSize: 14, border: "1.5px solid #ddd", borderRadius: 8, marginBottom: 10, fontFamily: "inherit" }} />
+        {err && <div style={{ fontSize: 13, color: "#c62828", marginBottom: 10, fontWeight: 600 }}>{err}</div>}
+        <button onClick={submit} disabled={busy}
+          style={{ width: "100%", height: 46, background: "#E24B4A", color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 800, cursor: busy ? "wait" : "pointer", fontFamily: "inherit", marginBottom: 8 }}>
+          {busy ? "로그인하는 중…" : "다시 로그인하고 이어서 기록"}
+        </button>
+        <button onClick={() => onBackup && onBackup()}
+          style={{ width: "100%", height: 38, background: "#fff", color: "#555", border: "1px solid #ccc", borderRadius: 10, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+          💾 백업 먼저 받기
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ManualModal({ onClose }) {
   const sec = (title, lines) => (
     <section style={{ marginBottom: 20 }}>
@@ -7546,6 +7631,36 @@ export default function App() {
   //    선생님이 하루치를 다 넣고도 그게 이 기기에만 있다는 걸 모른다.
   //    로컬에는 남아 있으므로 데이터를 잃지는 않지만, 다른 기기에서 열면 안 보인다.
   const [cloudSaveFailed, setCloudSaveFailed] = useState(false);
+  // ★ [로그인 끊김 창] 쓰는 중에 이 탭의 로그인이 사라지면 화면 전체를 막고, 그 자리에서 다시 로그인하게 한다.
+  //    새로고침하지 않으므로 화면에 있던 기록은 그대로 남고, 다시 로그인하면 바로 저장된다.
+  const [loginLost, setLoginLost] = useState(false);
+  useEffect(() => {
+    if (!currentUser) { loginLostRef.current = false; setLoginLost(false); return; }
+    checkLoginAlive("로그인 확인");
+    const onBack = () => { if (document.visibilityState === "visible") checkLoginAlive("다른 앱에서 돌아옴"); };
+    const onShow = () => checkLoginAlive("탭 다시 보임");
+    document.addEventListener("visibilitychange", onBack);
+    window.addEventListener("pageshow", onShow);
+    window.addEventListener("focus", onShow);
+    return () => { document.removeEventListener("visibilitychange", onBack); window.removeEventListener("pageshow", onShow); window.removeEventListener("focus", onShow); };
+  }, [currentUser]);
+  const loginLostRef = useRef(false);
+  const lastAuthRef = useRef({ email: "", id: "" });   // 마지막으로 확인한 로그인 계정 (다시 로그인할 때 같은 계정인지 확인)
+  const checkLoginAlive = (reason, forceLost = false) => {
+    if (!currentUserRef.current) return true;
+    if (loginLostRef.current) return false;   // 창이 떠 있는 동안은 다시 로그인 버튼으로만 풀린다 (처음 계정도 그대로 둔다)
+    const ss = _getStoredSession();
+    if (ss && ss.access_token && !forceLost) {
+      if (ss.user && ss.user.id) lastAuthRef.current = { email: ss.user.email || lastAuthRef.current.email, id: ss.user.id };
+      return true;
+    }
+    if (!loginLostRef.current) {
+      loginLostRef.current = true;
+      authTrace("로그인 끊김 발견 · " + reason);
+      setLoginLost(true);
+    }
+    return false;
+  };
   // ★ [97-5] 마지막으로 확인한 클라우드 updated_at.
   //    폴링과 자동저장이 같이 쓴다 — 내가 올린 변경을 폴링이 도로 내려받지 않게 하려면
   //    저장 쪽에서도 이 값을 갱신할 수 있어야 한다.
@@ -8562,6 +8677,7 @@ export default function App() {
           // ★ 저장 직전 클라우드 최신본과 병합 → 다른 사람이 수정한 아동을 덮어쓰지 않음
           (async () => {
             // ★ [끊김-복구] 저장 순번 — 저장이 순서가 뒤바뀌어 끝나도 표식을 잘못 지우지 않게
+            checkLoginAlive("저장");   // ★ [로그인 끊김 창] 알리기만 한다 — 아래 저장 순서는 예전 그대로
             const mySeq = ++saveSeqRef.current;
             const startedAt = new Date().toISOString();
             try {
@@ -8842,6 +8958,9 @@ export default function App() {
       //    선생님들은 앱을 켜둔 채 다른 일을 하는 시간이 대부분인데,
       //    그동안에도 5초마다 전체 데이터를 받고 있었다. 켜두기만 해도 전송량이 쌓였다.
       if (typeof document !== "undefined" && document.hidden) return;
+      // ★ [로그인 끊김 창] 로그인이 없으면 서버가 오류 대신 '빈 답'을 줘서, 아래가 그걸 '연결 잘 됨'으로 보고
+      //    노란 안내를 꺼 버렸다. 로그인이 없으면 확인하지 않고 끊김 창을 띄운다.
+      if (!checkLoginAlive("20초 확인")) return;
       try {
         if (typeof window !== "undefined" && window.storage) {
           // ★ [97-2] 먼저 updated_at 하나만 읽는다(약 30바이트).
@@ -8931,6 +9050,8 @@ export default function App() {
         }
       } catch (e) {
         setCloudReadFailed(true);   // ★ [95-3] 클라우드를 못 읽는 상태가 계속되고 있다
+        // ★ [로그인 끊김 창] 서버가 로그인을 받지 않으면(401) 인터넷 문제가 아니라 로그인 문제다
+        if (/HTTP 401/.test(String(e && e.message))) checkLoginAlive("서버가 로그인 거절(401)", true);
       }
     }, 20000);  // ★ [97-3] 5초 → 20초. 같은 아동을 두 선생님이 동시에 만지는 일은 드물고,
                 //    20초면 남의 변경을 받아오는 데 충분하다. 확인 횟수가 1/4로 준다.
@@ -10307,7 +10428,8 @@ export default function App() {
         },
         activeChildId,
         children,
-        esdmItems: _esdmItems
+        esdmItems: _esdmItems,
+        authTrace: authTraceRead()   // ★ [끊김 흔적] 문제 찾기용 (복원할 때는 쓰지 않음)
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -10661,6 +10783,34 @@ export default function App() {
 
   return (
     <div style={{ fontFamily: "'Pretendard','Noto Sans KR','Malgun Gothic',sans-serif", background: "linear-gradient(135deg,#fdf8f9 0%,#fff 50%,#fdf8f9 100%)", minHeight: "100vh", padding: "24px 16px", color: "#333" }}>
+      {loginLost && (
+        <LoginLostOverlay
+          defaultEmail={lastAuthRef.current.email}
+          onBackup={() => exportAllChildren()}
+          onRelogin={async (email, pw) => {
+            const res = await abaSignIn(email.trim(), pw);
+            if (res.error) {
+              const low = String(res.error).toLowerCase();
+              if (low.includes("invalid")) return "비밀번호가 맞지 않습니다. 다시 넣어 주세요.";
+              if (low.includes("network") || low.includes("네트워크") || low.includes("failed to fetch")) return "인터넷에 연결되지 않았습니다. 와이파이를 확인한 뒤 다시 눌러 주세요.";
+              return "다시 로그인하지 못했습니다: " + res.error;
+            }
+            const prevId = lastAuthRef.current.id;
+            if (prevId && res.user && res.user.id !== prevId) {
+              _saveSession(null);   // 이 기기에서만 지운다 — 서버 로그아웃을 부르면 그 선생님의 다른 기기까지 끊긴다
+              return "처음에 로그인했던 계정으로 다시 로그인해 주세요.";
+            }
+            _prepareSchedHandoff(email.trim(), pw);   // 시간표 바로 열기도 이어서 되게 (기다리지 않음)
+            authTrace("그 자리에서 다시 로그인함");
+            if (res.user && res.user.id) lastAuthRef.current = { email: res.user.email || email.trim(), id: res.user.id };
+            loginLostRef.current = false;
+            setLoginLost(false);
+            // 끊긴 동안 화면에만 있던 기록을 바로 올린다 (내용은 그대로, 저장만 한 번 돌림)
+            setChildren(prev => (Array.isArray(prev) && prev.length > 0 ? prev.slice() : prev));
+            return null;
+          }}
+        />
+      )}
       {/* ★ [반응형] 좁은 화면 자동 1열 변환 + 폰트 크기 보정 */}
       <style>{`
         /* TaskRow: 중간 너비(태블릿·좁힌 창)에서 7열 grid가 찌그러져 겹치는 문제 방지 — 세로 전환 */
