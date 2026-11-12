@@ -1381,8 +1381,8 @@ const VBMAPP_RECOMMEND = {
   },
   "Play": {
     1: ["다른 장난감으로 독립 놀이 2분", "원인-결과 장난감 조작", "5가지 장난감 기능적 독립 놀이 2분"],
-    2: ["연속 놀이 동작 5가지", "가작놀이 2가지 (인형 먹이기·전화하기)", "독립 놀이 10분"],
-    3: ["가작놀이 대본 자발 생성", "규칙 있는 보드 게임 참여", "또래와 게임 시 적절 반응"]
+    2: ["연속 놀이 동작 5가지", "가장놀이 2가지 (인형 먹이기·전화하기)", "독립 놀이 10분"],
+    3: ["가장놀이 대본 자발 생성", "규칙 있는 보드 게임 참여", "또래와 게임 시 적절 반응"]
   },
   "Social": {
     1: ["성인의 사회적 접촉 수용", "눈맞춤 + 긍정적 정서 5회 이상", "성인의 동작 2가지 이상 자발 모방"],
@@ -1668,6 +1668,14 @@ function stripSurname(fullName) {
   return trimmed.slice(1);
 }
 
+// ★ [두 글자 이름] '이도'처럼 성+한 글자 이름은 성을 떼면 "도는", "도의"가 되어 어색하다 — 그대로 부른다.
+//    세 글자 이상은 예전처럼 성을 떼고 받침 있으면 '이'를 붙인다(민수, 지훈이).
+function childCallName(fullName) {
+  const t = String(fullName || "").trim();
+  if (t.length === 2 && /^[가-힣]{2}$/.test(t)) return t;
+  return nameWithSuffix(stripSurname(t));
+}
+
 function nameWithSuffix(name) {
   if (!name) return name;
   const last = name.charAt(name.length - 1);
@@ -1679,7 +1687,7 @@ function nameWithSuffix(name) {
 
 function buildSummary(stosForReport, info) {
   if (!stosForReport || stosForReport.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
   const active = stosForReport.filter(s => s.status !== "중단");
   // ★ [57-9] 개수는 중단까지 포함한 전체를 쓴다.
   //    기존엔 active.length(중단 제외)를 썼는데, '영역별 완료 현황'과 '시작 vs 종결 비교'는
@@ -1768,7 +1776,7 @@ function buildBehaviorChange(selected, info) {
   if (selected.includes("특이 문제행동 없음") && selected.length > 1) {
     selected = selected.filter(x => x !== "특이 문제행동 없음");
   }
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
 
   const has받침 = (word) => {
     if (!word) return false;
@@ -1817,7 +1825,7 @@ function buildBehaviorChange(selected, info) {
 
 function buildRecommendations(selected, info) {
   if (!selected || selected.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
 
   const has받침 = (word) => {
     if (!word) return false;
@@ -1879,7 +1887,7 @@ function buildRecommendations(selected, info) {
 
 function buildHandover(selected, info) {
   if (!selected || selected.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
 
   const has받침 = (word) => {
     if (!word) return false;
@@ -1945,7 +1953,7 @@ function buildHandover(selected, info) {
 
 function buildInterimSummary(selected, info) {
   if (!selected || selected.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
 
   const has받침 = (word) => {
     if (!word) return false;
@@ -2015,7 +2023,7 @@ function buildInterimSummary(selected, info) {
 
 function buildInterimGrowth(selected, info) {
   if (!selected || selected.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
 
   const has받침 = (word) => {
     if (!word) return false;
@@ -2081,7 +2089,7 @@ function buildInterimGrowth(selected, info) {
 
 function buildInterimHomeCoop(selected, info) {
   if (!selected || selected.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
 
   const has받침 = (word) => {
     if (!word) return false;
@@ -2150,7 +2158,7 @@ function buildInterimHomeCoop(selected, info) {
 
 function buildInterimNextGoal(selected, info) {
   if (!selected || selected.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
 
   const has받침 = (word) => {
     if (!word) return false;
@@ -2222,7 +2230,7 @@ function buildInterimStrengths(domAvgs, stos, info) {
   //    영역 평균이 필요한 항목만 뒤에서 건너뛰고, 개수 기반 강점은 그대로 낸다.
   const domList = Array.isArray(domAvgs) ? domAvgs : [];
   if (!Array.isArray(stos) || stos.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
 
   const has받침 = (word) => {
     if (!word) return false;
@@ -2326,7 +2334,7 @@ function buildInterimStrengths(domAvgs, stos, info) {
 
 function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
   if (!Array.isArray(stos) || stos.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
 
   const has받침 = (word) => {
     if (!word) return false;
@@ -2463,7 +2471,7 @@ function buildInterimHighlights(domAvgs, stos, info, dailyMemos) {
 
 function buildHomeMaintenance(selected, info) {
   if (!selected || selected.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
 
   const has받침 = (word) => {
     if (!word) return false;
@@ -2534,7 +2542,7 @@ function buildHomeMaintenance(selected, info) {
 
 function buildIepReferralReason(selected, info) {
   if (!selected || selected.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
 
   const KEY_DESC = {
     "표현 언어 지연":          { cat: "lang",   desc: "원하는 것을 언어로 표현하거나 의사를 전달하는 데 제한이 있는 양상" },
@@ -2617,7 +2625,7 @@ function buildIepReferralReason(selected, info) {
 
 function buildIepHomeCollab(selected, info) {
   if (!selected || selected.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
 
   const has받침 = (word) => {
     if (!word) return false;
@@ -2676,7 +2684,7 @@ function buildIepHomeCollab(selected, info) {
 
 function buildIepRecommendations(selected, info) {
   if (!selected || selected.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
 
   const has받침 = (word) => {
     if (!word) return false;
@@ -2734,7 +2742,7 @@ function buildIepRecommendations(selected, info) {
 
 function buildReferralReason(selected, info) {
   if (!selected || selected.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
   const i_ga = josa이가(fn) === "이" ? "이" : "가";
 
   const KEY_DESC = {
@@ -2853,7 +2861,7 @@ function effectiveReferralReason(info) {
 
 function buildEndReason(selected, info) {
   if (!selected || selected.length === 0) return "";
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
 
   const has받침 = (word) => {
     if (!word) return false;
@@ -3009,7 +3017,7 @@ function stampState(text, savedStamp, currentStamp) {
 // ★ [57-4] stos — 넘기면 비교 섹션과 같은 계산(buildStartEndCompare)을 쓴다.
 //    안 넘기면 예전 동작 그대로.
 function buildFinalSummary(goals, info, periodEnd, stos) {
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
   const startDate = info?.evalStart || "";
   const endDate = periodEnd || info?.finalEndDate || info?.evalEnd || "";
   // 날짜 역전 방어 (입력이 거꾸로여도 정렬)
@@ -3160,7 +3168,7 @@ function buildFinalSummary(goals, info, periodEnd, stos) {
 //    기존엔 t.daily를 직접 훑어서 O·X(회기당 1회) 기록도 0/100으로 환산해 평균에 넣었다.
 //    조영훈 보고서: 전 목표가 O·X인데 "초기 11% → 중반 46% → 종결 32%"가 그대로 나갔다.
 function buildFinalGrowth(goals, info, stos) {
-  const fn = nameWithSuffix(stripSurname(info?.name || "")) || "아동";
+  const fn = childCallName((info?.name || "")) || "아동";
   const i_ga = josa이가(fn) === "이" ? "이" : "가";
 
   let firstSessionDate = null;
@@ -4119,7 +4127,7 @@ const ITEM_NO_PREFIX_RE = /^\s*\d{1,3}(?:-[a-z가-힣])?\.\s+/;
 function itemLabel(name) {
   const t = String(name || "");
   const stripped = t.replace(ITEM_NO_PREFIX_RE, "").trim();
-  return stripped || t;   // 번호만 있는 이상한 값이면 원본을 그대로 쓴다
+  return (stripped || t).replace(/가작놀이/g, "가장놀이");   // ★ [오타] 예전 목록에서 고른 목표에 남은 가작놀이   // 번호만 있는 이상한 값이면 원본을 그대로 쓴다
 }
 
 function shortTaskName(name, maxLen = 42) {
@@ -4470,15 +4478,31 @@ function generateRationale(goal) {
   return rationale;
 }
 
+// ★ [IEP 영역 이름] IEP 인쇄에서는 영역 이름을 20글자에서 자르지 않는다 — "Motor Imitation (운동"처럼 잘려 찍혔다.
+//    화면(목표 카드·데일리)은 좁아서 shortDomain을 그대로 쓴다.
+function iepDomainName(d) {
+  if (!d) return "-";   // 영역 이름이 없는 목표는 예전처럼 "-"
+  const cut = shortDomain(d);
+  if (!cut || cut === "-") return d;
+  const full = d.replace(/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪ]\s*/, "").replace(/\s*\([^()]*[A-Za-z][^()]*\)\s*$/, "");
+  // 20글자에서 잘린 이름만 끝까지 쓴다 — 짧은 이름표(학습·화자·신체 등)로 부르던 영역은 예전 그대로
+  return (full.length > 20 && full.startsWith(cut)) ? full : cut;
+}
+// ★ [영역 목록] 6개 이상이면 앞 5개만 적어 그게 전부처럼 읽혔다 — "… 등 13개"로 적는다.
+function iepAreaList(names) {
+  const arr = (names || []).filter(Boolean);
+  return arr.length <= 5 ? arr.join("·") : `${arr.slice(0, 5).join("·")} 등 ${arr.length}개`;
+}
+
 function generateCurriculumDescription(source, items, allGoals) {
   if (!items || items.length === 0) return "";
-  const domains = [...new Set(items.map(g => shortDomain(g.domain) || g.domain).filter(Boolean))];
+  const domains = [...new Set(items.map(g => iepDomainName(g.domain) || g.domain).filter(Boolean))];
   const domainCount = domains.length;
   const goalCount = items.length;
 
   const byDomain = {};
   items.forEach(g => {
-    const k = shortDomain(g.domain) || g.domain || "(영역 없음)";
+    const k = iepDomainName(g.domain) || g.domain || "(영역 없음)";
     if (!byDomain[k]) byDomain[k] = 0;
     byDomain[k]++;
   });
@@ -4488,7 +4512,7 @@ function generateCurriculumDescription(source, items, allGoals) {
     .filter(([_, n]) => n >= 2);   // 2개 이상 집중된 경우만
 
   if (source === "ELCAR") {
-    const domainList = domains.slice(0, 5).join("·");
+    const domainList = iepAreaList(domains);
     let s = `본 아동은 ELCAR 커리큘럼 기반 평가를 통해 ${domainCount}개 영역에 걸쳐 ${goalCount}개의 세부 목표가 IEP에 포함되었습니다. `;
     if (topDomains.length > 0) {
       const topNames = topDomains.map(([n, c]) => `${n}(${c}개)`).join("·");
@@ -4515,7 +4539,7 @@ function generateCurriculumDescription(source, items, allGoals) {
     const lvRange = (minLv !== null && maxLv !== null)
       ? (minLv === maxLv ? `Level ${minLv}` : `Level ${minLv}~${maxLv}`)
       : "";
-    const vbList = vbDomains.slice(0, 5).join("·");
+    const vbList = iepAreaList(vbDomains);
     if (!vbList || !lvRange) {
       return `VB-MAPP 평가 기반으로 ${goalCount}개 목표가 본 아동의 출발점으로 도출되었습니다. 단계적 확장을 목표로 하며, 자발성과 일반화에 중점을 두어 지도합니다.`;
     }
@@ -4531,8 +4555,9 @@ function generateCurriculumDescription(source, items, allGoals) {
   }
 
   if (source === "ESDM") {
-    const esdmDomains = [...new Set(items.filter(g => g.esdm).map(g => normEsdm(g.esdm).v))];
-    const esdmList = esdmDomains.slice(0, 5).join("·");
+    // ★ [ESDM 이름 맞추기] 아래 목록 제목(목표의 영역)과 같은 이름을 쓴다 — 문장과 제목이 달랐다
+    const esdmDomains = domains;
+    const esdmList = iepAreaList(esdmDomains);
     if (!esdmList) {
       return `ESDM 발달 평가 기반으로 ${goalCount}개 목표가 본 아동의 현 단계에 적합한 학습 목표로 도출되었습니다. 놀이 중심의 자연주의 교수법으로 일상 속 일반화를 강조하여 지도합니다.`;
     }
@@ -4545,7 +4570,7 @@ function generateCurriculumDescription(source, items, allGoals) {
     return s;
   }
 
-  const domainList = domains.slice(0, 5).join("·");
+  const domainList = iepAreaList(domains);
   let s = `본 아동의 발달 특성과 가정·학습 환경의 우선순위를 고려하여 ${domainList} 영역에 걸쳐 ${goalCount}개의 목표가 추가로 선정되었습니다. `;
   if (topDomains.length > 0) {
     const topNames = topDomains.map(([n, c]) => `${n}(${c}개)`).join("·");
@@ -14155,7 +14180,7 @@ export default function App() {
                     const updateTone = (newTone) => {
                       setInfo(prev => ({ ...prev, iepObservationTone: newTone }));
                     };
-                    const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+                    const childName = info.fn || childCallName((info.name)) || "아동";
                     const applyPhrase = (key, level) => {
                       const phrase = IEP_OBSERVATION_PHRASES[key]?.[level]?.[tone] || "";
                       if (phrase) {
@@ -14364,7 +14389,7 @@ export default function App() {
                   })()}
 
                   <div style={{ fontSize: 10, color: "#888", marginTop: 10, padding: "8px 12px", background: "#fdf8f9", borderRadius: 6, borderLeft: `3px solid ${PK}` }}>
-                    💡 6개 카테고리는 표준 양식입니다. 톤 토글 변경 후 3단계 버튼 클릭 시 새 문구로 덮어씌워지며, 직접 수정한 내용은 유지됩니다. 빈 칸은 IEP 인쇄물에 "(미입력)"으로 표시됩니다.
+                    💡 6개 카테고리는 표준 양식입니다. 톤 토글 변경 후 3단계 버튼 클릭 시 새 문구로 덮어씌워지며, 직접 수정한 내용은 유지됩니다. 빈 칸은 IEP 인쇄물에서 빠집니다.
                   </div>
                 </div>
               </div>
@@ -15399,6 +15424,69 @@ function stripReportMarkers(s) {
   return note ? (body ? body + "\n\n" + note : note) : body;
 }
 
+// ★ [IEP 보관본 보기] 보관된 IEP 계획안 내용 — 인쇄할 때 저장해 둔 아동 정보(info)와 목표 목록(goalsSummary)으로 보여 준다
+function IepArchiveBody({ snapshot }) {
+  const info = snapshot.info || {};
+  const childName = info.fn || childCallName((info.name || "")) || "아동";
+  const clean = (t) => personalizeText(stripReportMarkers(String(t || "")), childName).trim();
+  const head = (t) => <div style={{ fontSize: 12, fontWeight: 600, color: PKD, marginBottom: 6 }}>{t}</div>;
+  const boxStyle = { marginBottom: 14, paddingBottom: 12, borderBottom: "1px dashed #e8d8de" };
+  const textStyle = { fontSize: 11.5, lineHeight: 1.85, color: "#333", whiteSpace: "pre-wrap" };
+  const referral = clean(info.iepReferralReason);
+  const obs = info.iepObservations || {};
+  const obsRows = [
+    { key: "eyeContact", label: "눈맞춤" }, { key: "requesting", label: "요구 표현" }, { key: "following", label: "지시 따르기" },
+    { key: "attention", label: "주의 집중" }, { key: "imitation", label: "모방 반응" }, { key: "selfCare", label: "자기관리" }
+  ].map(c => ({ ...c, text: clean(obs[c.key]) })).filter(c => c.text);
+  const goals = (Array.isArray(snapshot.goalsSummary) ? snapshot.goalsSummary : []).filter(g => g && typeof g === "object");
+  const bySource = {};
+  goals.forEach(g => {
+    const src = ["ELCAR", "VB-MAPP", "ESDM"].includes(g.source) ? g.source : (g.source ? "기타" : "ELCAR");
+    const dom = iepDomainName(typeof g.domain === "string" ? g.domain : "") || "-";
+    if (!bySource[src]) bySource[src] = {};
+    if (!bySource[src][dom]) bySource[src][dom] = [];
+    bySource[src][dom].push(itemLabel(g.item));
+  });
+  const collab = clean(info.iepHomeCollab);
+  const recs = clean(info.iepRecommendations);
+  const hasAny = referral || obsRows.length > 0 || goals.length > 0 || collab || recs;
+  if (!hasAny) return <div style={{ padding: 30, textAlign: "center", color: "#999", fontSize: 12 }}>저장된 본문이 비어있습니다.</div>;
+  return (
+    <>
+      {referral && <div style={boxStyle}>{head("의뢰 사유")}<div style={textStyle}>{referral}</div></div>}
+      {obsRows.length > 0 && (
+        <div style={boxStyle}>
+          {head("평가 결과 및 현행 수준")}
+          {obsRows.map(c => (
+            <div key={c.key} style={{ ...textStyle, marginBottom: 6 }}><b style={{ color: "#555" }}>{c.label}</b> {c.text}</div>
+          ))}
+        </div>
+      )}
+      {goals.length > 0 && (
+        <div style={boxStyle}>
+          {head(`IEP 목표 (${goals.length}개)`)}
+          {["ELCAR", "VB-MAPP", "ESDM", "기타"].filter(src => bySource[src]).map(src => {
+            const doms = bySource[src];
+            const n = Object.values(doms).reduce((a, l) => a + l.length, 0);
+            return (
+              <div key={src} style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: "#555", marginBottom: 2 }}>{src} · {n}개</div>
+                {Object.entries(doms).map(([dom, items]) => (
+                  <div key={dom} style={{ ...textStyle, paddingLeft: 8 }}>
+                    <span style={{ color: PKD }}>{dom}</span>: {items.join(", ")}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {collab && <div style={boxStyle}>{head("보호자 협력 방안")}<div style={textStyle}>{collab}</div></div>}
+      {recs && <div style={boxStyle}>{head("권고사항")}<div style={textStyle}>{recs}</div></div>}
+    </>
+  );
+}
+
 function ArchiveViewModal({ item, onClose, list }) {
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -15483,10 +15571,12 @@ function ArchiveViewModal({ item, onClose, list }) {
                   </div>
                 </div>
               )}
+              {/* ★ [IEP 보관본 보기] IEP 보관본은 중간보고서 본문 칸이 없어 "비어있습니다"만 떴다 — 저장된 IEP 내용을 보여 준다 */}
+              {snapshot.isIep && <IepArchiveBody snapshot={snapshot} />}
               {/* 본문 섹션들 */}
-              {(() => {
+              {!snapshot.isIep && (() => {
                 const snapInfo = snapshot?.info || {};
-                const snapChildName = snapInfo.fn || nameWithSuffix(stripSurname(snapInfo.name || "")) || "아동";
+                const snapChildName = snapInfo.fn || childCallName((snapInfo.name || "")) || "아동";
                 return sectionOrder.map(key => {
                   const body = sections[key];
                   if (!body || !String(body).trim()) return null;
@@ -15504,7 +15594,7 @@ function ArchiveViewModal({ item, onClose, list }) {
                 });
               })()}
               {/* 보고서가 비어있을 때 */}
-              {!sectionOrder.some(k => sections[k] && String(sections[k]).trim()) && (
+              {!snapshot.isIep && !sectionOrder.some(k => sections[k] && String(sections[k]).trim()) && (
                 <div style={{ padding: 30, textAlign: "center", color: "#999", fontSize: 12 }}>저장된 본문이 비어있습니다.</div>
               )}
               {/* FBA + 중재 전략 + 강화제 (있으면) */}
@@ -16959,7 +17049,7 @@ cleanedHTML + '\n' +
           };
           const referralClean = stripMarker(info.iepReferralReason);
           if (!referralClean) return null;
-          const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+          const childName = info.fn || childCallName((info.name)) || "아동";
           const personalize = (text) => personalizeText(text || "", childName);
           return (
             <PrintSection num={nextSn()} title="의뢰 사유" accent>
@@ -17003,7 +17093,7 @@ cleanedHTML + '\n' +
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 4 }}>● VB-MAPP (Verbal Behavior Milestones Assessment and Placement Program)</div>
                     <div style={{ border: `1px solid ${PK}`, borderRadius: 4, padding: "10px 14px", background: "#fdf8f9", fontSize: 10.5, lineHeight: 1.75 }}>
-                      VB-MAPP은 B.F. Skinner의 언어 행동 분석(Verbal Behavior) 이론에 기반한 언어·학습 능력 평가 도구로, 자폐스펙트럼 및 기타 언어 지연 아동의 현행 수준을 측정하고 개별화된 교수 목표를 설정하는 데 사용됩니다. 평가는 크게 <b>마일스톤(Milestones)</b>, <b>장벽(Barriers)</b>, <b>전이(Transition)</b>의 세 영역으로 구성되며, 마일스톤은 총 <b>3단계(Level 1: 0~18개월, Level 2: 18~30개월, Level 3: 30~48개월)</b>에 걸쳐 Mand(요구), Tact(명명), Listener Responding(청자반응), VP/MTS(시각적 수행·매칭), Play(놀이), Social(사회성), Motor Imitation(운동모방), Echoic(에코익), LRFFC(기능·특성·범주 청자반응), Intraverbal(인트라버벌) 등 16개 영역의 170개 마일스톤을 평가합니다. 본 IEP에서는 ELCAR 목표와 VB-MAPP 마일스톤을 연계하여 학습자의 언어 행동 능력을 종합적으로 분석합니다.
+                      VB-MAPP은 B.F. Skinner의 언어 행동 분석(Verbal Behavior) 이론에 기반한 언어·학습 능력 평가 도구로, 자폐스펙트럼 및 기타 언어 지연 아동의 현행 수준을 측정하고 개별화된 교수 목표를 설정하는 데 사용됩니다. 평가는 크게 <b>마일스톤(Milestones)</b>, <b>장벽(Barriers)</b>, <b>전이(Transition)</b>의 세 영역으로 구성되며, 마일스톤은 총 <b>3단계(Level 1: 0~18개월, Level 2: 18~30개월, Level 3: 30~48개월)</b>에 걸쳐 Mand(요구), Tact(명명), Listener Responding(청자반응), VP/MTS(시각적 수행·매칭), Play(놀이), Social(사회성), Motor Imitation(운동모방), Echoic(에코익), LRFFC(기능·특성·범주 청자반응), Intraverbal(인트라버벌) 등 16개 영역의 170개 마일스톤을 평가합니다.{showElcar ? " 본 IEP에서는 ELCAR 목표와 VB-MAPP 마일스톤을 연계하여 학습자의 언어 행동 능력을 종합적으로 분석합니다." : ""}
                     </div>
                   </div>
                 )}
@@ -17078,7 +17168,11 @@ cleanedHTML + '\n' +
               groupPhrases.push("강화제 영역에는 선호도 확인과 강화제 다양화");   // ★ 실제로 하지 않았을 수 있는 평가 이름(MSWO·PSPA)은 넣지 않는다
             }
             if (groupedCats.language.length > 0) {
-              groupPhrases.push("언어 영역(요구·명명·청자 반응 등)에는 분리 시도 교수(DTT)와 자연 환경 교수(NET), 시간 지연");
+              // ★ [실제 영역만] 고른 목표에 없는 영역(명명·청자 반응 등)까지 적지 않는다
+              const _langName = { mand: "요구", tact: "명명", echoic: "따라 말하기", intraverbal: "대화", listener: "청자 반응" };
+              const _langOrder = ["mand", "tact", "echoic", "intraverbal", "listener"];
+              const _langs = _langOrder.filter(k => groupedCats.language.includes(k)).map(k => _langName[k]);
+              groupPhrases.push(`언어 영역(${_langs.join("·")})에는 분리 시도 교수(DTT)와 자연 환경 교수(NET), 시간 지연`);
             }
             if (groupedCats.social.length > 0) {
               groupPhrases.push("사회·놀이 영역에는 시범과 자연 환경 교수(NET)");   // ★ 개별 수업에서 쓰지 않을 수 있는 또래 매개·비디오 모델링은 넣지 않는다
@@ -17140,7 +17234,7 @@ cleanedHTML + '\n' +
                 { key: "imitation", label: "모방 반응" },
                 { key: "selfCare", label: "자기관리" }
               ];
-              const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+              const childName = info.fn || childCallName((info.name)) || "아동";
               const personalize = (text) => personalizeText(text || "", childName);
               const hasAny = categories.some(c => (obs[c.key] || "").trim() !== "");
               if (!hasAny) {
@@ -17155,7 +17249,7 @@ cleanedHTML + '\n' +
                 <>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                     <tbody>
-                      {categories.map(c => (
+                      {categories.filter(c => (obs[c.key] || "").trim() !== "").map(c => (   /* ★ [빈 칸] "(미입력)"을 찍지 않고 그 줄을 뺀다 */
                         <tr key={c.key} style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                           <td style={{ padding: "10px 12px", border: "1px solid #e8d0d6", background: PKL, color: PKD, fontWeight: 600, width: "16%", textAlign: "center", verticalAlign: "middle", pageBreakInside: "avoid", breakInside: "avoid" }}>{c.label}</td>
                           <td style={{ padding: "10px 14px", border: "1px solid #e8d0d6", color: "#333", lineHeight: 1.75, verticalAlign: "top", whiteSpace: "pre-line", pageBreakInside: "avoid", breakInside: "avoid" }}>
@@ -17195,7 +17289,7 @@ cleanedHTML + '\n' +
               if (goals.length === 0) {
                 return <div style={{ fontSize: 10.5, color: "#767676", padding: "12px 14px", textAlign: "center", border: "1px dashed #e0c8d0", borderRadius: 4 }}>IEP에 포함된 목표가 없습니다.</div>;
               }
-              const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+              const childName = info.fn || childCallName((info.name)) || "아동";
               const bySource = { "ELCAR": [], "VB-MAPP": [], "ESDM": [], "기타": [] };
               goals.forEach(g => {
                 const src = g.source || "ELCAR";
@@ -17213,7 +17307,7 @@ cleanedHTML + '\n' +
                 if (items.length === 0) return null;
                 const grouped = {};
                 items.forEach(g => {
-                  const key = shortDomain(g.domain) || g.domain || "(영역 없음)";
+                  const key = iepDomainName(g.domain) || g.domain || "(영역 없음)";   // ★ [IEP 영역 이름] 자르지 않음
                   if (!grouped[key]) grouped[key] = [];
                   grouped[key].push(g);
                 });
@@ -17273,7 +17367,7 @@ cleanedHTML + '\n' +
           };
           const collabClean = stripMarker(info.iepHomeCollab);
           if (!collabClean) return null;
-          const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+          const childName = info.fn || childCallName((info.name)) || "아동";
           const personalize = (text) => personalizeText(text || "", childName);
           return (
             <PrintSection num={nextSn()} title="보호자 협력 방안" accent>
@@ -17303,7 +17397,7 @@ cleanedHTML + '\n' +
           };
           const recsClean = stripMarker(info.iepRecommendations);
           if (!recsClean) return null;
-          const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+          const childName = info.fn || childCallName((info.name)) || "아동";
           const personalize = (text) => personalizeText(text || "", childName);
           return (
             <PrintSection num={nextSn()} title="권고사항" accent>
@@ -17318,7 +17412,7 @@ cleanedHTML + '\n' +
 
         {/* PDF-6: 보고서 4섹션 본문 (PDF의 종합현황/이번기간/가정에서함께/다음목표 4섹션) */}
         {!isIepMode && (() => {
-          const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+          const childName = info.fn || childCallName((info.name)) || "아동";
           const personalize = (text) => personalizeText(text || "", childName);
           return (
           <>
@@ -17555,7 +17649,7 @@ cleanedHTML + '\n' +
           };
               const behaviorClean = stripMarker(info.finalBehaviorChange);
               if (!behaviorClean) return null;
-              const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+              const childName = info.fn || childCallName((info.name)) || "아동";
               const personalize = (text) => personalizeText(text || "", childName);
               return (
                 <PrintSection num={nextSn()} title="도전적 행동 변화">
@@ -17576,7 +17670,7 @@ cleanedHTML + '\n' +
             {/* 중단된 목표 (있을 때만) — 중간모드만 표시 (종결모드는 종합평가 4단락에 통합됨) */}
             {!isFinalMode && (() => {
               const pausedItems = [];
-              const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+              const childName = info.fn || childCallName((info.name)) || "아동";
               // ★ [중단 목록 기준] 예전엔 IEP 목표의 중단 과제를 전부 실어서, 지난 보고서 전에 중단해
               //    이미 보고한 것과 데이터시트에 안 올린 목표의 것까지 보고서마다 반복해서 나갔다.
               //    보고서의 다른 칸(stosForReport)과 같은 기준 — 데이터시트에 올린 목표만,
@@ -17667,7 +17761,7 @@ cleanedHTML + '\n' +
 
             {/* ★ [본문 4섹션] 종결글 + 중간모드 reportSections — personalize 함수 사용을 위해 IIFE로 감쌈 */}
             {(() => {
-              const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+              const childName = info.fn || childCallName((info.name)) || "아동";
               const personalize = (text) => personalizeText(text || "", childName);
               // ★ [57-3] 회고 단락 전용 — 진행형을 종결 시점 과거형으로 바꾼 뒤 이름 치환.
               const personalizePast = (text) => personalizeText(toFinalTense(text || ""), childName);
@@ -18029,12 +18123,7 @@ cleanedHTML + '\n' +
             {/* IEP 고유: 작성 확인 본문 */}
             <div style={{ textAlign: "center", padding: "10px 0 16px", fontSize: 12, lineHeight: 1.85, color: "#555" }}>
               <div style={{ fontWeight: 600, fontSize: 12, color: "#333" }}>{info.name || "본"} 아동의 {year}년 개별화 교육(IEP)에 대한 계획을 다음과 같이 확인합니다.</div>
-              {(() => {
-                const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
-                return (
-                  <div style={{ marginTop: 6 }}>{personalizeText("본 계획안은 아동의 현재 발달 수준과 강점 영역을 토대로 단계적 목표를 설정하여 작성되었습니다.", childName)}</div>
-                );
-              })()}
+              {/* ★ [반복 줄임] 같은 뜻의 문장이 아래 회색 안내·맨 끝 상자와 세 번 나와서 이 줄은 뺀다 */}
             </div>
             {/* 서명 표 (중간보고서와 동일 양식) */}
             <table style={{ width: "75%", margin: "0 auto", borderCollapse: "collapse", fontSize: 12 }} className="signature-table">
@@ -18057,11 +18146,10 @@ cleanedHTML + '\n' +
             </table>
             <div style={{ textAlign: "center", fontSize: 10, color: "#aaa", marginTop: 14, lineHeight: 1.6 }}>
               {(() => {
-                const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || info.name || "아동";
+                const childName = info.fn || childCallName((info.name)) || info.name || "아동";
                 return (
                   <>
-                    본 계획안은 {info.name} 아동의 현재 발달 수준과 강점 영역을 토대로 작성되었으며,<br/>
-                    검단ABA언어행동연구소는 {childName}의 단계적 발달 진전을 위해 체계적 중재를 진행합니다.
+                    본 계획안은 {info.name} 아동의 현재 발달 수준과 강점 영역을 토대로 단계적 목표를 설정하여 작성되었습니다.
                   </>
                 );
               })()}
@@ -18098,7 +18186,7 @@ cleanedHTML + '\n' +
                   검단ABA언어행동연구소의 데이터 기반 중재 철학에 따라 분석·기술되었습니다.
                 </>
               ) : (() => {
-                const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || info.name || "아동";
+                const childName = info.fn || childCallName((info.name)) || info.name || "아동";
                 return (
                   <>
                     본 보고서는 {info.name} 아동의 IEP에 따라 작성되었으며, 데이터 기반 분석을 통해 {childName}의 강점 영역과 진행 양상을 정리하였습니다.<br/>
@@ -18114,13 +18202,13 @@ cleanedHTML + '\n' +
         {/* 푸터 - IEP/중간/종결 3가지 모드별 다른 메시지 */}
         <div style={{ marginTop: 20, padding: "14px 16px", background: "#fff", borderRadius: 10, fontSize: 11, lineHeight: 1.7, color: PKD, textAlign: "center", border: `1px solid ${PK}`, pageBreakBefore: "avoid", breakBefore: "avoid", pageBreakInside: "avoid", breakInside: "avoid" }}>
           {isIepMode ? (() => {
-            const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+            const childName = info.fn || childCallName((info.name)) || "아동";
             return `${childName}의 본 IEP는 데이터 기반의 체계적 중재를 통해 단계적으로 진행됩니다.`;
           })() : isFinalMode ? (() => {
-            const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+            const childName = info.fn || childCallName((info.name)) || "아동";
             return `검단ABA언어행동연구소. 본 보고서에 포함된 데이터 기반 분석은 ${childName}의 본 치료 전 과정의 강점 영역과 진행 양상을 정리하여, 다음 단계에서의 활용을 지원합니다.`;
           })() : (() => {
-            const childName = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+            const childName = info.fn || childCallName((info.name)) || "아동";
             return `${childName}의 본 보고 기간 동안 확인된 진행 양상을 토대로, 다음 단계의 중재를 진행합니다.`;
           })()}
         </div>
@@ -20694,7 +20782,7 @@ function TaskRow({ goal, task, date, calcDayRate, bumpTask, setTaskDayOX, resetT
 }
 
 function buildLocalReport({ info, stos, curFields, selFuncs, selStrats, selStratsCustom = "", bName, bInter, domAvgs, reinfSchedule, reinfType, promptStart, promptNow, nextPlans, behaviors, dailyMemos, archiveList, finalMode = false }) {
-  const fn = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+  const fn = info.fn || childCallName((info.name)) || "아동";
   const jEunNeun = (n) => josa은는(n);
   const jIGa = (n) => josa이가(n);
   const jEulReul = (n) => josa을를(n);
@@ -23668,7 +23756,7 @@ function ReportGeneratorSection({
   const generateTimerRef = useRef(null);
   const scrollTimerRef = useRef(null);
 
-  const fn = info.fn || nameWithSuffix(stripSurname(info.name)) || "아동";
+  const fn = info.fn || childCallName((info.name)) || "아동";
 
   useEffect(() => {
     return () => {
@@ -23790,7 +23878,7 @@ function ReportGeneratorSection({
       "다음 목표"
     ];
 
-    const childName = info.fn || nameWithSuffix(stripSurname(info.name || "")) || "아동";
+    const childName = info.fn || childCallName((info.name || "")) || "아동";
     const sectionsHtml = sectionOrder.map(key => {
       const rawContent = sections[key] || "";
       const personalized = personalizeText(rawContent, childName);
