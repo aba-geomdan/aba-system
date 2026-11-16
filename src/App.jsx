@@ -7098,8 +7098,47 @@ function WelcomeModal({ teacherName, onClose }) {
   );
 }
 
+// ★ [앱 사용 칸] 선생님마다 쓸 수 있는 앱 (원장님이 켜고 끔). 원장님은 늘 모든 앱을 씀.
+const ACCESS_APPS = [
+  { k: "aac", l: "🗣️ AAC" }, { k: "guide", l: "🏠 가정 자료" }, { k: "bip", l: "📋 BIP" },
+  { k: "scerts", l: "🎯 SCERTS" }, { k: "prep", l: "🏫 학교준비반" },
+];
 function AdminPanel({ onClose }) {
   const [users, setUsers] = useState([]);        // Auth 계정 목록 (관리자 제외)
+  const [access, setAccess] = useState({});      // { user_id: { app: true } }
+  const [accessErr, setAccessErr] = useState(""); // 앱 사용 칸을 못 읽거나 못 바꿨을 때
+  const [accessBusy, setAccessBusy] = useState(""); // 바꾸는 중인 "user_id:app"
+  const loadAccess = async () => {
+    try {
+      const headers = await _authHeaders();
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/app_access?select=user_id,app,enabled`, { headers });
+      if (!r.ok) { setAccessErr("앱 사용 칸을 불러오지 못했습니다. (Supabase에 '앱사용권한_설정.sql'을 먼저 실행해 주세요)"); return; }
+      const rows = await r.json();
+      const m = {};
+      (Array.isArray(rows) ? rows : []).forEach((x) => { if (x && x.user_id && x.enabled) { m[x.user_id] = { ...(m[x.user_id] || {}), [x.app]: true }; } });
+      setAccess(m); setAccessErr("");
+    } catch (e) { setAccessErr("앱 사용 칸을 불러오지 못했습니다. 인터넷 연결을 확인해 주세요."); }
+  };
+  const toggleAccess = async (uid, app) => {
+    const k = uid + ":" + app;
+    if (accessBusy) return;
+    const next = !(access[uid] && access[uid][app]);
+    setAccessBusy(k);
+    try {
+      const headers = await _authHeaders();
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/app_access?on_conflict=user_id,app`, {
+        method: "POST",
+        headers: { ...headers, "Prefer": "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ user_id: uid, app, enabled: next, updated_at: new Date().toISOString() }),
+      });
+      if (!r.ok) throw new Error("save");
+      setAccess((m) => ({ ...m, [uid]: { ...(m[uid] || {}), [app]: next } }));
+      setAccessErr("");
+    } catch (e) {
+      setAccessErr("바꾸지 못했습니다. 인터넷 연결을 확인한 뒤 다시 눌러 주세요.");
+    }
+    setAccessBusy("");
+  };
   const [loading, setLoading] = useState(false);
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -7121,7 +7160,7 @@ function AdminPanel({ onClose }) {
     setLoading(false);
   };
 
-  useEffect(() => { loadUsers(); }, []);
+  useEffect(() => { loadUsers(); loadAccess(); }, []);
 
   const handleAdd = async () => {
     if (!newName.trim() || !newEmail.trim() || !newPw) {
@@ -7299,9 +7338,28 @@ function AdminPanel({ onClose }) {
                     )}
                   </div>
                 </div>
+                {/* ★ [앱 사용 칸] 이 선생님이 쓸 수 있는 앱 — 누를 때마다 바로 저장 */}
+                <div style={{ marginTop: 9, paddingTop: 8, borderTop: "1px dashed #eee", display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: 11, color: "#888", marginRight: 2 }}>쓸 수 있는 앱</span>
+                  {ACCESS_APPS.map((a) => {
+                    const on = !!(access[u.user_id] && access[u.user_id][a.k]);
+                    const busyHere = accessBusy === u.user_id + ":" + a.k;
+                    return (
+                      <button key={a.k} onClick={() => toggleAccess(u.user_id, a.k)} disabled={!!accessBusy}
+                        title={on ? "누르면 끕니다" : "누르면 켭니다"}
+                        style={{ padding: "3px 9px", borderRadius: 12, fontSize: 11, fontFamily: "inherit", cursor: accessBusy ? "default" : "pointer",
+                          border: `1px solid ${on ? PKD : "#ddd"}`, background: on ? PKL : "#fff", color: on ? PKD : "#aaa", fontWeight: on ? 700 : 400, opacity: busyHere ? 0.5 : 1 }}>
+                        {a.l}{on ? " ✓" : ""}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             ))}
           </div>
+        )}
+        {accessErr ? <div style={{ marginTop: 8, fontSize: 11, color: "#B45309" }}>{accessErr}</div> : (
+          <div style={{ marginTop: 8, fontSize: 10.5, color: "#888" }}>앱은 누를 때마다 켜짐(분홍 ✓)/꺼짐이 바로 저장됩니다. 원장님은 늘 모든 앱을 씁니다. 꺼진 앱은 선생님이 주소로 들어가도 열리지 않습니다.</div>
         )}
 
         <div style={{
@@ -7794,27 +7852,84 @@ function _bipBehaviorNames(child) {
     return out.slice(0, 10);
   } catch (e) { return []; }
 }
-function openToolForChild(app, childId, childName, childBirth, childBehaviors) {
+// ★ [앱 로그인 없이 열기] 통합본에서 앱을 열 때, 서버(app-session)에서 그 앱 전용 새 로그인을 받아
+//    새 창에 넘겨 준다 → 그 앱이 로그인 화면 없이 열린다. 통합본 로그인과 따로 움직여서 서로 끊기게 하지 않는다.
+//    받지 못하면(서버 함수가 아직 없거나 인터넷 문제) 예전처럼 그 앱의 로그인 화면으로 연다.
+const APP_HANDOFF_KEY = "aba-app-handoff";
+async function _fetchAppSession(appKey) {
   try {
-    // BIP를 이 아이로 열기: 번호만 주소에, 이름·생년월일은 같은 사이트 저장칸에 잠깐 맡긴다 (원장님 화면에서만 불림)
-    if (app.k === "bip" && childId) {
+    const token = await _getValidAccessToken();
+    if (!token) return null;
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 15000) : null;
+    let r;
+    try {
+      r = await fetch(`${SUPABASE_URL}/functions/v1/app-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}`, "apikey": SUPABASE_ANON_KEY },
+        body: JSON.stringify({ app: appKey }),
+        ...(ctrl ? { signal: ctrl.signal } : {}),
+      });
+    } finally { if (timer) clearTimeout(timer); }
+    if (!r || !r.ok) return null;
+    const d = await r.json();
+    if (!d || !d.access_token || !d.refresh_token || !d.user) return null;
+    // 그사이 통합본이 다른 사람으로 바뀌었으면 넘기지 않음
+    const cur = _getStoredSession();
+    if (!cur || !cur.user || cur.user.id !== d.user.id) return null;
+    return d;
+  } catch (e) { return null; }
+}
+function openToolForChild(app, childId, childName, childBirth, childBehaviors, isAdmin) {
+  try {
+    let url = app.url;
+    // 아이 정보 넘기기는 원장님 화면에서만 (BIP·가정 자료)
+    if (isAdmin && childId && app.k === "bip") {
+      // BIP를 이 아이로 열기: 번호만 주소에, 이름·생년월일은 같은 사이트 저장칸에 잠깐 맡긴다
       try {
         localStorage.setItem(BIP_HANDOFF_KEY, JSON.stringify({ cid: childId, name: childName || "", birth: childBirth || "",
           behaviors: Array.isArray(childBehaviors) ? childBehaviors : [], ts: Date.now() }));
       } catch (e) {}
       _bipOpenedAt = Date.now();
-      window.open(app.url + "?aba_child=" + encodeURIComponent(childId), "_blank");
-      return;
-    }
-    if (app.k === "guide" && childId) {
+      url = app.url + "?aba_child=" + encodeURIComponent(childId);
+    } else if (isAdmin && childId && app.k === "guide") {
       try {
         localStorage.setItem(GUIDE_HANDOFF_KEY, JSON.stringify({ cid: childId, name: childName || "", ts: Date.now() }));
       } catch (e) {}
-      window.open(app.url + "?aba_child=" + encodeURIComponent(childId), "_blank");
-      return;
+      url = app.url + "?aba_child=" + encodeURIComponent(childId);
     }
-    window.open(app.url, "_blank");
+    // 창은 누른 순간 먼저 연다 (나중에 열면 브라우저가 팝업으로 막음)
+    let w = null;
+    try { w = window.open("", "_blank"); } catch (e) { w = null; }
+    if (!w) { window.open(url, "_blank"); return; }
+    try {
+      w.document.title = "여는 중…";
+      w.document.body.innerHTML = '<p style="font-family:sans-serif;color:#999;padding:28px;font-size:14px">' + (app.label || "앱") + " 여는 중…</p>";
+    } catch (e) {}
+    _fetchAppSession(app.k).then((sess) => {
+      try {
+        if (sess) w.sessionStorage.setItem(APP_HANDOFF_KEY, JSON.stringify({ app: app.k, session: sess, ts: Date.now() }));
+      } catch (e) {}
+      try { w.location.href = url; } catch (e) { try { window.open(url, "_blank"); } catch (e2) {} }
+    });
   } catch (e) {}
+}
+// 선생님이 쓸 수 있는 앱 목록 (원장님이 켜 준 것). 한 번 받으면 2분 동안 같이 쓴다.
+let _myAppsCache = null; // { uid, at, list }
+async function _loadMyAllowedApps() {
+  const cur = _getStoredSession();
+  const uid = cur && cur.user && cur.user.id;
+  if (!uid) return [];
+  if (_myAppsCache && _myAppsCache.uid === uid && Date.now() - _myAppsCache.at < 2 * 60 * 1000) return _myAppsCache.list;
+  try {
+    const headers = await _authHeaders();
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/my_allowed_apps`, { method: "POST", headers, body: "{}" });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    const list = (Array.isArray(rows) ? rows : []).map((x) => (typeof x === "string" ? x : (x && (x.my_allowed_apps || x.app)) || "")).filter(Boolean);
+    _myAppsCache = { uid, at: Date.now(), list };
+    return list;
+  } catch (e) { return []; }
 }
 
 class ToolFence extends React.Component {
@@ -7824,7 +7939,16 @@ class ToolFence extends React.Component {
   render() { return this.state.failed ? null : this.props.children; }
 }
 
-function AdminToolRowInner({ childId, childName, childBirth, childBehaviors }) {
+function AdminToolRowInner({ childId, childName, childBirth, childBehaviors, isAdmin }) {
+  // 선생님: 원장님이 켜 준 앱만 보인다. 하나도 없으면 줄을 그리지 않는다.
+  const [myApps, setMyApps] = useState(isAdmin ? null : []);
+  useEffect(() => {
+    if (isAdmin) return;
+    let alive = true;
+    _loadMyAllowedApps().then((list) => { if (alive) setMyApps(list); });
+    return () => { alive = false; };
+  }, [isAdmin]);
+  const apps = isAdmin ? TOOL_APPS : TOOL_APPS.filter((a) => (myApps || []).includes(a.k));
   const [open, setOpen] = useState(() => {
     try { return localStorage.getItem(TOOL_ROW_OPEN_KEY) === "1"; } catch (e) { return false; }
   });
@@ -7842,14 +7966,15 @@ function AdminToolRowInner({ childId, childName, childBirth, childBehaviors }) {
     border: `1px solid ${a.all ? PKD : PK}`, borderRadius: 18,
     fontSize: open ? 12.5 : 15, fontFamily: "inherit", cursor: "pointer", whiteSpace: "nowrap", lineHeight: 1.2,
   });
+  if (!apps.length) return null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", margin: "-4px 0 14px", padding: "7px 10px", background: PKL, borderRadius: 10 }}>
       <button onClick={toggle} title={open ? "접기" : "펼치기"}
         style={{ border: "none", background: "transparent", color: PKD, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: "2px 4px", whiteSpace: "nowrap" }}>
         {open ? "▾" : "▸"} 이 아이 자료
       </button>
-      {TOOL_APPS.map(a => (
-        <button key={a.k} onClick={() => openToolForChild(a, childId, childName, childBirth, childBehaviors)} title={a.label + " 열기"} style={pill(a)}>
+      {apps.map(a => (
+        <button key={a.k} onClick={() => openToolForChild(a, childId, childName, childBirth, childBehaviors, isAdmin)} title={a.label + " 열기"} style={pill(a)}>
           <span>{a.icon}</span>
           {open && <span>{a.label}</span>}
           {open && <span style={{ fontSize: 10, opacity: 0.6 }}>↗</span>}
@@ -13051,9 +13176,10 @@ export default function App() {
           </div>
         </div>
 
-        {/* ★ [도구 연결] 원장님 화면 전용 앱 바로가기 줄 — 선생님 화면에는 없음 */}
-        {currentUser?.role === "admin" && activeChild && (
-          <AdminToolRow childId={activeChild.id} childName={activeChild?.info?.name || ""} childBirth={activeChild?.info?.birth || ""} childBehaviors={_bipBehaviorNames(activeChild)} />
+        {/* ★ [도구 연결] 앱 바로가기 줄 — 원장님은 모든 앱, 선생님은 원장님이 켜 준 앱만 (하나도 없으면 줄이 없음) */}
+        {currentUser && activeChild && (
+          <AdminToolRow childId={activeChild.id} childName={activeChild?.info?.name || ""} childBirth={activeChild?.info?.birth || ""}
+            childBehaviors={currentUser.role === "admin" ? _bipBehaviorNames(activeChild) : []} isAdmin={currentUser.role === "admin"} />
         )}
 
         {/* ═══ 탭 네비게이션 ═══ */}
@@ -24536,6 +24662,7 @@ function ReportTab({ allGoalsForAlert = [], periodMemos = [], memoPicks = [], on
       {!isFinalMode && (
         <ReportGeneratorSection
           childId={childId}
+          isAdmin={currentUser?.role === "admin"}
           periodLocked={!!cutoffDisabled}
           info={info}
           stos={stosForReport}
@@ -25098,6 +25225,7 @@ function GrowthHistoryChart({ list }) {
 
 function ReportGeneratorSection({
   childId = null,         // ★ [생성 중 아동 바꿈] 누른 아동과 지금 아동이 다르면 결과를 버린다
+  isAdmin = false,        // ★ [BIP에서 가져오기] 원장님 화면에만 버튼
   periodLocked = false,   // ★ [그래프 복원 중] 보고 종료일 칸 잠금
   info, stos, domAvgs, reportPeriodStart, reportPeriodEnd, awaitingNewData,
   goalCards = [],   // ★ [7차 9번]
@@ -25111,6 +25239,46 @@ function ReportGeneratorSection({
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [memoAlert, setMemoAlert] = useState(null);
+  // ★ [BIP에서 가져오기] 원장님 화면 전용 — BIP의 표적행동·고른 기능만 가져온다 (빈도·추세·중재 기법은 직접 고름)
+  const [bipNote, setBipNote] = useState(null); // { ok, text, cid }
+  const [bipBusy, setBipBusy] = useState(false);
+  useEffect(() => { setBipNote(null); }, [childId]);
+  const importFromBip = async () => {
+    if (bipBusy || !childId) return;
+    const cid = childId;
+    setBipBusy(true);
+    try {
+      const list = await _loadBipCases(true);
+      const k = (Array.isArray(list) ? list : []).find((c) => c && String(c.abaChildId || "") === String(cid));
+      if (!k) { setBipNote({ ok: false, cid, text: "이 아이와 연결된 BIP가 없습니다. 위 '이 아이 자료' 줄의 📋 BIP로 먼저 만들어 주세요." }); return; }
+      const name = String(k.target || "").trim();
+      if (!name) { setBipNote({ ok: false, cid, text: "BIP에 표적행동이 아직 없습니다. BIP에서 먼저 적어 주세요." }); return; }
+      const MAP = { attention: "attention", escape: "escape", sensory: "sensory", tangible: "access", physical: "other" };
+      const picked = [k.bipFunc, k.bipSecFunc && k.bipSecFunc !== "none" ? k.bipSecFunc : null].filter(Boolean);
+      const funcs = [];
+      picked.forEach((f) => { const m = MAP[f]; if (m && !funcs.includes(m)) funcs.push(m); });
+      const funcOther = picked.includes("physical") ? "신체적 불편·통증" : "";
+      const label = funcs.map((f) => (f === "other" && funcOther ? `기타(${funcOther})` : (REPORT_FUNCS.find((x) => x.k === f) || {}).l)).filter(Boolean).join(", ");
+      const norm = (t) => String(t || "").replace(/\s/g, "");
+      const idx = reportBehaviors.findIndex((b) => norm(b && b.name) === norm(name));
+      if (idx >= 0) {
+        const cur = reportBehaviors[idx] || {};
+        if ((cur.funcs || []).length || !funcs.length) {
+          setBipNote({ ok: true, cid, text: `'${name}'은(는) 이미 있어서 그대로 두었습니다. 행동 기능은 직접 확인해 주세요${label ? ` (BIP에서 고른 기능: ${label})` : ""}.` });
+          return;
+        }
+        const next = reportBehaviors.map((b, i) => (i === idx ? { ...b, funcs, ...(funcOther ? { funcOther } : {}) } : b));
+        setReportPatch({ reportBehaviors: next });
+        setBipNote({ ok: true, cid, text: `이미 있는 '${name}'의 행동 기능을 BIP와 같게 채웠습니다 (${label}). 빈도·강도, 추세, 중재 기법은 직접 골라 주세요.` });
+        return;
+      }
+      const next = [...reportBehaviors, { name, severity: "", trend: "", funcs, funcOther, intervention: "", interventionCustom: "" }];
+      setReportPatch({ reportBehaviors: next });
+      setBipNote({ ok: true, cid, text: `BIP에서 '${name}'${label ? `(${label})` : ""}을(를) 가져왔습니다.${funcs.length ? "" : " BIP에서 기능을 아직 고르지 않아 행동 기능은 비워 두었습니다."} 빈도·강도, 추세, 중재 기법은 직접 골라 주세요.` });
+    } catch (e) {
+      setBipNote({ ok: false, cid, text: "BIP 자료를 불러오지 못했습니다. 인터넷 연결을 확인한 뒤 다시 눌러 주세요." });
+    } finally { setBipBusy(false); }
+  };
   const reportRef = useRef(null);
   const generateTimerRef = useRef(null);
   const scrollTimerRef = useRef(null);
@@ -25575,6 +25743,13 @@ function ReportGeneratorSection({
         <div style={{ padding: 12, background: "#fff", borderRadius: 10, border: "1px solid #f0e0e5" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: PKD }}>⚠️ 주요 도전적 행동</div>
+            <div style={{ display: "flex", gap: 5 }}>
+            {isAdmin && childId && (
+              <button onClick={importFromBip} disabled={bipBusy} title="BIP의 표적행동과 고른 기능을 가져옵니다 (원장님 화면에만 보임)"
+                style={{ fontSize: 10, padding: "3px 8px", background: "#EEF3FB", color: "#3E5F8A", border: "1px solid #C9DAF0", borderRadius: 6, cursor: bipBusy ? "default" : "pointer", fontFamily: "inherit", fontWeight: 700, opacity: bipBusy ? 0.6 : 1 }}>
+                {bipBusy ? "가져오는 중…" : "📋 BIP에서 가져오기"}
+              </button>
+            )}
             <button
               onClick={() => {
                 const next = [...reportBehaviors, { name: "", severity: "", trend: "", funcs: [], funcOther: "", intervention: "", interventionCustom: "" }];
@@ -25583,7 +25758,13 @@ function ReportGeneratorSection({
               style={{ fontSize: 10, padding: "3px 8px", background: PKL, color: PKD, border: `1px solid ${PK}`, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>
               + 추가
             </button>
+            </div>
           </div>
+          {bipNote && bipNote.cid === childId && (
+            <div style={{ fontSize: 10.5, color: bipNote.ok ? "#4A6A9E" : "#B45309", background: bipNote.ok ? "#EEF3FB" : "#FFF7E8", borderRadius: 6, padding: "4px 8px", marginBottom: 8, lineHeight: 1.5 }}>
+              ↳ {bipNote.text}
+            </div>
+          )}
 
           {reportBehaviors.length === 0 && (
             <div style={{ fontSize: 11, color: "#888", padding: "12px 8px", textAlign: "center", border: "1px dashed #ddd", borderRadius: 6 }}>
