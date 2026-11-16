@@ -7781,13 +7781,28 @@ const GUIDE_HANDOFF_KEY = "aba-guide-handoff";
 const BIP_HANDOFF_KEY = "aba-bip-handoff";
 
 // 5분 가이드를 이 아이로 열기: 이름은 주소에 싣지 않고, 같은 사이트 저장칸에 잠깐 맡긴다.
-function openToolForChild(app, childId, childName, childBirth) {
+let _bipOpenedAt = 0; // BIP를 연 시각 — 돌아오면 '연결된 자료' 카드가 바로 새로 읽게
+// BIP에 넘길 도전적 행동 이름 (통합본 보고서의 도전적 행동 기록, 이름만·최대 10개)
+function _bipBehaviorNames(child) {
+  try {
+    const list = Array.isArray(child?.reportBehaviors) ? child.reportBehaviors : [];
+    const out = [];
+    list.forEach((b) => {
+      const n = String((b && b.name) || "").trim().slice(0, 60);
+      if (n && !out.includes(n)) out.push(n);
+    });
+    return out.slice(0, 10);
+  } catch (e) { return []; }
+}
+function openToolForChild(app, childId, childName, childBirth, childBehaviors) {
   try {
     // BIP를 이 아이로 열기: 번호만 주소에, 이름·생년월일은 같은 사이트 저장칸에 잠깐 맡긴다 (원장님 화면에서만 불림)
     if (app.k === "bip" && childId) {
       try {
-        localStorage.setItem(BIP_HANDOFF_KEY, JSON.stringify({ cid: childId, name: childName || "", birth: childBirth || "", ts: Date.now() }));
+        localStorage.setItem(BIP_HANDOFF_KEY, JSON.stringify({ cid: childId, name: childName || "", birth: childBirth || "",
+          behaviors: Array.isArray(childBehaviors) ? childBehaviors : [], ts: Date.now() }));
       } catch (e) {}
+      _bipOpenedAt = Date.now();
       window.open(app.url + "?aba_child=" + encodeURIComponent(childId), "_blank");
       return;
     }
@@ -7809,7 +7824,7 @@ class ToolFence extends React.Component {
   render() { return this.state.failed ? null : this.props.children; }
 }
 
-function AdminToolRowInner({ childId, childName, childBirth }) {
+function AdminToolRowInner({ childId, childName, childBirth, childBehaviors }) {
   const [open, setOpen] = useState(() => {
     try { return localStorage.getItem(TOOL_ROW_OPEN_KEY) === "1"; } catch (e) { return false; }
   });
@@ -7834,7 +7849,7 @@ function AdminToolRowInner({ childId, childName, childBirth }) {
         {open ? "▾" : "▸"} 이 아이 자료
       </button>
       {TOOL_APPS.map(a => (
-        <button key={a.k} onClick={() => openToolForChild(a, childId, childName, childBirth)} title={a.label + " 열기"} style={pill(a)}>
+        <button key={a.k} onClick={() => openToolForChild(a, childId, childName, childBirth, childBehaviors)} title={a.label + " 열기"} style={pill(a)}>
           <span>{a.icon}</span>
           {open && <span>{a.label}</span>}
           {open && <span style={{ fontSize: 10, opacity: 0.6 }}>↗</span>}
@@ -7891,8 +7906,9 @@ function HomeLinkPanel({ childId, childName }) {
       <div style={LINK_ROW}>
         <b style={LINK_NAME}>🏠 가정 자료</b>
         <span style={{ fontSize: 12.5, color: stale ? "#B45309" : rows.length ? "#333" : "#999", fontWeight: stale ? 700 : 400 }}>{summary}{stale ? " · 새 자료 챙길 때" : ""}</span>
-        <button onClick={() => setOpen(o => !o)} disabled={rows.length === 0}
-          style={{ marginLeft: "auto", ...BS, padding: "4px 12px", fontSize: 12, opacity: rows.length === 0 ? 0.4 : 1, cursor: rows.length === 0 ? "default" : "pointer" }}>{open ? "접기" : "목록 보기"}</button>
+        {rows.length > 0 && (
+          <button onClick={() => setOpen(o => !o)} style={{ marginLeft: "auto", ...BS, padding: "4px 12px", fontSize: 12 }}>{open ? "접기" : "목록 보기"}</button>
+        )}
       </div>
       {state.error ? <div style={{ fontSize: 12, color: "#999", padding: "0 0 8px" }}>{state.error}</div> : null}
       {open && rows.length > 0 ? (
@@ -7923,27 +7939,45 @@ function HomeLinkCard(props) {
 const BIP_FUNC_LABEL = { attention: "관심 끌기", escape: "회피·도피", sensory: "감각 자극", tangible: "선호물 획득", physical: "신체적 불편·통증" };
 const BIP_SCALE_LABEL = { FAST: "FAST", QABF: "QABF", MAS: "MAS" };
 
+// BIP 자료는 아이를 바꿀 때마다 새로 받지 않고, 한 번 받은 것을 2분 동안 같이 쓴다 (받는 양 줄이기).
+//   BIP를 열었다가 돌아오면(_bipOpenedAt) 2분이 안 됐어도 새로 받는다. 같은 사람 것일 때만 다시 씀.
+let _bipCasesCache = null; // { uid, at, list }
+let _bipCasesInFlight = null;
+async function _loadBipCases(force) {
+  const u = await abaGetCurrentUser();
+  if (!u || !u.id) throw new Error("no user");
+  const c = _bipCasesCache;
+  if (!force && c && c.uid === u.id && c.at >= _bipOpenedAt && Date.now() - c.at < 2 * 60 * 1000) return c.list;
+  if (_bipCasesInFlight && _bipCasesInFlight.uid === u.id) return _bipCasesInFlight.p;
+  const p = (async () => {
+    const startedAt = Date.now();
+    const headers = await _authHeaders();
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/bip_data?user_id=eq.${encodeURIComponent(u.id)}&key=eq.cases&select=value`, { headers });
+    if (!r.ok) throw new Error("read fail");
+    const rows = await r.json();
+    let list = [];
+    if (Array.isArray(rows) && rows[0]) {
+      const v = rows[0].value;
+      list = (typeof v === "string" ? JSON.parse(v) : v) || [];
+    }
+    list = Array.isArray(list) ? list : [];
+    _bipCasesCache = { uid: u.id, at: startedAt, list };
+    return list;
+  })();
+  _bipCasesInFlight = { uid: u.id, p };
+  try { return await p; } finally { if (_bipCasesInFlight && _bipCasesInFlight.p === p) _bipCasesInFlight = null; }
+}
+
 function BipLinkPanel({ childId, childName, childBirth }) {
   const [state, setState] = useState({ loading: true, error: "", kase: null });
   const lastLoadRef = useRef(0);       // 마지막으로 받은 시각
-  const openedBipRef = useRef(false);  // 이 카드에서 BIP를 열었는지 (돌아오면 바로 새로 받기)
 
   useEffect(() => {
     let alive = true;
     const load = async () => {
       lastLoadRef.current = Date.now();
       try {
-        const u = await abaGetCurrentUser();
-        if (!u || !u.id) throw new Error("no user");
-        const headers = await _authHeaders();
-        const r = await fetch(`${SUPABASE_URL}/rest/v1/bip_data?user_id=eq.${encodeURIComponent(u.id)}&key=eq.cases&select=value`, { headers });
-        if (!r.ok) throw new Error("read fail");
-        const rows = await r.json();
-        let list = [];
-        if (Array.isArray(rows) && rows[0]) {
-          const v = rows[0].value;
-          list = (typeof v === "string" ? JSON.parse(v) : v) || [];
-        }
+        const list = await _loadBipCases(false);
         const kase = (Array.isArray(list) ? list : []).find((c) => c && String(c.abaChildId || "") === String(childId)) || null;
         if (alive) setState({ loading: false, error: "", kase });
       } catch (e) {
@@ -7953,17 +7987,15 @@ function BipLinkPanel({ childId, childName, childBirth }) {
     };
     load();
     // BIP 탭에서 쓰고 돌아오면 새로 읽는다. 사진이 든 BIP 자료는 클 수 있어서,
-    // 이 카드로 BIP를 열고 돌아온 경우가 아니면 2분에 한 번까지만 다시 받는다.
+    // 위 '이 아이 자료' 줄로 BIP를 열고 돌아온 경우가 아니면 2분에 한 번까지만 다시 받는다.
     const onVis = () => {
       if (document.visibilityState !== "visible") return;
-      if (openedBipRef.current || Date.now() - lastLoadRef.current > 2 * 60 * 1000) { openedBipRef.current = false; load(); }
+      if (_bipOpenedAt > lastLoadRef.current || Date.now() - lastLoadRef.current > 2 * 60 * 1000) load();
     };
     document.addEventListener("visibilitychange", onVis);
     return () => { alive = false; document.removeEventListener("visibilitychange", onVis); };
   }, [childId]);
 
-  const bipApp = TOOL_APPS.find((a) => a.k === "bip");
-  const openBip = () => { if (!bipApp) return; openedBipRef.current = true; openToolForChild(bipApp, childId, childName, childBirth); };
 
   const k = state.kase;
   const records = (k && Array.isArray(k.records)) ? k.records : [];
@@ -7989,7 +8021,6 @@ function BipLinkPanel({ childId, childName, childBirth }) {
           : !k ? <span style={{ fontSize: 12.5, color: "#999" }}>아직 없음</span>
           : <span style={{ fontSize: 12.5, color: "#333" }}>{brief}
               {recText ? <span style={{ color: stale ? "#B45309" : "#999", fontWeight: stale ? 700 : 400 }}> · {recText}{stale ? " (확인할 때)" : ""}</span> : null}</span>}
-        <button onClick={openBip} style={{ marginLeft: "auto", ...BS, padding: "4px 12px", fontSize: 12 }}>{k ? "BIP 열기 ↗" : "BIP 시작 ↗"}</button>
       </div>
       {state.error && !k ? <div style={{ fontSize: 12, color: "#999", padding: "0 0 8px" }}>{state.error}</div> : null}
     </div>
@@ -13022,7 +13053,7 @@ export default function App() {
 
         {/* ★ [도구 연결] 원장님 화면 전용 앱 바로가기 줄 — 선생님 화면에는 없음 */}
         {currentUser?.role === "admin" && activeChild && (
-          <AdminToolRow childId={activeChild.id} childName={activeChild?.info?.name || ""} childBirth={activeChild?.info?.birth || ""} />
+          <AdminToolRow childId={activeChild.id} childName={activeChild?.info?.name || ""} childBirth={activeChild?.info?.birth || ""} childBehaviors={_bipBehaviorNames(activeChild)} />
         )}
 
         {/* ═══ 탭 네비게이션 ═══ */}
