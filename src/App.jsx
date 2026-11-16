@@ -7780,10 +7780,19 @@ const TOOL_APPS = [
 ];
 const TOOL_ROW_OPEN_KEY = "aba-admin-tools-open";
 const GUIDE_HANDOFF_KEY = "aba-guide-handoff";
+const BIP_HANDOFF_KEY = "aba-bip-handoff";
 
 // 5분 가이드를 이 아이로 열기: 이름은 주소에 싣지 않고, 같은 사이트 저장칸에 잠깐 맡긴다.
-function openToolForChild(app, childId, childName) {
+function openToolForChild(app, childId, childName, childBirth) {
   try {
+    // BIP를 이 아이로 열기: 번호만 주소에, 이름·생년월일은 같은 사이트 저장칸에 잠깐 맡긴다 (원장님 화면에서만 불림)
+    if (app.k === "bip" && childId) {
+      try {
+        localStorage.setItem(BIP_HANDOFF_KEY, JSON.stringify({ cid: childId, name: childName || "", birth: childBirth || "", ts: Date.now() }));
+      } catch (e) {}
+      window.open(app.url + "?aba_child=" + encodeURIComponent(childId), "_blank");
+      return;
+    }
     if (app.k === "guide" && childId) {
       try {
         localStorage.setItem(GUIDE_HANDOFF_KEY, JSON.stringify({ cid: childId, name: childName || "", ts: Date.now() }));
@@ -7802,7 +7811,7 @@ class ToolFence extends React.Component {
   render() { return this.state.failed ? null : this.props.children; }
 }
 
-function AdminToolRowInner({ childId, childName }) {
+function AdminToolRowInner({ childId, childName, childBirth }) {
   const [open, setOpen] = useState(() => {
     try { return localStorage.getItem(TOOL_ROW_OPEN_KEY) === "1"; } catch (e) { return false; }
   });
@@ -7827,7 +7836,7 @@ function AdminToolRowInner({ childId, childName }) {
         {open ? "▾" : "▸"} 이 아이 자료
       </button>
       {TOOL_APPS.map(a => (
-        <button key={a.k} onClick={() => openToolForChild(a, childId, childName)} title={a.label + " 열기"} style={pill(a)}>
+        <button key={a.k} onClick={() => openToolForChild(a, childId, childName, childBirth)} title={a.label + " 열기"} style={pill(a)}>
           <span>{a.icon}</span>
           {open && <span>{a.label}</span>}
           {open && <span style={{ fontSize: 10, opacity: 0.6 }}>↗</span>}
@@ -7880,25 +7889,18 @@ function HomeLinkPanel({ childId, childName }) {
   const stale = days !== null && days >= 30;
 
   return (
-    <div style={CS}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: PKD }}>🏠 가정 연계</h3>
-        <span style={{ fontSize: 10, color: "#fff", background: PKD, borderRadius: 6, padding: "1px 6px" }}>관리자만</span>
-        <span style={{ fontSize: 12, color: stale ? "#B45309" : "#999", fontWeight: stale ? 700 : 400 }}>{summary}{stale ? " · 새 자료 챙길 때" : ""}</span>
-        {rows.length > 0 && (
-          <button onClick={() => setOpen(o => !o)} style={{ marginLeft: "auto", ...BS, padding: "4px 12px", fontSize: 12 }}>{open ? "접기" : "목록 보기"}</button>
-        )}
+    <div>
+      <div style={LINK_ROW}>
+        <b style={LINK_NAME}>🏠 가정 연계</b>
+        <span style={{ fontSize: 12.5, color: stale ? "#B45309" : rows.length ? "#333" : "#999", fontWeight: stale ? 700 : 400 }}>{summary}{stale ? " · 새 자료 챙길 때" : ""}</span>
+        <button onClick={() => setOpen(o => !o)} disabled={rows.length === 0}
+          style={{ marginLeft: "auto", ...BS, padding: "4px 12px", fontSize: 12, opacity: rows.length === 0 ? 0.4 : 1, cursor: rows.length === 0 ? "default" : "pointer" }}>{open ? "접기" : "목록 보기"}</button>
       </div>
-      {state.error ? <div style={{ fontSize: 12, color: "#999", marginTop: 8 }}>{state.error}</div> : null}
-      {!state.loading && !state.error && rows.length === 0 ? (
-        <div style={{ fontSize: 12, color: "#999", marginTop: 8, lineHeight: 1.6 }}>
-          위 '이 아이 자료' 줄의 🏠 5분 가이드로 만든 가이드가 여기에 날짜순으로 모입니다.
-        </div>
-      ) : null}
+      {state.error ? <div style={{ fontSize: 12, color: "#999", padding: "0 0 8px" }}>{state.error}</div> : null}
       {open && rows.length > 0 ? (
-        <div style={{ marginTop: 10, borderTop: "1px solid #f0e0e5" }}>
+        <div style={{ marginBottom: 6, background: "#fdf8f9", borderRadius: 8, padding: "2px 10px" }}>
           {rows.map(g => (
-            <div key={g.guide_id} style={{ display: "flex", gap: 12, padding: "8px 2px", borderBottom: "1px solid #f7eef1", fontSize: 13 }}>
+            <div key={g.guide_id} style={{ display: "flex", gap: 12, padding: "7px 2px", borderBottom: "1px solid #f7eef1", fontSize: 13 }}>
               <span style={{ color: "#999", minWidth: 78, whiteSpace: "nowrap" }}>{_hlDate(g.created_at)}</span>
               <span style={{ color: "#333", flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{g.topic}</span>
             </div>
@@ -7909,8 +7911,110 @@ function HomeLinkPanel({ childId, childName }) {
   );
 }
 
+// 연결된 자료 카드 안의 한 줄 모양 (가정 연계·BIP 공통)
+const LINK_ROW = { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "9px 0" };
+const LINK_NAME = { fontSize: 13.5, color: "#333", minWidth: 128 };
+
 function HomeLinkCard(props) {
   return <ToolFence key={props.childId}><HomeLinkPanel {...props} /></ToolFence>;
+}
+
+/* ★ [도구 연결] 행동 지원(BIP) 카드 — 원장님 화면 전용
+   - BIP 메이커에 원장님 계정으로 저장된 케이스 중, 이 아이와 연결된 것만 읽어서 보여 준다 (읽기만, 통합본 자료는 건드리지 않음).
+   - 연결은 '이 아이 자료' 줄의 BIP 버튼으로 BIP를 열어 케이스를 만들 때 생긴다. */
+const BIP_FUNC_LABEL = { attention: "관심 끌기", escape: "회피·도피", sensory: "감각 자극", tangible: "선호물 획득", physical: "신체적 불편·통증" };
+const BIP_SCALE_LABEL = { FAST: "FAST", QABF: "QABF", MAS: "MAS" };
+
+function BipLinkPanel({ childId, childName, childBirth }) {
+  const [state, setState] = useState({ loading: true, error: "", kase: null });
+  const lastLoadRef = useRef(0);       // 마지막으로 받은 시각
+  const openedBipRef = useRef(false);  // 이 카드에서 BIP를 열었는지 (돌아오면 바로 새로 받기)
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      lastLoadRef.current = Date.now();
+      try {
+        const u = await abaGetCurrentUser();
+        if (!u || !u.id) throw new Error("no user");
+        const headers = await _authHeaders();
+        const r = await fetch(`${SUPABASE_URL}/rest/v1/bip_data?user_id=eq.${encodeURIComponent(u.id)}&key=eq.cases&select=value`, { headers });
+        if (!r.ok) throw new Error("read fail");
+        const rows = await r.json();
+        let list = [];
+        if (Array.isArray(rows) && rows[0]) {
+          const v = rows[0].value;
+          list = (typeof v === "string" ? JSON.parse(v) : v) || [];
+        }
+        const kase = (Array.isArray(list) ? list : []).find((c) => c && String(c.abaChildId || "") === String(childId)) || null;
+        if (alive) setState({ loading: false, error: "", kase });
+      } catch (e) {
+        // 다시 읽기에 실패하면 이미 받아 둔 내용은 그대로 둔다
+        if (alive) setState((prev) => (prev.kase ? { ...prev, loading: false } : { loading: false, error: "BIP 자료를 불러오지 못했습니다.", kase: null }));
+      }
+    };
+    load();
+    // BIP 탭에서 쓰고 돌아오면 새로 읽는다. 사진이 든 BIP 자료는 클 수 있어서,
+    // 이 카드로 BIP를 열고 돌아온 경우가 아니면 2분에 한 번까지만 다시 받는다.
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      if (openedBipRef.current || Date.now() - lastLoadRef.current > 2 * 60 * 1000) { openedBipRef.current = false; load(); }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { alive = false; document.removeEventListener("visibilitychange", onVis); };
+  }, [childId]);
+
+  const bipApp = TOOL_APPS.find((a) => a.k === "bip");
+  const openBip = () => { if (!bipApp) return; openedBipRef.current = true; openToolForChild(bipApp, childId, childName, childBirth); };
+
+  const k = state.kase;
+  const records = (k && Array.isArray(k.records)) ? k.records : [];
+  const asmts = (k && Array.isArray(k.assessments)) ? k.assessments : [];
+  // 기록 번호는 넣은 시각이라, 가장 큰 번호가 마지막으로 넣은 기록
+  const lastRecTs = records.reduce((m, r) => Math.max(m, Number(r && r.id) || 0), 0);
+  const days = lastRecTs ? Math.floor((Date.now() - lastRecTs) / 86400000) : null;
+  const stale = days !== null && days >= 14;
+  const scales = Array.from(new Set(asmts.map((a) => BIP_SCALE_LABEL[a && a.scaleId] || (a && a.scaleId)).filter(Boolean)));
+  const hasEdit = k ? Object.keys(k).some((key) => /^editedBip_/.test(key) && k[key]) : false;
+  const hasAi = k ? Object.keys(k).some((key) => /^aiBip_/.test(key) && k[key]) : false;
+
+  const planShort = !k ? "" : hasEdit ? "직접 고친 글" : hasAi ? "AI 생성본" : asmts.length ? "기본 문안" : "평가 전";
+  const brief = !k ? "" : [k.target || "목표행동 미설정", BIP_FUNC_LABEL[k.bipFunc] || (scales.length ? "기능 미선택" : ""), planShort].filter(Boolean).join(" · ");
+  const recText = days === null ? "" : days === 0 ? "기록 오늘" : `기록 ${days}일 전`;
+
+  return (
+    <div>
+      <div style={LINK_ROW}>
+        <b style={LINK_NAME}>📋 행동 지원 (BIP)</b>
+        {state.loading ? <span style={{ fontSize: 12.5, color: "#999" }}>불러오는 중…</span>
+          : state.error && !k ? null
+          : !k ? <span style={{ fontSize: 12.5, color: "#999" }}>아직 없음</span>
+          : <span style={{ fontSize: 12.5, color: "#333" }}>{brief}
+              {recText ? <span style={{ color: stale ? "#B45309" : "#999", fontWeight: stale ? 700 : 400 }}> · {recText}{stale ? " (확인할 때)" : ""}</span> : null}</span>}
+        <button onClick={openBip} style={{ marginLeft: "auto", ...BS, padding: "4px 12px", fontSize: 12 }}>{k ? "BIP 열기 ↗" : "BIP 시작 ↗"}</button>
+      </div>
+      {state.error && !k ? <div style={{ fontSize: 12, color: "#999", padding: "0 0 8px" }}>{state.error}</div> : null}
+    </div>
+  );
+}
+
+function BipLinkCard(props) {
+  return <ToolFence key={props.childId}><BipLinkPanel {...props} /></ToolFence>;
+}
+
+/* ★ [도구 연결] 연결된 자료 카드 — 원장님 화면 전용. 가정 연계·BIP를 한 카드 안에 한 줄씩 (한 줄이 오류 나도 다른 줄은 그대로) */
+function LinkedToolsCard({ childId, childName, childBirth }) {
+  return (
+    <div style={{ ...CS, paddingTop: "0.9rem", paddingBottom: "0.6rem" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: PKD }}>🔗 연결된 자료</h3>
+        <span style={{ fontSize: 10, color: "#fff", background: PKD, borderRadius: 6, padding: "1px 6px" }}>관리자만</span>
+      </div>
+      <HomeLinkCard childId={childId} childName={childName} />
+      <div style={{ borderTop: "1px solid #f7eef1" }} />
+      <BipLinkCard childId={childId} childName={childName} childBirth={childBirth} />
+    </div>
+  );
 }
 
 
@@ -12920,7 +13024,7 @@ export default function App() {
 
         {/* ★ [도구 연결] 원장님 화면 전용 앱 바로가기 줄 — 선생님 화면에는 없음 */}
         {currentUser?.role === "admin" && activeChild && (
-          <AdminToolRow childId={activeChild.id} childName={activeChild?.info?.name || ""} />
+          <AdminToolRow childId={activeChild.id} childName={activeChild?.info?.name || ""} childBirth={activeChild?.info?.birth || ""} />
         )}
 
         {/* ═══ 탭 네비게이션 ═══ */}
@@ -14068,9 +14172,9 @@ export default function App() {
               />
             )}
 
-            {/* ★ [도구 연결] 가정 연계 카드 — 원장님 화면 전용, 5분 가이드 보관함을 읽기만 함 */}
+            {/* ★ [도구 연결] 연결된 자료 카드 — 원장님 화면 전용, 가정 연계(5분 가이드)·BIP를 읽기만 함 */}
             {activeChild && currentUser?.role === "admin" && (
-              <HomeLinkCard key={"homelink-" + activeChild.id} childId={activeChild.id} childName={info.name || ""} />
+              <LinkedToolsCard key={"linked-" + activeChild.id} childId={activeChild.id} childName={info.name || ""} childBirth={info.birth || ""} />
             )}
 
             <div style={{ ...CS, background: "#fdf8f9", border: `1px solid ${PK}` }}>
