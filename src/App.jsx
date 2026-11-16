@@ -7771,12 +7771,10 @@ function ChildSurveyCard(props) {
    ═══════════════════════════════════════════════════════════════ */
 const TOOL_APPS = [
   { k: "aac", icon: "🗣️", label: "AAC 메이커", url: "https://aba-geomdan.github.io/aac-maker/" },
-  { k: "guide", icon: "🏠", label: "5분 가이드", url: "https://aba-geomdan.github.io/geomdan-guide/" },
-  { k: "esdm", icon: "🧩", label: "함께놀이", url: "https://aba-geomdan.github.io/esdm/" },
+  { k: "guide", icon: "🏠", label: "가정 자료", url: "https://aba-geomdan.github.io/geomdan-guide/" },
   { k: "bip", icon: "📋", label: "BIP", url: "https://aba-geomdan.github.io/bip-maker/" },
   { k: "scerts", icon: "🎯", label: "SCERTS", url: "https://aba-geomdan.github.io/abageomdan-scerts-v2/" },
   { k: "prep", icon: "🏫", label: "학교준비반", url: "https://aba-geomdan.github.io/school-prep/" },
-  { k: "portal", icon: "🧰", label: "도구모음 전체", url: "https://aba-geomdan.github.io/portal/", all: true },
 ];
 const TOOL_ROW_OPEN_KEY = "aba-admin-tools-open";
 const GUIDE_HANDOFF_KEY = "aba-guide-handoff";
@@ -7869,7 +7867,7 @@ function HomeLinkPanel({ childId, childName }) {
         if (alive) setState({ loading: false, error: "", rows: Array.isArray(rows) ? rows : [] });
       } catch (e) {
         // 다시 읽기에 실패하면 이미 받아 둔 목록은 그대로 둔다
-        if (alive) setState(prev => (prev.rows.length > 0 ? { ...prev, loading: false } : { loading: false, error: "5분 가이드 쪽 준비(SQL)가 끝나면 여기에 보입니다.", rows: [] }));
+        if (alive) setState(prev => (prev.rows.length > 0 ? { ...prev, loading: false } : { loading: false, error: "가정 자료 쪽 준비(SQL)가 끝나면 여기에 보입니다.", rows: [] }));
       }
     };
     load();
@@ -7885,13 +7883,13 @@ function HomeLinkPanel({ childId, childName }) {
   const summary = state.loading ? "불러오는 중…"
     : state.error ? ""
     : rows.length === 0 ? "아직 없음"
-    : `5분 가이드 ${rows.length}건 · 마지막 ${days == null ? "-" : days === 0 ? "오늘" : days + "일 전"}`;
+    : `자료 ${rows.length}건 · 마지막 ${days == null ? "-" : days === 0 ? "오늘" : days + "일 전"}`;
   const stale = days !== null && days >= 30;
 
   return (
     <div>
       <div style={LINK_ROW}>
-        <b style={LINK_NAME}>🏠 가정 연계</b>
+        <b style={LINK_NAME}>🏠 가정 자료</b>
         <span style={{ fontSize: 12.5, color: stale ? "#B45309" : rows.length ? "#333" : "#999", fontWeight: stale ? 700 : 400 }}>{summary}{stale ? " · 새 자료 챙길 때" : ""}</span>
         <button onClick={() => setOpen(o => !o)} disabled={rows.length === 0}
           style={{ marginLeft: "auto", ...BS, padding: "4px 12px", fontSize: 12, opacity: rows.length === 0 ? 0.4 : 1, cursor: rows.length === 0 ? "default" : "pointer" }}>{open ? "접기" : "목록 보기"}</button>
