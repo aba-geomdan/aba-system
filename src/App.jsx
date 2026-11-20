@@ -8001,10 +8001,20 @@ function HomeLinkPanel({ childId, childName }) {
     const load = async () => {
       try {
         const headers = await _authHeaders();
-        const r = await fetch(`${SUPABASE_URL}/rest/v1/gd_guides?child_id=eq.${encodeURIComponent(childId)}&select=guide_id,topic,created_at&order=created_at.desc&limit=50`, { headers });
-        if (!r.ok) throw new Error("not ready");
-        const rows = await r.json();
-        if (alive) setState({ loading: false, error: "", rows: Array.isArray(rows) ? rows : [] });
+        const cid = encodeURIComponent(childId);
+        // 예전 5분 가이드 보관함 + 지금 가정 자료 저장 목록(esdm_plans)을 함께 읽는다. 한쪽만 읽혀도 보여 준다.
+        const [r1, r2] = await Promise.all([
+          fetch(`${SUPABASE_URL}/rest/v1/gd_guides?child_id=eq.${cid}&select=guide_id,topic,created_at&order=created_at.desc&limit=50`, { headers }).catch(() => null),
+          fetch(`${SUPABASE_URL}/rest/v1/esdm_plans?child_id=eq.${cid}&select=id,title,created_at&order=created_at.desc&limit=50`, { headers }).catch(() => null),
+        ]);
+        if ((!r1 || !r1.ok) && (!r2 || !r2.ok)) throw new Error("not ready");
+        const a1 = r1 && r1.ok ? await r1.json().catch(() => []) : [];
+        const a2 = r2 && r2.ok ? await r2.json().catch(() => []) : [];
+        const rows = [
+          ...(Array.isArray(a1) ? a1 : []),
+          ...(Array.isArray(a2) ? a2 : []).map(p => ({ guide_id: "p-" + p.id, topic: p.title || "가정 자료", created_at: p.created_at })),
+        ].sort((x, y) => String(y.created_at || "").localeCompare(String(x.created_at || ""))).slice(0, 50);
+        if (alive) setState({ loading: false, error: "", rows });
       } catch (e) {
         // 다시 읽기에 실패하면 이미 받아 둔 목록은 그대로 둔다
         if (alive) setState(prev => (prev.rows.length > 0 ? { ...prev, loading: false } : { loading: false, error: "가정 자료 쪽 준비(SQL)가 끝나면 여기에 보입니다.", rows: [] }));
