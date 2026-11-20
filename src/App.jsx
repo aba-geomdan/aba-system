@@ -7894,7 +7894,7 @@ function openToolForChild(app, childId, childName, childBirth, childBehaviors, i
       url = app.url + "?aba_child=" + encodeURIComponent(childId);
     } else if (isAdmin && childId && app.k === "guide") {
       try {
-        localStorage.setItem(GUIDE_HANDOFF_KEY, JSON.stringify({ cid: childId, name: childName || "", ts: Date.now() }));
+        localStorage.setItem(GUIDE_HANDOFF_KEY, JSON.stringify({ cid: childId, name: childName || "", birth: childBirth || "", ts: Date.now() }));
       } catch (e) {}
       url = app.url + "?aba_child=" + encodeURIComponent(childId);
     }
