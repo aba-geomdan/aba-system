@@ -7897,6 +7897,12 @@ function openToolForChild(app, childId, childName, childBirth, childBehaviors, i
         localStorage.setItem(GUIDE_HANDOFF_KEY, JSON.stringify({ cid: childId, name: childName || "", birth: childBirth || "", ts: Date.now() }));
       } catch (e) {}
       url = app.url + "?aba_child=" + encodeURIComponent(childId);
+    } else if (isAdmin && childId && (app.k === "scerts" || app.k === "prep")) {
+      // SCERTS·학교준비반을 이 아이로 열기: 번호만 주소에, 이름·생년월일은 같은 사이트 저장칸에 잠깐 맡긴다
+      try {
+        localStorage.setItem("aba-child-handoff", JSON.stringify({ app: app.k, cid: childId, name: childName || "", birth: childBirth || "", ts: Date.now() }));
+      } catch (e) {}
+      url = app.url + "?aba_child=" + encodeURIComponent(childId);
     }
     // 창은 누른 순간 먼저 연다 (나중에 열면 브라우저가 팝업으로 막음)
     let w = null;
