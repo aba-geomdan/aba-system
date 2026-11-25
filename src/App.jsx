@@ -7655,7 +7655,7 @@ function ChildSurveyPanel({ childId, childName, isAdmin }) {
         const headers = await _authHeaders();
         const id = encodeURIComponent(childId);
         const [r1, r2] = await Promise.all([
-          fetch(`${SUPABASE_URL}/rest/v1/inquiries?child_id=eq.${id}&select=id,answers,memo,status,created_at&order=created_at.desc`, { headers }),
+          fetch(`${SUPABASE_URL}/rest/v1/inquiries?child_id=eq.${id}&select=id,answers,memo,notes,status,created_at&order=created_at.desc`, { headers }),
           fetch(`${SUPABASE_URL}/rest/v1/rein_surveys?child_id=eq.${id}&select=id,answers,submitted_at&order=submitted_at.desc`, { headers }),
         ]);
         if (!r1.ok || !r2.ok) {
@@ -7784,6 +7784,18 @@ function ChildSurveyPanel({ childId, childName, isAdmin }) {
                   <div style={{ fontSize: 14, color: "#333", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{inq.memo}</div>
                 </div>
               ) : null}
+              {/* ★ 소견 및 권고 — 설문 앱에서 원장이 [칸 추가]로 적은 칸. 여기서는 읽기만. 빈 칸은 숨김 */}
+              {(Array.isArray(inq.notes) ? inq.notes : [])
+                .filter((n) => n && String(n.text || "").trim())
+                .map((n, i) => (
+                  <div key={i} style={{ background: "#FFF9FA", border: `1px solid ${PK}`, borderRadius: 10, padding: "10px 12px", margin: "8px 0 4px" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: PKD, marginBottom: 4 }}>
+                      {String(n.title || "").trim() || "소견 및 권고"}
+                      <span style={{ fontWeight: 400, color: "#948A90" }}> · 원장</span>
+                    </div>
+                    <div style={{ fontSize: 14, color: "#333", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{String(n.text)}</div>
+                  </div>
+                ))}
               <SvDetail questions={SV_INQ_Q} answers={inq.answers} />
             </div>
           )}
